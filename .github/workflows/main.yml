@@ -1,0 +1,40 @@
+name: build-windows
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  win:
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Creer le dossier de cache vcpkg
+        run: New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg_cache
+          key: vcpkg-${{ hashFiles('vcpkg.json') }}
+
+      - name: Configure
+        run: >
+          cmake -B build -S .
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Copy-Item build\Release\* dist\ -Include *.exe,*.dll
+          Copy-Item calibration dist\calibration -Recurse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ar6dof-probe-win64
+          path: dist
