@@ -1,0 +1,5 @@
+{
+  "name": "ar6dof",
+  "version-string": "0.1.0",
+  "dependencies": ["opencv4"]
+}
