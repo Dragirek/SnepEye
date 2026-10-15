@@ -1,11 +1,13 @@
 // ar6dof_probe : étape 1 du casque AR open source.
-// Vérifie le matériel ET la calibration avant de brancher le tracking :
-//  - choix de la caméra stéréo et de l'IMU dans une liste
-//  - chargement d'une calibration faite ailleurs (dossier "calibration")
-//  - aperçu gauche/droite, brut ou rectifié
-//  - lecture IMU en direct : valeurs, cadence réelle, checksums
-//  Touches : s = sauver une paire brute | r = brut/rectifié | c = mesurer la
-//  qualité de la calibration | x = inverser gauche/droite | q = quitter
+// Vérifie le matériel, la calibration caméra et l'orientation de l'IMU.
+//
+//  Fenêtre "ar6dof_probe" (caméras) :
+//    s = sauver une paire brute | r = brut/rectifié | c = qualité de la calibration
+//    x = inverser gauche/droite | q = quitter
+//  Fenêtre "orientation" (IMU en 3D) :
+//    g puis f = calibration guidée du montage (voir l'aide à l'écran)
+//    1/2 = -/+90 deg autour de X (avant)  3/4 = autour de Y (gauche)  5/6 = autour de Z (haut)
+//    0 = réinitialiser le montage | z = remettre le yaw à zéro
 #include <windows.h>
 
 #include <atomic>
@@ -13,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -24,17 +27,47 @@
 #include "calib.h"
 #include "devices.h"
 #include "imu_parser.h"
+#include "orientation.h"
 #include "serial_win.h"
 
 struct ImuState {
   std::mutex m;
-  float acc[3] = {0, 0, 0}, gyr[3] = {0, 0, 0};
+  Vec3 acc_s, gyr_s;          // valeurs brutes, repère du capteur
+  Mat3 mount;                 // capteur -> casque
+  Quat q;                     // orientation casque -> monde
+  bool q_ok = false;
+  bool reinit = false, zero_yaw = false;
   double rate_acc = 0, rate_gyr = 0;
   uint64_t bytes = 0, ok = 0, bad = 0;
   bool port_error = false;
 };
 
 static std::atomic<bool> g_run{true};
+
+static std::string ExeDir() {
+  char p[MAX_PATH];
+  DWORD n = GetModuleFileNameA(nullptr, p, MAX_PATH);
+  std::string s(p, n);
+  size_t k = s.find_last_of("\\/");
+  return k == std::string::npos ? std::string(".") : s.substr(0, k);
+}
+
+static void SaveMount(const Mat3& m) {
+  std::ofstream f(ExeDir() + "\\mount.txt");
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++) f << m.m[i][j] << " ";
+}
+
+static Mat3 LoadMount() {
+  std::ifstream f(ExeDir() + "\\mount.txt");
+  double v[9];
+  for (int i = 0; i < 9; i++)
+    if (!(f >> v[i])) return Mat3();
+  Mat3 t;
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++) t.m[i][j] = v[i * 3 + j];
+  return std::abs(t.Det() - 1.0) < 1e-3 ? t : Mat3();
+}
 
 static void ImuThread(std::string port, ImuState* st) {
   SerialPort sp;
@@ -44,6 +77,10 @@ static void ImuThread(std::string port, ImuState* st) {
     return;
   }
   ImuParser parser;
+  Mahony filt;
+  Vec3 accBody;
+  bool haveAcc = false, haveT = false;
+  int64_t lastT = 0;
   uint64_t n_acc = 0, n_gyr = 0, a0 = 0, g0 = 0;
   auto t0 = std::chrono::steady_clock::now();
   uint8_t buf[4096];
@@ -57,8 +94,31 @@ static void ImuThread(std::string port, ImuState* st) {
     if (n > 0) {
       std::lock_guard<std::mutex> l(st->m);
       parser.feed(buf, n, [&](const ImuSample& s) {
-        if (s.type == 1) { for (int i = 0; i < 3; i++) st->acc[i] = s.v[i]; ++n_acc; }
-        else             { for (int i = 0; i < 3; i++) st->gyr[i] = s.v[i]; ++n_gyr; }
+        if (st->reinit) { filt.Reset(); haveAcc = false; haveT = false; st->reinit = false; }
+        if (st->zero_yaw) { filt.ZeroYaw(); st->zero_yaw = false; }
+        Vec3 v{s.v[0], s.v[1], s.v[2]};
+        if (s.type == 1) {
+          st->acc_s = v;
+          ++n_acc;
+          accBody = st->mount * v;
+          haveAcc = true;
+        } else {
+          st->gyr_s = v;
+          ++n_gyr;
+          if (haveAcc) {
+            Vec3 g = st->mount * v;
+            if (haveT) {
+              double dt = (double)(s.t_us - lastT) * 1e-6;
+              if (dt > 0 && dt < 0.1) filt.Update(g, accBody, dt);
+            } else {
+              filt.Update(g, accBody, 0.0);
+            }
+            haveT = true;
+            lastT = s.t_us;
+            st->q = filt.q();
+            st->q_ok = filt.Initialized();
+          }
+        }
       });
       st->bytes = parser.bytes_total;
       st->ok = parser.packets_ok;
@@ -96,6 +156,62 @@ static std::string AskStr(const std::string& q, const std::string& def) {
   return line.empty() ? def : line;
 }
 
+// Modèle 3D "casque" + axes + sol, dessiné avec OpenCV (pas de dépendance 3D).
+static void DrawOrientation(cv::Mat& img, const Quat& q, bool ok) {
+  img.setTo(cv::Scalar(32, 32, 32));
+  const double focal = 560, cx = img.cols * 0.5, cy = img.rows * 0.5 + 10;
+  View v = MakeView(-35, 22, 1.1);
+  auto line3 = [&](Vec3 a, Vec3 b, cv::Scalar col, int th) {
+    double x1, y1, x2, y2;
+    if (Project(v, a, focal, cx, cy, x1, y1) && Project(v, b, focal, cx, cy, x2, y2))
+      cv::line(img, cv::Point((int)x1, (int)y1), cv::Point((int)x2, (int)y2), col, th, cv::LINE_AA);
+  };
+  // Sol fixe (aligné sur la gravité) : repère de ce qui est "à plat"
+  for (int i = -3; i <= 3; i++) {
+    double t = i * 0.1;
+    line3({-0.3, t, -0.14}, {0.3, t, -0.14}, cv::Scalar(70, 70, 70), 1);
+    line3({t, -0.3, -0.14}, {t, 0.3, -0.14}, cv::Scalar(70, 70, 70), 1);
+  }
+  line3({0, 0, 0}, {0, 0, 0.3}, cv::Scalar(200, 200, 200), 1);  // verticale du monde
+  if (!ok) {
+    cv::putText(img, "en attente de l'IMU...", {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 0.7, {0, 165, 255}, 2);
+    return;
+  }
+  Mat3 R = ToMat3(q);
+  const double hx = 0.09, hy = 0.16, hz = 0.06;
+  Vec3 P[8];
+  for (int i = 0; i < 8; i++) {
+    Vec3 b{(i & 1) ? hx : -hx, (i & 2) ? hy : -hy, (i & 4) ? hz : -hz};
+    P[i] = R * b;
+  }
+  const int bits[3] = {1, 2, 4};
+  for (int i = 0; i < 8; i++)
+    for (int bit : bits) {
+      if (i & bit) continue;
+      int j = i | bit;
+      bool front = (bit != 1) && (i & 1);  // arête de la face avant (x = +hx)
+      line3(P[i], P[j], front ? cv::Scalar(0, 220, 255) : cv::Scalar(200, 200, 200), front ? 3 : 1);
+    }
+  // Deux "yeux" sur la face avant
+  for (int s = -1; s <= 1; s += 2) {
+    double x, y;
+    if (Project(v, R * Vec3{hx, 0.07 * s, 0}, focal, cx, cy, x, y))
+      cv::circle(img, cv::Point((int)x, (int)y), 7, cv::Scalar(0, 220, 255), 2, cv::LINE_AA);
+  }
+  // Axes du casque
+  struct Ax { Vec3 d; cv::Scalar c; const char* name; };
+  Ax axes[3] = {{{0.25, 0, 0}, cv::Scalar(0, 0, 255), "X avant"},
+                {{0, 0.22, 0}, cv::Scalar(0, 200, 0), "Y gauche"},
+                {{0, 0, 0.22}, cv::Scalar(255, 120, 0), "Z haut"}};
+  for (auto& a : axes) {
+    Vec3 tip = R * a.d;
+    line3({0, 0, 0}, tip, a.c, 3);
+    double x, y;
+    if (Project(v, tip * 1.1, focal, cx, cy, x, y))
+      cv::putText(img, a.name, cv::Point((int)x + 4, (int)y), cv::FONT_HERSHEY_SIMPLEX, 0.55, a.c, 1, cv::LINE_AA);
+  }
+}
+
 int main() {
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
@@ -120,15 +236,15 @@ int main() {
   // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
   StereoCalib calib;
   bool haveCalib = false;
-  std::string dir = AskStr("\nDossier de calibration RTAB-Map ('-' = aucune)", "calibration");
+  std::string calibErr = "aucun dossier de calibration";
+  std::string dir = AskStr("\nDossier de calibration RTAB-Map ('-' = aucune)", ExeDir() + "\\calibration");
   if (dir != "-") {
-    std::string err;
-    if (LoadRtabmapStereo(dir, calib, err)) {
+    if (LoadRtabmapStereo(dir, calib, calibErr)) {
       haveCalib = true;
       std::cout << "Calibration chargee (" << calib.files << "), faite en "
                 << calib.size.width << "x" << calib.size.height << " par oeil.\n";
     } else {
-      std::cout << "Calibration NON chargee : " << err << "\n";
+      std::cout << "Calibration NON chargee : " << calibErr << "\n";
     }
   }
 
@@ -142,6 +258,7 @@ int main() {
             << "  (si differente de ce que tu as demande, ce mode n'existe pas)\n";
 
   ImuState imu;
+  imu.mount = LoadMount();
   std::thread th;
   if (pi >= 0) th = std::thread(ImuThread, ports[pi], &imu);
 
@@ -149,11 +266,14 @@ int main() {
   int saved = 0, frames = 0, fails = 0;
   double fps = 0;
   auto tf = std::chrono::steady_clock::now();
-  cv::Mat frame;
+  cv::Mat frame, orient(520, 640, CV_8UC3);
   Rectifier rect;
   bool rectReady = false, showRect = haveCalib, swapEyes = false;
   std::string checkMsg = "touche 'c' : mesurer la qualite de la calibration (scene riche en details)";
-  std::cout << "\nFenetre ouverte. s=sauver paire, r=brut/rectifie, c=controle calib, x=inverser G/D, q=quitter\n";
+  std::string mountMsg = "montage : g (a plat, a l'endroit) puis f (penche vers l'avant)";
+  bool havePendingUp = false;
+  Vec3 pendingUp;
+  std::cout << "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n";
 
   while (true) {
     if (!cap.read(frame) || frame.empty()) {
@@ -176,6 +296,7 @@ int main() {
       std::string err;
       rectReady = MakeRectifier(calib, cv::Size(w, frame.rows), rect, err);
       if (!rectReady) {
+        calibErr = err;
         std::cout << "Rectification impossible : " << err << "\n";
         haveCalib = false;
         showRect = false;
@@ -194,10 +315,23 @@ int main() {
     cv::Mat disp;
     cv::resize(shown, disp, cv::Size(), scale, scale);
     if (disp.channels() == 1) cv::cvtColor(disp, disp, cv::COLOR_GRAY2BGR);
-    // Lignes horizontales : en rectifie, un meme point doit etre sur la meme ligne
     for (int y = 40; y < disp.rows; y += 60)
       cv::line(disp, {0, y}, {disp.cols, y}, {0, 255, 0}, 1);
     cv::line(disp, {disp.cols / 2, 0}, {disp.cols / 2, disp.rows}, {0, 0, 255}, 2);
+
+    // Copie des données IMU (un seul verrouillage)
+    Vec3 acc, gyr;
+    Quat q;
+    bool qok = false, portErr = false;
+    double rA = 0, rG = 0;
+    uint64_t bytes = 0, okN = 0, badN = 0;
+    Mat3 mount;
+    {
+      std::lock_guard<std::mutex> l(imu.m);
+      acc = imu.acc_s; gyr = imu.gyr_s; q = imu.q; qok = imu.q_ok; portErr = imu.port_error;
+      rA = imu.rate_acc; rG = imu.rate_gyr; bytes = imu.bytes; okN = imu.ok; badN = imu.bad;
+      mount = imu.mount;
+    }
 
     char line[256];
     int y = 24;
@@ -218,31 +352,46 @@ int main() {
       for (size_t i = 0; i < rect.warnings.size() && i < 5; i++)
         put("! " + rect.warnings[i], {0, 165, 255});
     } else {
-      put("pas de calibration chargee", {0, 165, 255});
+      put("pas de calibration : " + calibErr, {0, 165, 255});
     }
     if (pi < 0) {
       put("IMU: non selectionnee");
+    } else if (portErr) {
+      put("IMU: erreur d'ouverture/lecture du port", {0, 0, 255});
+    } else if (bytes > 0 && okN == 0) {
+      put("IMU: octets recus mais 0 paquet valide (firmware v2 flashe ?)", {0, 0, 255});
     } else {
-      std::lock_guard<std::mutex> l(imu.m);
-      if (imu.port_error) {
-        put("IMU: erreur d'ouverture/lecture du port", {0, 0, 255});
-      } else if (imu.bytes > 0 && imu.ok == 0) {
-        put("IMU: octets recus mais 0 paquet valide (firmware v2 flashe ?)", {0, 0, 255});
-      } else {
-        float na = std::sqrt(imu.acc[0] * imu.acc[0] + imu.acc[1] * imu.acc[1] + imu.acc[2] * imu.acc[2]);
-        std::snprintf(line, sizeof(line), "IMU accel %.1f Hz  |a|=%.2f m/s2 (attendu ~9.81 a l'arret)", imu.rate_acc, na);
-        put(line);
-        std::snprintf(line, sizeof(line), "   a = %+.3f %+.3f %+.3f", imu.acc[0], imu.acc[1], imu.acc[2]);
-        put(line);
-        std::snprintf(line, sizeof(line), "IMU gyro  %.1f Hz   w = %+.4f %+.4f %+.4f rad/s", imu.rate_gyr,
-                      imu.gyr[0], imu.gyr[1], imu.gyr[2]);
-        put(line);
-        std::snprintf(line, sizeof(line), "paquets ok=%llu  checksum ko=%llu",
-                      (unsigned long long)imu.ok, (unsigned long long)imu.bad);
-        put(line);
-      }
+      double na = Norm(acc);
+      std::snprintf(line, sizeof(line), "IMU accel %.1f Hz  |a|=%.2f m/s2   gyro %.1f Hz   paquets ok=%llu ko=%llu",
+                    rA, na, rG, (unsigned long long)okN, (unsigned long long)badN);
+      put(line);
     }
     cv::imshow("ar6dof_probe", disp);
+
+    // ---- Fenêtre orientation ----
+    DrawOrientation(orient, q, qok && pi >= 0);
+    {
+      int yy = 500;
+      auto put2 = [&](const std::string& s, cv::Scalar c = {255, 255, 255}, int ypos = -1) {
+        int yp = ypos >= 0 ? ypos : yy;
+        cv::putText(orient, s, {10, yp}, cv::FONT_HERSHEY_SIMPLEX, 0.45, c, 1, cv::LINE_AA);
+      };
+      if (qok && pi >= 0) {
+        double r, p, ya;
+        ToEuler(q, r, p, ya);
+        const double k = 180.0 / 3.14159265358979;
+        std::snprintf(line, sizeof(line), "roll %+6.1f  pitch %+6.1f  yaw %+6.1f deg", r * k, p * k, ya * k);
+        put2(line, {255, 255, 255}, 24);
+        put2("pitch>0: regarde en bas | roll>0: penche a droite | yaw>0: tourne a gauche (derive, pas de boussole)",
+             {170, 170, 170}, 44);
+      }
+      put2("montage: avant=" + AxisName(mount.Row(0)) + "  gauche=" + AxisName(mount.Row(1)) +
+               "  haut=" + AxisName(mount.Row(2)),
+           {0, 255, 255}, 470);
+      put2(mountMsg, {0, 255, 255}, 488);
+      put2("g/f calibrer | 1-6 tourner de 90 deg | 0 reset montage | z yaw=0", {170, 170, 170}, 508);
+    }
+    cv::imshow("orientation", orient);
 
     int k = cv::waitKey(1);
     if (k == 'q' || k == 27) break;
@@ -259,6 +408,44 @@ int main() {
       cv::imwrite(n1, left);
       cv::imwrite(n2, right);
       ++saved;
+    }
+    // ---- Calibration du montage de l'IMU ----
+    if (k == 'g') {
+      havePendingUp = MountStep1(acc, gyr, pendingUp, mountMsg);
+    }
+    if (k == 'f') {
+      if (!havePendingUp) {
+        mountMsg = "appuie d'abord sur g (casque a plat, a l'endroit, immobile)";
+      } else {
+        Mat3 R;
+        if (MountStep2(pendingUp, acc, gyr, R, mountMsg)) {
+          std::lock_guard<std::mutex> l(imu.m);
+          imu.mount = R;
+          imu.reinit = true;
+          SaveMount(R);
+          havePendingUp = false;
+        }
+      }
+    }
+    if (k >= '1' && k <= '6') {
+      int axis = (k - '1') / 2;
+      int sign = ((k - '1') % 2 == 0) ? -1 : +1;
+      std::lock_guard<std::mutex> l(imu.m);
+      imu.mount = Rot90(axis, sign) * imu.mount;
+      imu.reinit = true;
+      SaveMount(imu.mount);
+      mountMsg = "montage tourne de 90 deg (sauvegarde)";
+    }
+    if (k == '0') {
+      std::lock_guard<std::mutex> l(imu.m);
+      imu.mount = Mat3();
+      imu.reinit = true;
+      SaveMount(imu.mount);
+      mountMsg = "montage reinitialise";
+    }
+    if (k == 'z') {
+      std::lock_guard<std::mutex> l(imu.m);
+      imu.zero_yaw = true;
     }
   }
 
