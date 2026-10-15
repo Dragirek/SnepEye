@@ -3,7 +3,7 @@ project(ar6dof LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui calib3d features2d)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui calib3d features2d video)
 
 add_executable(ar6dof_probe src/main.cpp)
 target_include_directories(ar6dof_probe PRIVATE src)

@@ -14,9 +14,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -26,9 +28,11 @@
 
 #include "calib.h"
 #include "devices.h"
+#include "fusion.h"
 #include "imu_parser.h"
 #include "orientation.h"
 #include "serial_win.h"
+#include "tracker.h"
 
 struct ImuState {
   std::mutex m;
@@ -37,12 +41,20 @@ struct ImuState {
   Quat q;                     // orientation casque -> monde
   bool q_ok = false;
   bool reinit = false, zero_yaw = false;
+  std::deque<GyroSample> gyroBuf;  // gyro (repère casque) horodaté sur l'horloge du PC
+  ClockSync clk;
   double rate_acc = 0, rate_gyr = 0;
   uint64_t bytes = 0, ok = 0, bad = 0;
   bool port_error = false;
 };
 
 static std::atomic<bool> g_run{true};
+
+// Secondes depuis le lancement (horloge du PC, commune à l'IMU et aux images).
+static double NowS() {
+  static const auto t0 = std::chrono::steady_clock::now();
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+}
 
 static std::string ExeDir() {
   char p[MAX_PATH];
@@ -94,7 +106,7 @@ static void ImuThread(std::string port, ImuState* st) {
     if (n > 0) {
       std::lock_guard<std::mutex> l(st->m);
       parser.feed(buf, n, [&](const ImuSample& s) {
-        if (st->reinit) { filt.Reset(); haveAcc = false; haveT = false; st->reinit = false; }
+        if (st->reinit) { filt.Reset(); haveAcc = false; haveT = false; st->gyroBuf.clear(); st->reinit = false; }
         if (st->zero_yaw) { filt.ZeroYaw(); st->zero_yaw = false; }
         Vec3 v{s.v[0], s.v[1], s.v[2]};
         if (s.type == 1) {
@@ -105,6 +117,12 @@ static void ImuThread(std::string port, ImuState* st) {
         } else {
           st->gyr_s = v;
           ++n_gyr;
+          {
+            double tm = st->clk.ToHost((double)s.t_us * 1e-6, NowS());
+            st->gyroBuf.push_back({tm, st->mount * v});
+            while (st->gyroBuf.size() > 1 && st->gyroBuf.back().t - st->gyroBuf.front().t > 3.0)
+              st->gyroBuf.pop_front();
+          }
           if (haveAcc) {
             Vec3 g = st->mount * v;
             if (haveT) {
@@ -212,6 +230,58 @@ static void DrawOrientation(cv::Mat& img, const Quat& q, bool ok) {
   }
 }
 
+static Mat3 FromCv(const cv::Matx33d& a) {
+  Mat3 r;
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++) r.m[i][j] = a(i, j);
+  return r;
+}
+static cv::Matx33d ToCv(const Mat3& a) {
+  cv::Matx33d r;
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j < 3; j++) r(i, j) = a.m[i][j];
+  return r;
+}
+static void ToGray(const cv::Mat& src, cv::Mat& dst) {
+  if (src.channels() == 3) cv::cvtColor(src, dst, cv::COLOR_BGR2GRAY);
+  else if (src.channels() == 4) cv::cvtColor(src, dst, cv::COLOR_BGRA2GRAY);
+  else dst = src;
+}
+
+// Trajectoire : vue de dessus (gauche) et vue de côté (droite), repère monde G.
+static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const Vec3& pos, const Mat3& R, bool valid) {
+  img.setTo(cv::Scalar(32, 32, 32));
+  const int pw = img.cols / 2, top0 = 70, bot = img.rows - 60;
+  double ext = 0.5;
+  for (const auto& p : trail)
+    ext = std::max(ext, std::max(std::abs(p.x), std::max(std::abs(p.y), std::abs(p.z))));
+  const double sc = 120.0 / ext;  // pixels par metre : le trace tient toujours dans le panneau
+  const cv::Point c1(pw / 2, (top0 + bot) / 2), c2(pw + pw / 2, (top0 + bot) / 2);
+  cv::rectangle(img, cv::Rect(4, top0, pw - 8, bot - top0), cv::Scalar(70, 70, 70), 1);
+  cv::rectangle(img, cv::Rect(pw + 4, top0, pw - 8, bot - top0), cv::Scalar(70, 70, 70), 1);
+  cv::line(img, cv::Point(c1.x, top0), cv::Point(c1.x, bot), cv::Scalar(55, 55, 55), 1);
+  cv::line(img, cv::Point(4, c1.y), cv::Point(pw - 4, c1.y), cv::Scalar(55, 55, 55), 1);
+  cv::line(img, cv::Point(c2.x, top0), cv::Point(c2.x, bot), cv::Scalar(55, 55, 55), 1);
+  cv::line(img, cv::Point(pw + 4, c2.y), cv::Point(2 * pw - 4, c2.y), cv::Scalar(55, 55, 55), 1);
+  cv::putText(img, "dessus : avant en haut, gauche a gauche", cv::Point(8, top0 - 6), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+  cv::putText(img, "cote : avant a droite, haut en haut", cv::Point(pw + 8, top0 - 6), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+  char sc_txt[64];
+  std::snprintf(sc_txt, sizeof(sc_txt), "echelle: 1 m = %.0f px", sc);
+  cv::putText(img, sc_txt, cv::Point(8, bot + 16), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+  auto top = [&](const Vec3& p) { return cv::Point((int)(c1.x - p.y * sc), (int)(c1.y - p.x * sc)); };
+  auto side = [&](const Vec3& p) { return cv::Point((int)(c2.x + p.x * sc), (int)(c2.y - p.z * sc)); };
+  for (size_t i = 1; i < trail.size(); i++) {
+    cv::line(img, top(trail[i - 1]), top(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+    cv::line(img, side(trail[i - 1]), side(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+  }
+  if (!valid) return;
+  Vec3 fwd = R * Vec3{1, 0, 0};  // avant du casque dans le monde
+  cv::circle(img, top(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+  cv::line(img, top(pos), top(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+  cv::circle(img, side(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+  cv::line(img, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+}
+
 int main() {
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
@@ -273,6 +343,22 @@ int main() {
   std::string mountMsg = "montage : g (a plat, a l'endroit) puis f (penche vers l'avant)";
   bool havePendingUp = false;
   Vec3 pendingUp;
+
+  // ---- Tracking 6DoF ----
+  bool tracking = false, usePrior = true, trackReady = false, haveLast = false;
+  double camDelay = 0.030, predS = 0.015, voMs = 0, lastFrameT = 0, snapT_s = 0;
+  cv::Size wk;
+  cv::Matx33d Kt;
+  double Bt = 0;
+  Rectifier rectT;
+  std::unique_ptr<StereoVO> vo;
+  const Mat3 Rcb = CamFromBody();
+  Mat3 R_GV, snapRvc, poseR;
+  Vec3 snapT, snapV, poseP;
+  bool poseValid = false;
+  std::vector<Vec3> trail;
+  std::string trackMsg = "touche t : demarrer le tracking 6DoF (fais d'abord g puis f dans la fenetre orientation)";
+  cv::Mat traj(480, 640, CV_8UC3);
   std::cout << "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n";
 
   while (true) {
@@ -281,6 +367,7 @@ int main() {
       continue;
     }
     fails = 0;
+    const double tRead = NowS();  // instant de réception ; l'image a été prise un peu avant (voir camDelay)
     ++frames;
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - tf).count();
@@ -302,6 +389,96 @@ int main() {
         showRect = false;
       }
     }
+    // Copie des données IMU (un seul verrouillage)
+    Vec3 acc, gyr;
+    Quat q;
+    bool qok = false, portErr = false;
+    double rA = 0, rG = 0;
+    uint64_t bytes = 0, okN = 0, badN = 0;
+    Mat3 mount;
+    {
+      std::lock_guard<std::mutex> l(imu.m);
+      acc = imu.acc_s; gyr = imu.gyr_s; q = imu.q; qok = imu.q_ok; portErr = imu.port_error;
+      rA = imu.rate_acc; rG = imu.rate_gyr; bytes = imu.bytes; okN = imu.ok; badN = imu.bad;
+      mount = imu.mount;
+    }
+
+    // ---- Tracking 6DoF ----
+    if (tracking && haveCalib) {
+      if (!trackReady) {
+        wk = cv::Size(w / 2, frame.rows / 2);  // on travaille en demi-résolution (plus rapide)
+        std::string e1;
+        trackReady = MakeRectifier(calib, wk, rectT, e1) && RectifiedIntrinsics(calib, wk, Kt, Bt);
+        if (trackReady) {
+          vo.reset(new StereoVO(Kt, Bt));
+        } else {
+          trackMsg = "tracking impossible : " + (e1.empty() ? std::string("calibration incompatible") : e1);
+          tracking = false;
+        }
+      }
+      if (trackReady && vo) {
+        cv::Mat gl, gr, sl, sr, tl, tr;
+        ToGray(left, gl);
+        ToGray(right, gr);
+        cv::resize(gl, sl, wk, 0, 0, cv::INTER_AREA);
+        cv::resize(gr, sr, wk, 0, 0, cv::INTER_AREA);
+        cv::remap(sl, tl, rectT.mapL1, rectT.mapL2, cv::INTER_LINEAR);
+        cv::remap(sr, tr, rectT.mapR1, rectT.mapR2, cv::INTER_LINEAR);
+        const double tcap = tRead - camDelay;
+        if (!haveLast) {
+          // Première image : le monde est aligné sur la gravité (haut = Z) grace a l'IMU
+          Vec3 upc = {0, -1, 0};
+          if (qok && pi >= 0) upc = Rcb * ToMat3(q).Row(2);
+          R_GV = GravityAlign(upc);
+          vo->Reset();
+          vo->Process(tl, tr, nullptr, 0.033);
+          haveLast = true;
+          lastFrameT = tcap;
+          trail.clear();
+        } else {
+          double dt = std::max(0.001, std::min(0.2, tcap - lastFrameT));
+          cv::Matx33d dRc;
+          const cv::Matx33d* pr = nullptr;
+          if (usePrior && pi >= 0) {
+            Mat3 dRb;
+            {
+              std::lock_guard<std::mutex> l(imu.m);
+              dRb = IntegrateGyro(imu.gyroBuf, lastFrameT, tcap);
+            }
+            dRc = ToCv(Rcb * dRb * Rcb.T());
+            pr = &dRc;
+          }
+          auto tv0 = std::chrono::steady_clock::now();
+          vo->Process(tl, tr, pr, dt);
+          voMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tv0).count();
+          lastFrameT = tcap;
+        }
+        snapRvc = FromCv(vo->R);
+        snapT = Vec3{vo->t[0], vo->t[1], vo->t[2]};
+        snapV = Vec3{vo->v[0], vo->v[1], vo->v[2]};
+        snapT_s = tcap;
+      }
+    }
+    // Pose "maintenant + prédiction" : rotation = vision + gyro depuis l'image, position = vision + vitesse
+    if (haveLast) {
+      double target = NowS() + predS;
+      double span = std::min(0.2, std::max(0.0, target - snapT_s));
+      Mat3 dRb;
+      if (pi >= 0) {
+        std::lock_guard<std::mutex> l(imu.m);
+        dRb = IntegrateGyro(imu.gyroBuf, snapT_s, snapT_s + span);
+      }
+      Mat3 R_Vb = snapRvc * Rcb * dRb;
+      Vec3 pV = snapT + snapV * std::min(span, 0.1);
+      poseR = R_GV * R_Vb;
+      poseP = R_GV * pV;
+      poseValid = true;
+      if (tracking && vo && vo->state == StereoVO::kOk) {
+        trail.push_back(poseP);
+        if (trail.size() > 1500) trail.erase(trail.begin());
+      }
+    }
+
     cv::Mat rl, rr, shown;
     if (showRect && rectReady) {
       cv::remap(left, rl, rect.mapL1, rect.mapL2, cv::INTER_LINEAR);
@@ -319,19 +496,6 @@ int main() {
       cv::line(disp, {0, y}, {disp.cols, y}, {0, 255, 0}, 1);
     cv::line(disp, {disp.cols / 2, 0}, {disp.cols / 2, disp.rows}, {0, 0, 255}, 2);
 
-    // Copie des données IMU (un seul verrouillage)
-    Vec3 acc, gyr;
-    Quat q;
-    bool qok = false, portErr = false;
-    double rA = 0, rG = 0;
-    uint64_t bytes = 0, okN = 0, badN = 0;
-    Mat3 mount;
-    {
-      std::lock_guard<std::mutex> l(imu.m);
-      acc = imu.acc_s; gyr = imu.gyr_s; q = imu.q; qok = imu.q_ok; portErr = imu.port_error;
-      rA = imu.rate_acc; rG = imu.rate_gyr; bytes = imu.bytes; okN = imu.ok; badN = imu.bad;
-      mount = imu.mount;
-    }
 
     char line[256];
     int y = 24;
@@ -393,6 +557,31 @@ int main() {
     }
     cv::imshow("orientation", orient);
 
+    // ---- Fenêtre trajectoire ----
+    DrawTrajectory(traj, trail, poseP, poseR, poseValid && haveLast);
+    {
+      char tl[256];
+      if (poseValid && haveLast) {
+        double r, p, ya;
+        MatToEuler(poseR, r, p, ya);
+        const double kk = 180.0 / 3.14159265358979;
+        std::snprintf(tl, sizeof(tl), "x %+.3f  y %+.3f  z %+.3f m   roll %+.1f pitch %+.1f yaw %+.1f deg",
+                      poseP.x, poseP.y, poseP.z, r * kk, p * kk, ya * kk);
+        cv::putText(traj, tl, cv::Point(10, 22), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+        const char* stn = !vo ? "-" : vo->state == StereoVO::kOk ? "OK" : vo->state == StereoVO::kLost ? "PERDU" : "INIT";
+        std::snprintf(tl, sizeof(tl), "tracking %s | points %d (inliers %d) | calcul %.1f ms | prior IMU: %s",
+                      stn, vo ? vo->nPoints() : 0, vo ? vo->nInliers : 0, voMs, usePrior ? "oui" : "non");
+        cv::putText(traj, tl, cv::Point(10, 44), cv::FONT_HERSHEY_SIMPLEX, 0.45,
+                    (vo && vo->state == StereoVO::kLost) ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+      } else {
+        cv::putText(traj, trackMsg, cv::Point(10, 22), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+      }
+      std::snprintf(tl, sizeof(tl), "t demarrer/arreter+recentrer | u prior IMU | [ ] delai camera %.0f ms | - = prediction %.0f ms",
+                    camDelay * 1000, predS * 1000);
+      cv::putText(traj, tl, cv::Point(10, traj.rows - 14), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+    }
+    cv::imshow("trajectoire", traj);
+
     int k = cv::waitKey(1);
     if (k == 'q' || k == 27) break;
     if (k == 'r' && haveCalib && rectReady) showRect = !showRect;
@@ -447,6 +636,31 @@ int main() {
       std::lock_guard<std::mutex> l(imu.m);
       imu.zero_yaw = true;
     }
+    // ---- Tracking ----
+    if (k == 't') {
+      if (!tracking) {
+        if (!haveCalib) {
+          trackMsg = "le tracking a besoin d'une calibration chargee";
+        } else {
+          tracking = true;
+          haveLast = false;
+          poseValid = false;
+          trail.clear();
+          if (vo) vo->Reset();
+          trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
+        }
+      } else {
+        tracking = false;
+        haveLast = false;
+        poseValid = false;
+        trackMsg = "tracking arrete";
+      }
+    }
+    if (k == 'u') usePrior = !usePrior;
+    if (k == '[') camDelay = std::max(0.0, camDelay - 0.005);
+    if (k == ']') camDelay = std::min(0.2, camDelay + 0.005);
+    if (k == '-') predS = std::max(0.0, predS - 0.005);
+    if (k == '=') predS = std::min(0.1, predS + 0.005);
   }
 
   g_run = false;
