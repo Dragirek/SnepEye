@@ -248,6 +248,17 @@ static void ToGray(const cv::Mat& src, cv::Mat& dst) {
   else dst = src;
 }
 
+static double LoadBaseline() {
+  std::ifstream f(ExeDir() + "\\baseline_mm.txt");
+  double v = 0;
+  if (!(f >> v) || v < 0) return 0;
+  return v;
+}
+static void SaveBaseline(double v) {
+  std::ofstream f(ExeDir() + "\\baseline_mm.txt");
+  f << v;
+}
+
 static bool OpenCam(cv::VideoCapture& cap, int idx, int api, int W, int H, int fps) {
   cap.release();
   if (!cap.open(idx, api)) return false;
@@ -391,6 +402,21 @@ int main() {
       haveCalib = true;
       std::cout << "Calibration chargee (" << calib.files << "), faite en "
                 << calib.size.width << "x" << calib.size.height << " par oeil.\n";
+      // L'echelle metrique d'une calibration depend de la taille des cases de la mire saisie
+      // pendant la calibration. On peut la corriger avec la distance REELLE entre les 2 objectifs.
+      double calibBase = cv::norm(calib.T) * 1000.0;
+      double saved = LoadBaseline();
+      char defbuf[32];
+      std::snprintf(defbuf, sizeof(defbuf), "%.1f", saved);
+      std::cout << "Base entre les cameras dans la calibration : " << calibBase << " mm\n";
+      std::string a = AskStr("Base REELLE entre les centres des 2 objectifs, en mm (0 = garder celle de la calibration)", defbuf);
+      double real = 0;
+      try { real = std::stod(a); } catch (...) { real = 0; }
+      SaveBaseline(real);
+      if (real > 1.0 && calibBase > 1.0) {
+        calib.T = calib.T * (real / calibBase);
+        std::cout << "Echelle corrigee : x" << real / calibBase << " (base utilisee : " << real << " mm)\n";
+      }
     } else {
       std::cout << "Calibration NON chargee : " << calibErr << "\n";
     }
