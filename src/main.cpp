@@ -1,13 +1,13 @@
-// ar6dof_probe : étape 1 du casque AR open source.
-// Vérifie le matériel, la calibration caméra et l'orientation de l'IMU.
+// ar6dof_probe : casque AR open source, étape 2 (tracking 6DoF).
 //
 //  Fenêtre "ar6dof_probe" (caméras) :
-//    s = sauver une paire brute | r = brut/rectifié | c = qualité de la calibration
-//    x = inverser gauche/droite | q = quitter
+//    s sauver une paire brute | r brut/rectifié | c qualité de la calibration
+//    x inverser gauche/droite | q quitter
 //  Fenêtre "orientation" (IMU en 3D) :
-//    g puis f = calibration guidée du montage (voir l'aide à l'écran)
-//    1/2 = -/+90 deg autour de X (avant)  3/4 = autour de Y (gauche)  5/6 = autour de Z (haut)
-//    0 = réinitialiser le montage | z = remettre le yaw à zéro
+//    g puis f = calibration guidée du montage | 1-6 tourner de 90 deg | 0 reset | z yaw=0
+//  Fenêtre "trajectoire" (tracking) :
+//    t démarrer/arrêter+recentrer | u prior IMU on/off | [ ] délai caméra | - = prédiction
+//    , . zoom de la grille | m poser un repère (distance mesurée en cm) | n l'effacer
 #include <windows.h>
 
 #include <atomic>
@@ -248,38 +248,113 @@ static void ToGray(const cv::Mat& src, cv::Mat& dst) {
   else dst = src;
 }
 
-// Trajectoire : vue de dessus (gauche) et vue de côté (droite), repère monde G.
-static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const Vec3& pos, const Mat3& R, bool valid) {
+static bool OpenCam(cv::VideoCapture& cap, int idx, int api, int W, int H, int fps) {
+  cap.release();
+  if (!cap.open(idx, api)) return false;
+  cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+  cap.set(cv::CAP_PROP_FRAME_WIDTH, W);
+  cap.set(cv::CAP_PROP_FRAME_HEIGHT, H);
+  cap.set(cv::CAP_PROP_FPS, fps);  // sans cette ligne Windows choisit souvent 30 fps
+  return cap.isOpened();
+}
+
+// Cadence réellement reçue pendant `seconds` (après quelques images de chauffe).
+static double MeasureFps(cv::VideoCapture& cap, double seconds) {
+  cv::Mat f;
+  int fail = 0, n = 0;
+  for (int i = 0; i < 5; i++) cap.read(f);
+  auto t0 = std::chrono::steady_clock::now();
+  double el = 0;
+  while (el < seconds) {
+    if (!cap.read(f) || f.empty()) {
+      if (++fail > 50) break;
+      continue;
+    }
+    ++n;
+    el = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  }
+  return el > 0 ? n / el : 0;
+}
+
+static std::string Lab(double v) {
+  char b[32];
+  if (std::abs(v) < 1e-9) return "0";
+  if (std::abs(v) < 0.995) std::snprintf(b, sizeof(b), "%+d cm", (int)std::lround(v * 100));
+  else std::snprintf(b, sizeof(b), "%+.1f m", v);
+  return b;
+}
+
+// Trajectoire : vue de dessus (gauche) et de côté (droite), monde G, avec GRILLE GRADUÉE.
+// zoom = pixels par mètre (0 = automatique). Le repère (m) est tracé en magenta.
+static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const Vec3& pos, const Mat3& R, bool valid,
+                           double zoom, bool haveMark, const Vec3& mark, double* outPxPerM) {
   img.setTo(cv::Scalar(32, 32, 32));
-  const int pw = img.cols / 2, top0 = 70, bot = img.rows - 60;
-  double ext = 0.5;
-  for (const auto& p : trail)
-    ext = std::max(ext, std::max(std::abs(p.x), std::max(std::abs(p.y), std::abs(p.z))));
-  const double sc = 120.0 / ext;  // pixels par metre : le trace tient toujours dans le panneau
-  const cv::Point c1(pw / 2, (top0 + bot) / 2), c2(pw + pw / 2, (top0 + bot) / 2);
-  cv::rectangle(img, cv::Rect(4, top0, pw - 8, bot - top0), cv::Scalar(70, 70, 70), 1);
-  cv::rectangle(img, cv::Rect(pw + 4, top0, pw - 8, bot - top0), cv::Scalar(70, 70, 70), 1);
-  cv::line(img, cv::Point(c1.x, top0), cv::Point(c1.x, bot), cv::Scalar(55, 55, 55), 1);
-  cv::line(img, cv::Point(4, c1.y), cv::Point(pw - 4, c1.y), cv::Scalar(55, 55, 55), 1);
-  cv::line(img, cv::Point(c2.x, top0), cv::Point(c2.x, bot), cv::Scalar(55, 55, 55), 1);
-  cv::line(img, cv::Point(pw + 4, c2.y), cv::Point(2 * pw - 4, c2.y), cv::Scalar(55, 55, 55), 1);
+  const int pw = img.cols / 2, top0 = 92, bot = img.rows - 44;
+  double sc = zoom;
+  if (sc <= 0) {
+    double ext = 0.3;
+    for (const auto& p : trail)
+      ext = std::max(ext, std::max(std::abs(p.x), std::max(std::abs(p.y), std::abs(p.z))));
+    sc = 120.0 / ext;
+  }
+  if (outPxPerM) *outPxPerM = sc;
+  const cv::Rect ra(4, top0, pw - 8, bot - top0), rb(pw + 4, top0, pw - 8, bot - top0);
+  cv::Mat A = img(ra), Bm = img(rb);  // dessiner dans ces vues = découpage automatique
+  A.setTo(cv::Scalar(38, 38, 38));
+  Bm.setTo(cv::Scalar(38, 38, 38));
+  const cv::Point c1(ra.width / 2, ra.height / 2), c2(rb.width / 2, rb.height / 2);
+
+  const double steps[9] = {0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0};
+  double step = steps[8];
+  for (int i = 0; i < 9; i++)
+    if (steps[i] * sc >= 40.0) { step = steps[i]; break; }
+  const double gp = step * sc;  // pixels entre deux lignes de grille
+  auto grid = [&](cv::Mat& M, const cv::Point& c, bool topView) {
+    int nx = (int)(M.cols / 2 / gp) + 1, ny = (int)(M.rows / 2 / gp) + 1;
+    for (int i = -nx; i <= nx; i++) {
+      int x = c.x + (int)std::lround(i * gp);
+      cv::line(M, cv::Point(x, 0), cv::Point(x, M.rows), i == 0 ? cv::Scalar(100, 100, 100) : cv::Scalar(58, 58, 58), 1);
+      double v = topView ? -i * step : i * step;  // dessus : y (gauche +) ; côté : x (avant +)
+      cv::putText(M, Lab(v), cv::Point(x + 2, M.rows - 4), cv::FONT_HERSHEY_SIMPLEX, 0.32, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+    }
+    for (int j = -ny; j <= ny; j++) {
+      int y = c.y + (int)std::lround(j * gp);
+      cv::line(M, cv::Point(0, y), cv::Point(M.cols, y), j == 0 ? cv::Scalar(100, 100, 100) : cv::Scalar(58, 58, 58), 1);
+      double v = -j * step;  // dessus : x (avant +) ; côté : z (haut +)
+      cv::putText(M, Lab(v), cv::Point(2, y - 2), cv::FONT_HERSHEY_SIMPLEX, 0.32, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+    }
+  };
+  grid(A, c1, true);
+  grid(Bm, c2, false);
+  cv::rectangle(img, ra, cv::Scalar(90, 90, 90), 1);
+  cv::rectangle(img, rb, cv::Scalar(90, 90, 90), 1);
   cv::putText(img, "dessus : avant en haut, gauche a gauche", cv::Point(8, top0 - 6), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
   cv::putText(img, "cote : avant a droite, haut en haut", cv::Point(pw + 8, top0 - 6), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
-  char sc_txt[64];
-  std::snprintf(sc_txt, sizeof(sc_txt), "echelle: 1 m = %.0f px", sc);
-  cv::putText(img, sc_txt, cv::Point(8, bot + 16), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+  char gt[64];
+  if (step < 0.995) std::snprintf(gt, sizeof(gt), "1 carreau = %d cm", (int)std::lround(step * 100));
+  else std::snprintf(gt, sizeof(gt), "1 carreau = %.0f m", step);
+  cv::putText(img, gt, cv::Point(8, bot + 16), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+
   auto top = [&](const Vec3& p) { return cv::Point((int)(c1.x - p.y * sc), (int)(c1.y - p.x * sc)); };
   auto side = [&](const Vec3& p) { return cv::Point((int)(c2.x + p.x * sc), (int)(c2.y - p.z * sc)); };
   for (size_t i = 1; i < trail.size(); i++) {
-    cv::line(img, top(trail[i - 1]), top(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
-    cv::line(img, side(trail[i - 1]), side(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+    cv::line(A, top(trail[i - 1]), top(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+    cv::line(Bm, side(trail[i - 1]), side(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
+  }
+  if (haveMark) {
+    cv::circle(A, top(mark), 7, cv::Scalar(255, 0, 255), 2, cv::LINE_AA);
+    cv::circle(Bm, side(mark), 7, cv::Scalar(255, 0, 255), 2, cv::LINE_AA);
+    if (valid) {
+      cv::line(A, top(mark), top(pos), cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
+      cv::line(Bm, side(mark), side(pos), cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
+    }
   }
   if (!valid) return;
   Vec3 fwd = R * Vec3{1, 0, 0};  // avant du casque dans le monde
-  cv::circle(img, top(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
-  cv::line(img, top(pos), top(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-  cv::circle(img, side(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
-  cv::line(img, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+  cv::circle(A, top(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+  cv::line(A, top(pos), top(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+  cv::circle(Bm, side(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+  cv::line(Bm, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
 }
 
 int main() {
@@ -299,9 +374,12 @@ int main() {
   std::cout << "  [-1] pas d'IMU\n";
   int pi = AskInt("Port IMU", ports.empty() ? -1 : 0, -1, (int)ports.size() - 1);
 
-  std::cout << "\nImage cote a cote (gauche|droite) : largeur TOTALE des 2 yeux et hauteur.\n";
-  int W = AskInt("Largeur totale", 3200, 320, 8000);
-  int H = AskInt("Hauteur", 1200, 240, 4000);
+  std::cout << "\nModes MJPEG de ta ELP : 3200x1200@60 | 2560x720@60 (16:9, incompatible avec ta calibration)\n"
+               "                       1600x600@120 | 1280x480@120 | 640x240@120\n"
+               "Image cote a cote (gauche|droite) : largeur TOTALE des 2 yeux, hauteur, cadence.\n";
+  int W = AskInt("Largeur totale", 1600, 320, 8000);
+  int H = AskInt("Hauteur", 600, 240, 4000);
+  int FPS = AskInt("Cadence demandee (fps)", 120, 5, 240);
 
   // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
   StereoCalib calib;
@@ -318,11 +396,39 @@ int main() {
     }
   }
 
-  cv::VideoCapture cap(ci, cv::CAP_MSMF);
-  if (!cap.isOpened()) { std::cout << "Impossible d'ouvrir la camera.\n"; return 1; }
-  cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
-  cap.set(cv::CAP_PROP_FRAME_WIDTH, W);
-  cap.set(cv::CAP_PROP_FRAME_HEIGHT, H);
+  // Ouverture de la caméra avec la cadence demandée. On MESURE la cadence reçue ;
+  // si elle est trop basse avec un backend, on essaie l'autre (MSMF / DirectShow).
+  cv::VideoCapture cap;
+  {
+    const int apis[2] = {cv::CAP_MSMF, cv::CAP_DSHOW};
+    const char* names[2] = {"MSMF", "DSHOW"};
+    int first = AskInt("Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
+    double best = -1;
+    int bestIdx = -1, openIdx = -1;
+    for (int attempt = 0; attempt < 2; attempt++) {
+      int bi = (first + attempt) % 2;
+      openIdx = -1;
+      if (!OpenCam(cap, ci, apis[bi], W, H, FPS)) {
+        std::cout << "  " << names[bi] << " : ouverture impossible\n";
+        continue;
+      }
+      openIdx = bi;
+      double f = MeasureFps(cap, 1.5);
+      std::cout << "  " << names[bi] << " : " << cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
+                << cap.get(cv::CAP_PROP_FRAME_HEIGHT) << ", " << f << " fps mesures (sans traitement)\n";
+      if (f > best) { best = f; bestIdx = bi; }
+      if (f >= 0.85 * FPS) break;
+    }
+    if (bestIdx < 0) { std::cout << "Impossible d'ouvrir la camera.\n"; return 1; }
+    if (openIdx != bestIdx && !OpenCam(cap, ci, apis[bestIdx], W, H, FPS)) {
+      std::cout << "Impossible de rouvrir la camera.\n";
+      return 1;
+    }
+    std::cout << "Backend retenu : " << names[bestIdx] << " (" << best << " fps)\n";
+    if (best < 0.85 * FPS)
+      std::cout << "ATTENTION : cadence inferieure a la demande. Verifie le mode (resolution/fps), le port USB 3,\n"
+                   "et que la piece est assez eclairee (en basse lumiere la camera allonge l'exposition et baisse sa cadence).\n";
+  }
   std::cout << "Resolution negociee : " << cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
             << cap.get(cv::CAP_PROP_FRAME_HEIGHT)
             << "  (si differente de ce que tu as demande, ce mode n'existe pas)\n";
@@ -357,6 +463,12 @@ int main() {
   Vec3 snapT, snapV, poseP;
   bool poseValid = false;
   std::vector<Vec3> trail;
+  double lastDispS = 0, pxPerM = 0;
+  cv::Size smallFor;
+  const double zoomList[6] = {0, 100, 200, 400, 800, 1600};  // 0 = auto
+  int zoomIdx = 3;
+  bool haveMark = false;
+  Vec3 mark;
   std::string trackMsg = "touche t : demarrer le tracking 6DoF (fais d'abord g puis f dans la fenetre orientation)";
   cv::Mat traj(480, 640, CV_8UC3);
   std::cout << "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n";
@@ -369,6 +481,7 @@ int main() {
     fails = 0;
     const double tRead = NowS();  // instant de réception ; l'image a été prise un peu avant (voir camDelay)
     ++frames;
+    const bool displayDue = (tRead - lastDispS) >= 0.033;  // affichage ~30 Hz max, tracking à pleine cadence
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - tf).count();
     if (dt >= 1.0) { fps = frames / dt; frames = 0; tf = now; }
@@ -403,27 +516,44 @@ int main() {
       mount = imu.mount;
     }
 
-    // ---- Tracking 6DoF ----
-    if (tracking && haveCalib) {
-      if (!trackReady) {
-        wk = cv::Size(w / 2, frame.rows / 2);  // on travaille en demi-résolution (plus rapide)
+    // ---- Paire rectifiée de travail (<= 800 px par oeil) : tracking + affichage rectifié ----
+    cv::Mat tl, tr;
+    const bool needSmall = haveCalib && (tracking || (showRect && displayDue));
+    if (needSmall) {
+      const cv::Size want(w, frame.rows);
+      if (!trackReady || smallFor != want) {
+        double ws = std::min(1.0, 800.0 / w);
+        wk = cv::Size(cvRound(w * ws), cvRound(frame.rows * ws));
         std::string e1;
         trackReady = MakeRectifier(calib, wk, rectT, e1) && RectifiedIntrinsics(calib, wk, Kt, Bt);
+        smallFor = want;
         if (trackReady) {
           vo.reset(new StereoVO(Kt, Bt));
+          haveLast = false;
         } else {
-          trackMsg = "tracking impossible : " + (e1.empty() ? std::string("calibration incompatible") : e1);
+          trackMsg = "rectification de travail impossible : " + (e1.empty() ? std::string("calibration incompatible") : e1);
           tracking = false;
+          showRect = false;
         }
       }
-      if (trackReady && vo) {
-        cv::Mat gl, gr, sl, sr, tl, tr;
+      if (trackReady) {
+        cv::Mat gl, gr, sl, sr;
         ToGray(left, gl);
         ToGray(right, gr);
-        cv::resize(gl, sl, wk, 0, 0, cv::INTER_AREA);
-        cv::resize(gr, sr, wk, 0, 0, cv::INTER_AREA);
+        if (wk != gl.size()) {
+          cv::resize(gl, sl, wk, 0, 0, cv::INTER_AREA);
+          cv::resize(gr, sr, wk, 0, 0, cv::INTER_AREA);
+        } else {
+          sl = gl;
+          sr = gr;
+        }
         cv::remap(sl, tl, rectT.mapL1, rectT.mapL2, cv::INTER_LINEAR);
         cv::remap(sr, tr, rectT.mapR1, rectT.mapR2, cv::INTER_LINEAR);
+      }
+    }
+    // ---- Tracking 6DoF ----
+    if (tracking && haveCalib) {
+      if (trackReady && vo && !tl.empty()) {
         const double tcap = tRead - camDelay;
         if (!haveLast) {
           // Première image : le monde est aligné sur la gravité (haut = Z) grace a l'IMU
@@ -479,14 +609,11 @@ int main() {
       }
     }
 
-    cv::Mat rl, rr, shown;
-    if (showRect && rectReady) {
-      cv::remap(left, rl, rect.mapL1, rect.mapL2, cv::INTER_LINEAR);
-      cv::remap(right, rr, rect.mapR1, rect.mapR2, cv::INTER_LINEAR);
-      cv::hconcat(rl, rr, shown);
-    } else {
-      cv::hconcat(left, right, shown);
-    }
+    if (displayDue) {
+    lastDispS = tRead;
+    cv::Mat shown;
+    if (showRect && !tl.empty()) cv::hconcat(tl, tr, shown);
+    else cv::hconcat(left, right, shown);
 
     double scale = std::min(1.0, 1600.0 / shown.cols);
     cv::Mat disp;
@@ -506,7 +633,7 @@ int main() {
     };
     std::snprintf(line, sizeof(line), "cam %dx%d (oeil %dx%d) %.1f fps  paires: %d  vue: %s%s",
                   frame.cols, frame.rows, w, frame.rows, fps, saved,
-                  (showRect && rectReady) ? "RECTIFIEE" : "brute", swapEyes ? "  [G/D inverses]" : "");
+                  (showRect && !tl.empty()) ? "RECTIFIEE" : "brute", swapEyes ? "  [G/D inverses]" : "");
     put(line);
     if (haveCalib && rectReady) {
       std::snprintf(line, sizeof(line), "calib: f=%.0f px  base=%.1f mm  champ ~%.0f deg", rect.f,
@@ -558,7 +685,7 @@ int main() {
     cv::imshow("orientation", orient);
 
     // ---- Fenêtre trajectoire ----
-    DrawTrajectory(traj, trail, poseP, poseR, poseValid && haveLast);
+    DrawTrajectory(traj, trail, poseP, poseR, poseValid && haveLast, zoomList[zoomIdx], haveMark, mark, &pxPerM);
     {
       char tl[256];
       if (poseValid && haveLast) {
@@ -576,20 +703,44 @@ int main() {
       } else {
         cv::putText(traj, trackMsg, cv::Point(10, 22), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
       }
-      std::snprintf(tl, sizeof(tl), "t demarrer/arreter+recentrer | u prior IMU | [ ] delai camera %.0f ms | - = prediction %.0f ms",
-                    camDelay * 1000, predS * 1000);
-      cv::putText(traj, tl, cv::Point(10, traj.rows - 14), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+      if (poseValid && haveLast) {
+        double d0 = Norm(poseP) * 100.0;
+        if (haveMark) {
+          Vec3 dd = poseP - mark;
+          std::snprintf(tl, sizeof(tl), "origine %.1f cm | repere %.1f cm (dx %+.1f dy %+.1f dz %+.1f)", d0, Norm(dd) * 100,
+                        dd.x * 100, dd.y * 100, dd.z * 100);
+        } else {
+          std::snprintf(tl, sizeof(tl), "distance a l'origine : %.1f cm   (m = poser un repere ici)", d0);
+        }
+        cv::putText(traj, tl, cv::Point(10, 66), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 200, 255), 1, cv::LINE_AA);
+      }
+      std::snprintf(tl, sizeof(tl), ", . zoom (%.0f px/m)%s | m/n repere | t demarrer/recentrer | u prior IMU",
+                    pxPerM, zoomList[zoomIdx] <= 0 ? " auto" : "");
+      cv::putText(traj, tl, cv::Point(10, traj.rows - 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
+      std::snprintf(tl, sizeof(tl), "[ ] delai camera %.0f ms | - = prediction %.0f ms", camDelay * 1000, predS * 1000);
+      cv::putText(traj, tl, cv::Point(10, traj.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
     }
     cv::imshow("trajectoire", traj);
+    }  // fin de l'affichage (displayDue)
 
     int k = cv::waitKey(1);
     if (k == 'q' || k == 27) break;
     if (k == 'r' && haveCalib && rectReady) showRect = !showRect;
     if (k == 'x') swapEyes = !swapEyes;
     if (k == 'c') {
-      if (!rl.empty()) checkMsg = CheckRectification(rl, rr);
-      else checkMsg = "active d'abord la vue rectifiee (touche r)";
+      if (haveCalib && rectReady) {
+        cv::Mat ca, cb;  // rectification pleine résolution, seulement pour ce contrôle
+        cv::remap(left, ca, rect.mapL1, rect.mapL2, cv::INTER_LINEAR);
+        cv::remap(right, cb, rect.mapR1, rect.mapR2, cv::INTER_LINEAR);
+        checkMsg = CheckRectification(ca, cb);
+      } else {
+        checkMsg = "pas de calibration chargee";
+      }
     }
+    if (k == 'm') { haveMark = poseValid && haveLast; mark = poseP; }
+    if (k == 'n') haveMark = false;
+    if (k == '.') zoomIdx = std::min(5, zoomIdx + 1);
+    if (k == ',') zoomIdx = std::max(0, zoomIdx - 1);
     if (k == 's') {
       char n1[64], n2[64];
       std::snprintf(n1, sizeof(n1), "capture/left_%04d.png", saved);
