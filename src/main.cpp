@@ -30,8 +30,10 @@
 #include <opencv2/opencv.hpp>
 
 #include "calib.h"
+#include "camera_model_json.h"
 #include "devices.h"
 #include "floor.h"
+#include "frame_share_win.h"
 #include "fusion.h"
 #include "imu_parser.h"
 #include "orientation.h"
@@ -404,6 +406,7 @@ int main() {
   int H = AskInt("Hauteur", 600, 240, 4000);
   int FPS = AskInt("Cadence demandee (fps)", 120, 5, 240);
   int udpPort = AskInt("Port UDP vers Unity sur ce PC (0 = desactive)", 9876, 0, 65535);
+  int shareFrames = AskInt("Partager l'image de la camera avec Unity pour le passthrough (1 = oui, 0 = non)", 1, 0, 1);
 
   // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
   StereoCalib calib;
@@ -430,6 +433,8 @@ int main() {
         calib.T = calib.T * (real / calibBase);
         std::cout << "Echelle corrigee : x" << real / calibBase << " (base utilisee : " << real << " mm)\n";
       }
+      if (ExportCameraModel(calib, ExeDir() + "\\camera_model.json"))
+        std::cout << "Modele de camera exporte pour Unity : " << ExeDir() << "\\camera_model.json\n";
     } else {
       std::cout << "Calibration NON chargee : " << calibErr << "\n";
     }
@@ -517,6 +522,8 @@ int main() {
     else std::cout << "Sortie UDP impossible (port " << udpPort << ")\n";
   }
   uint32_t udpSeq = 0;
+  FrameShare share;
+  bool shareFailed = false;
   FloorFilter floorF;
   bool floorValid = false, floorLocked = false;
   double floorZ = 0, lastFloorT = 0;
@@ -530,6 +537,14 @@ int main() {
     fails = 0;
     const double tRead = NowS();  // instant de réception ; l'image a été prise un peu avant (voir camDelay)
     ++frames;
+    // Passthrough : l'image brute est partagée avec Unity tout de suite (avant le tracking, pour la latence)
+    if (shareFrames && !shareFailed) {
+      if (!share.IsOpen()) {
+        if (share.Open("Local\\ar6dof_frame", frame)) std::cout << "Passthrough : image partagee " << frame.cols << "x" << frame.rows << " (Local\\ar6dof_frame)\n";
+        else { shareFailed = true; std::cout << "Passthrough : partage impossible (image BGR 8 bits, largeur multiple de 4 requise)\n"; }
+      }
+      if (share.IsOpen() && share.Matches(frame)) share.Write(frame);
+    }
     const bool displayDue = (tRead - lastDispS) >= 0.033;  // affichage ~30 Hz max, tracking à pleine cadence
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - tf).count();
