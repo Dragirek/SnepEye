@@ -99,4 +99,61 @@ Uk=assemble(EyeParams(fov_deg=fov,k=(0.2,0,0)),cm,W,H)
 e=np.array([[0.95,0.5],[0.5,0.5]]); a1=shade(e,U0,W,H)[3]; a2=shade(e,Uk,W,H)[3]
 print("T6 k1=0.2 : bord x_source %.1f -> %.1f ; centre inchangé %.1f -> %.1f"%(a1[0,0],a2[0,0],a1[1,0],a2[1,0]))
 assert a2[0,0]>a1[0,0] and abs(a2[1,0]-a1[1,0])<1e-6
+
+# ---- T7 : REPROJECTION. Un point du monde doit rester au bon endroit même si la tête a tourné depuis la capture.
+rng=np.random.default_rng(3)
+cmp_=pinhole_model(W,H,100.0)
+def rand_rot(deg):
+    v=rng.normal(size=3); v/=np.linalg.norm(v); return rot_from_to([0,0,1],[0,0,1]) if deg==0 else (np.eye(3)+math.sin(math.radians(deg))*np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])+(1-math.cos(math.radians(deg)))*(np.outer(v,v)-np.eye(3)))
+Rwc_cap=rand_rot(20)            # orientation caméra -> monde à la capture (arbitraire)
+Rwc_now=Rwc_cap@rand_rot(6)     # la tête a tourné de ~6° depuis
+# même rotation exprimée via les quaternions casque->monde (chaîne exacte du C#)
+Rwb_cap=Rwc_cap@R_CB; Rwb_now=Rwc_now@R_CB             # R_wc = R_wb * R_cb^T  =>  R_wb = R_wc * R_cb
+def to_q(R):
+    t_=np.trace(R)
+    if t_>0:
+        s_=math.sqrt(t_+1)*2; return np.array([s_/4,(R[2,1]-R[1,2])/s_,(R[0,2]-R[2,0])/s_,(R[1,0]-R[0,1])/s_])
+    i=int(np.argmax(np.diag(R))); j,k=(i+1)%3,(i+2)%3
+    s_=math.sqrt(R[i,i]-R[j,j]-R[k,k]+1)*2; q=np.zeros(4); q[1+i]=s_/4; q[0]=(R[k,j]-R[j,k])/s_
+    q[1+j]=(R[j,i]+R[i,j])/s_; q[1+k]=(R[k,i]+R[i,k])/s_; return q
+dR=delta_cam(to_q(Rwb_cap),to_q(Rwb_now))
+assert np.allclose(dR, Rwc_cap.T@Rwc_now, atol=1e-9)
+fov_d=70.0; tanH=math.tan(math.radians(fov_d)/2)
+Ur=assemble(EyeParams(fov_deg=fov_d,center_on_image=False),cmp_,W,H,dR_cam=dR)
+worst=0
+for _ in range(500):
+    Wd=Rwc_now@np.array([rng.uniform(-.5,.5),rng.uniform(-.4,.4),1.0]); Wd/=np.linalg.norm(Wd)   # direction monde
+    ray_now=Rwc_now.T@Wd                                    # vue actuelle
+    q=np.array([ray_now[0]/ray_now[2]/tanH, -ray_now[1]/ray_now[2]/tanH])
+    e=(q+1)/2
+    _,valid,_,src=shade(e,Ur,W,H)
+    rc=Rwc_cap.T@Wd                                         # vue à la capture
+    u=cmp_.K[0,0]*rc[0]/rc[2]+cmp_.K[0,2]; v=cmp_.K[1,1]*rc[1]/rc[2]+cmp_.K[1,2]
+    worst=max(worst,math.hypot(src[0]-u,src[1]-v))
+print("T7 reprojection (6° de rotation depuis la capture) : écart max = %.2e px"%worst)
+assert worst<1e-6
+# sans reprojection, la même rotation décalerait l'image de plusieurs dizaines de pixels
+U_no=assemble(EyeParams(fov_deg=fov_d,center_on_image=False),cmp_,W,H)
+Wd=Rwc_now@np.array([0.1,0.0,1.0]); Wd/=np.linalg.norm(Wd); rn=Rwc_now.T@Wd
+e=(np.array([rn[0]/rn[2]/tanH,-rn[1]/rn[2]/tanH])+1)/2
+rc=Rwc_cap.T@Wd; u=cmp_.K[0,0]*rc[0]/rc[2]+cmp_.K[0,2]; v=cmp_.K[1,1]*rc[1]/rc[2]+cmp_.K[1,2]
+s_no=shade(e,U_no,W,H)[3]
+print("   sans reprojection : décalage de %.0f px"%math.hypot(s_no[0]-u,s_no[1]-v))
+
+# ---- T8 : marge de la scène (overscan) : le même point d'écran tombe au centre de la scène élargie
+Uo=assemble(EyeParams(fov_deg=fov,pan=(0.2,0)),cm,W,H,overscan=1.3)
+suv=shade(np.array([0.5,0.5]),Uo,W,H)[2]
+print("T8 overscan 1.3, décalage 0.2 : le centre d'écran lit la scène en u=%.3f (au lieu de %.3f sans marge)"%(suv[0],0.5-0.1))
+assert abs(suv[0]-(0.5-0.2/1.3*0.5))<1e-9
+# un décalage qui sortirait de la scène sans marge reste couvert avec marge
+U1=assemble(EyeParams(fov_deg=fov,pan=(0.3,0)),cm,W,H,overscan=1.0); U2=assemble(EyeParams(fov_deg=fov,pan=(0.3,0)),cm,W,H,overscan=1.3)
+e=np.array([[0.02,0.5]])      # bord gauche de l'écran, image décalée de 0.3 vers la droite
+print("   bord gauche, pan 0.3 : u_scène = %.3f sans marge (hors scène = rogné), %.3f avec marge"%(shade(e,U1,W,H)[2][0,0],shade(e,U2,W,H)[2][0,0]))
+assert shade(e,U1,W,H)[2][0,0]<0 and 0<=shade(e,U2,W,H)[2][0,0]<=1
+
+# ---- T9 : bords étirés (clamp) au lieu de noirs
+Ucl=assemble(EyeParams(fov_deg=130.0),cm,W,H,clamp=True); Unc=assemble(EyeParams(fov_deg=130.0),cm,W,H,clamp=False)
+e=np.array([[0.99,0.99]])
+print("T9 hors champ : valide sans clamp =",bool(shade(e,Unc,W,H)[1][0]),"| avec clamp =",bool(shade(e,Ucl,W,H)[1][0]))
+assert (not shade(e,Unc,W,H)[1][0]) and shade(e,Ucl,W,H)[1][0]
 print("TOUS LES TESTS DE REFERENCE OK")

@@ -37,6 +37,7 @@
 #include "fusion.h"
 #include "imu_parser.h"
 #include "orientation.h"
+#include "pose_snap.h"
 #include "pose_packet.h"
 #include "serial_win.h"
 #include "tracker.h"
@@ -89,7 +90,25 @@ static Mat3 LoadMount() {
   return std::abs(t.Det() - 1.0) < 1e-3 ? t : Mat3();
 }
 
-static void ImuThread(std::string port, ImuState* st) {
+// Horloge système haute résolution, commune à ar6dof_probe et à Unity (sert à horodater les poses).
+static double QpcSeconds() {
+  static const LARGE_INTEGER freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
+  LARGE_INTEGER c;
+  QueryPerformanceCounter(&c);
+  return (double)c.QuadPart / (double)freq.QuadPart;
+}
+
+// Appelée par le thread IMU (verrou de l'IMU déjà pris) après chaque lot de mesures gyro.
+static void PublishPose(ImuState* st, VisionSnap* vs, UdpSender* udp, uint32_t* seq, const Mat3& Rcb) {
+  SnapData sd;
+  { std::lock_guard<std::mutex> l(vs->m); sd = vs->d; }
+  if (!sd.valid) return;
+  PoseOut po = ComputePose(sd, st->gyroBuf, NowS() + sd.predS, Rcb);
+  auto pkt = PackPose(sd.flags, (*seq)++, po.p, QuatFromMat3(po.R), po.vG, po.wG, sd.floorZ, QpcSeconds() + sd.predS);
+  udp->Send(pkt.data(), (int)pkt.size());
+}
+
+static void ImuThread(std::string port, ImuState* st, VisionSnap* vs, UdpSender* udp) {
   SerialPort sp;
   if (!sp.open(port)) {
     std::lock_guard<std::mutex> l(st->m);
@@ -101,7 +120,9 @@ static void ImuThread(std::string port, ImuState* st) {
   Vec3 accBody;
   bool haveAcc = false, haveT = false;
   int64_t lastT = 0;
-  uint64_t n_acc = 0, n_gyr = 0, a0 = 0, g0 = 0;
+  uint64_t n_acc = 0, n_gyr = 0, a0 = 0, g0 = 0, pubGyro = 0;
+  uint32_t pubSeq = 0;
+  const Mat3 Rcb = CamFromBody();
   auto t0 = std::chrono::steady_clock::now();
   uint8_t buf[4096];
   while (g_run) {
@@ -149,6 +170,10 @@ static void ImuThread(std::string port, ImuState* st) {
       st->bytes = parser.bytes_total;
       st->ok = parser.packets_ok;
       st->bad = parser.bad_checksum;
+      if (vs && udp && udp->IsOpen() && n_gyr != pubGyro) {  // nouvelles mesures gyro : on publie la pose tout de suite
+        pubGyro = n_gyr;
+        PublishPose(st, vs, udp, &pubSeq, Rcb);
+      }
     }
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - t0).count();
@@ -480,7 +505,6 @@ int main() {
   ImuState imu;
   imu.mount = LoadMount();
   std::thread th;
-  if (pi >= 0) th = std::thread(ImuThread, ports[pi], &imu);
 
   std::filesystem::create_directories("capture");
   int saved = 0, frames = 0, fails = 0;
@@ -524,6 +548,8 @@ int main() {
   uint32_t udpSeq = 0;
   FrameShare share;
   bool shareFailed = false;
+  VisionSnap vsnap;
+  if (pi >= 0) th = std::thread(ImuThread, ports[pi], &imu, &vsnap, &udp);   // publie la pose à la cadence de l'IMU
   FloorFilter floorF;
   bool floorValid = false, floorLocked = false;
   double floorZ = 0, lastFloorT = 0;
@@ -653,21 +679,26 @@ int main() {
         snapT_s = tcap;
       }
     }
-    // Pose "maintenant + prédiction" : rotation = vision + gyro depuis l'image, position = vision + vitesse
+    // Pose "maintenant + prédiction". L'envoi à Unity est fait par le thread IMU (cadence de l'IMU, ~200 Hz) :
+    // ici on met seulement à jour l'état partagé (une fois par image) et on calcule la pose à afficher.
     if (haveLast) {
-      double target = NowS() + predS;
-      double span = std::min(0.2, std::max(0.0, target - snapT_s));
-      Mat3 dRb;
-      Vec3 omegaB;
-      if (pi >= 0) {
-        std::lock_guard<std::mutex> l(imu.m);
-        dRb = IntegrateGyro(imu.gyroBuf, snapT_s, snapT_s + span);
-        omegaB = LastOmega(imu.gyroBuf);
+      uint16_t fl = 0;
+      if (tracking && vo) {
+        if (vo->state == StereoVO::kOk) fl |= kFlagTracking;
+        if (vo->state == StereoVO::kLost) fl |= kFlagLost;
       }
-      Mat3 R_Vb = snapRvc * Rcb * dRb;
-      Vec3 pV = snapT + snapV * std::min(span, 0.1);
-      poseR = R_GV * R_Vb;
-      poseP = R_GV * pV;
+      if (floorValid) fl |= kFlagFloor;
+      if (floorLocked) fl |= kFlagFloorLocked;
+      UpdateSnap(vsnap, snapRvc, snapT, snapV, snapT_s, NowS(), R_GV, fl, floorValid, floorZ, predS);
+      PoseOut po;
+      {
+        SnapData sd;
+        { std::lock_guard<std::mutex> l(vsnap.m); sd = vsnap.d; }
+        std::lock_guard<std::mutex> l(imu.m);
+        po = ComputePose(sd, imu.gyroBuf, NowS() + predS, Rcb);
+      }
+      poseP = po.p;
+      poseR = po.R;
       poseValid = true;
       if (tracking && vo && vo->state == StereoVO::kOk) {
         trail.push_back(poseP);
@@ -684,14 +715,9 @@ int main() {
         floorValid = floorF.Valid();
         if (floorValid) floorZ = floorF.Z();
       }
-      // Envoi à Unity
-      if (udp.IsOpen() && tracking && vo) {
-        uint16_t fl = 0;
-        if (vo->state == StereoVO::kOk) fl |= kFlagTracking;
-        if (vo->state == StereoVO::kLost) fl |= kFlagLost;
-        if (floorValid) fl |= kFlagFloor;
-        if (floorLocked) fl |= kFlagFloorLocked;
-        auto pkt = PackPose(fl, udpSeq++, poseP, QuatFromMat3(poseR), R_GV * snapV, poseR * omegaB, floorZ);
+      // Sans IMU il n'y a pas de thread de publication : on envoie à la cadence de la caméra
+      if (pi < 0 && udp.IsOpen() && tracking && vo) {
+        auto pkt = PackPose(fl, udpSeq++, po.p, QuatFromMat3(po.R), po.vG, po.wG, floorZ, QpcSeconds() + predS);
         udp.Send(pkt.data(), (int)pkt.size());
       }
     }
@@ -893,6 +919,7 @@ int main() {
           haveLast = false;
           poseValid = false;
           trail.clear();
+          InvalidateSnap(vsnap);
           if (vo) vo->Reset();
           trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
           floorF.Reset();
@@ -903,6 +930,7 @@ int main() {
         tracking = false;
         haveLast = false;
         poseValid = false;
+        InvalidateSnap(vsnap);
         trackMsg = "tracking arrete";
       }
     }

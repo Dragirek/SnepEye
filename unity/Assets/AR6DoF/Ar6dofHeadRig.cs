@@ -4,9 +4,10 @@ using UnityEngine;
 namespace AR6DoF
 {
     /// <summary>
-    /// À placer sur le parent de la caméra ("Rig"). Applique la pose 6DoF reçue :
+    /// À placer sur le parent des caméras ("Rig"). Applique la pose 6DoF reçue :
     ///  - y = 0 est le SOL (détecté par le tracker, ou hauteur d'yeux supposée sinon)
-    ///  - prédiction jusqu'à l'instant du rendu (vitesses reçues)
+    ///  - la pose est prédite jusqu'à l'instant du rendu avec les vitesses reçues (la rotation est mise à jour
+    ///    à la cadence de l'IMU, ~200 Hz, pas à celle de la caméra)
     ///  - touche de recentrage : l'origine et l'avant sont ramenés à la position/direction actuelles
     /// </summary>
     public class Ar6dofHeadRig : MonoBehaviour
@@ -31,6 +32,8 @@ namespace AR6DoF
         public bool FloorDetected { get; private set; }
         /// <summary>Hauteur des yeux au-dessus du sol (m).</summary>
         public float HeadHeight { get; private set; }
+        /// <summary>Orientation casque -> monde (repère G, matrice 3x3 en ligne) prédite à l'instant du rendu. Sert à la reprojection de l'image.</summary>
+        public double[] RenderRotationG { get; private set; }
 
         bool wantRecenter, haveOrigin;
         Vector3 originU;
@@ -49,6 +52,7 @@ namespace AR6DoF
             if (Ar6dofInput.Down(recenterKey)) wantRecenter = true;
         }
 
+        [BeforeRenderOrder(0)]   // avant le passthrough (qui en dépend)
         void Apply()
         {
             if (receiver == null) return;
@@ -57,13 +61,16 @@ namespace AR6DoF
             ConnectionLost = age > staleSeconds;
             TrackingOk = p.Tracking && !ConnectionLost;
 
-            // Pose prédite à l'instant du rendu
-            double dt = predictToRenderTime ? Math.Min(age, maxPredictSeconds) : 0.0;
+            // Pose prédite à l'instant du rendu. tPose est l'instant auquel la pose reçue est valable ;
+            // un dt négatif (rendu avant tPose) est possible quand le tracker anticipe.
+            double dt = predictToRenderTime ? Math.Max(-0.03, Math.Min(maxPredictSeconds, Ar6dofClock.Now() - p.tPose)) : 0.0;
+            double[] qG = { p.qw, p.qx, p.qy, p.qz };
+            if (dt != 0.0)   // vitesse angulaire en repère monde : la rotation s'applique après l'orientation
+                qG = Ar6dofMath.QuatMul(Ar6dofMath.QuatFromRotVec(p.angG.x * dt, p.angG.y * dt, p.angG.z * dt), qG);
+            qG = Ar6dofMath.Normalize(qG);
+            RenderRotationG = Ar6dofMath.QuatToMat(qG);
+            Quaternion rotU = Ar6dofConvert.Rotation((float)qG[0], (float)qG[1], (float)qG[2], (float)qG[3]);
             Vector3 posU = Ar6dofConvert.Position(p.posG + p.velG * (float)dt);
-            Quaternion rotU = Ar6dofConvert.Rotation(p.qw, p.qx, p.qy, p.qz);
-            Vector3 w = Ar6dofConvert.AngularVelocity(p.angG);
-            float angle = w.magnitude * (float)dt;
-            if (angle > 1e-5f) rotU = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, w.normalized) * rotU;
 
             // Sol : y = 0
             float floorG;

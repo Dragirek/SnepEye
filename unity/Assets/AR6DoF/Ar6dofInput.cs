@@ -2,9 +2,15 @@ using UnityEngine;
 
 namespace AR6DoF
 {
+    /// <summary>Indique si le panneau de réglages (F1) est affiché : les autres composants y ajoutent leurs réglages.</summary>
+    public static class Ar6dofUi
+    {
+        public static bool Visible;
+    }
+
     /// <summary>
     /// Lecture clavier compatible avec les deux systèmes d'entrée de Unity 6
-    /// (Input System "nouveau" ou ancien Input Manager). Lettres uniquement (KeyCode.R, KeyCode.M...).
+    /// (Input System "nouveau" ou ancien Input Manager). Lettres et touches F1..F12 (KeyCode.R, KeyCode.F1...).
     /// </summary>
     public static class Ar6dofInput
     {
