@@ -49,6 +49,7 @@ class StereoVO {
       : K_(K), B_(baseline_m), maxPts_(maxPts), depthMax_(depthMax) {}
 
   int nPoints() const { return (int)p2_.size(); }
+  const std::vector<cv::Point3d>& Points3D() const { return p3_; }  // points suivis, repère V
 
   void Reset() {
     R = cv::Matx33d::eye();

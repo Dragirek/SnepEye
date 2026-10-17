@@ -8,6 +8,9 @@
 //  Fenêtre "trajectoire" (tracking) :
 //    t démarrer/arrêter+recentrer | u prior IMU on/off | [ ] délai caméra | - = prédiction
 //    , . zoom de la grille | m poser un repère (distance mesurée en cm) | n l'effacer
+//    v verrouiller/déverrouiller le sol détecté
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 
 #include <atomic>
@@ -28,11 +31,14 @@
 
 #include "calib.h"
 #include "devices.h"
+#include "floor.h"
 #include "fusion.h"
 #include "imu_parser.h"
 #include "orientation.h"
+#include "pose_packet.h"
 #include "serial_win.h"
 #include "tracker.h"
+#include "udp_sender.h"
 
 struct ImuState {
   std::mutex m;
@@ -298,9 +304,10 @@ static std::string Lab(double v) {
 // Trajectoire : vue de dessus (gauche) et de côté (droite), monde G, avec GRILLE GRADUÉE.
 // zoom = pixels par mètre (0 = automatique). Le repère (m) est tracé en magenta.
 static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const Vec3& pos, const Mat3& R, bool valid,
-                           double zoom, bool haveMark, const Vec3& mark, double* outPxPerM) {
+                           double zoom, bool haveMark, const Vec3& mark, double* outPxPerM,
+                           bool floorValid, double floorZ) {
   img.setTo(cv::Scalar(32, 32, 32));
-  const int pw = img.cols / 2, top0 = 92, bot = img.rows - 44;
+  const int pw = img.cols / 2, top0 = 92, bot = img.rows - 76;
   double sc = zoom;
   if (sc <= 0) {
     double ext = 0.3;
@@ -352,6 +359,11 @@ static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const V
     cv::line(A, top(trail[i - 1]), top(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
     cv::line(Bm, side(trail[i - 1]), side(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
   }
+  if (floorValid) {  // le sol, dans la vue de côté
+    int yf = c2.y - (int)(floorZ * sc);
+    cv::line(Bm, cv::Point(0, yf), cv::Point(Bm.cols, yf), cv::Scalar(90, 220, 90), 2, cv::LINE_AA);
+    cv::putText(Bm, "sol", cv::Point(Bm.cols - 34, yf - 4), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(90, 220, 90), 1, cv::LINE_AA);
+  }
   if (haveMark) {
     cv::circle(A, top(mark), 7, cv::Scalar(255, 0, 255), 2, cv::LINE_AA);
     cv::circle(Bm, side(mark), 7, cv::Scalar(255, 0, 255), 2, cv::LINE_AA);
@@ -391,6 +403,7 @@ int main() {
   int W = AskInt("Largeur totale", 1600, 320, 8000);
   int H = AskInt("Hauteur", 600, 240, 4000);
   int FPS = AskInt("Cadence demandee (fps)", 120, 5, 240);
+  int udpPort = AskInt("Port UDP vers Unity sur ce PC (0 = desactive)", 9876, 0, 65535);
 
   // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
   StereoCalib calib;
@@ -496,7 +509,17 @@ int main() {
   bool haveMark = false;
   Vec3 mark;
   std::string trackMsg = "touche t : demarrer le tracking 6DoF (fais d'abord g puis f dans la fenetre orientation)";
-  cv::Mat traj(480, 640, CV_8UC3);
+  cv::Mat traj(520, 640, CV_8UC3);
+  // ---- Sol + sortie vers Unity ----
+  UdpSender udp;
+  if (udpPort > 0) {
+    if (udp.Open("127.0.0.1", udpPort)) std::cout << "Sortie pose -> Unity : UDP 127.0.0.1:" << udpPort << "\n";
+    else std::cout << "Sortie UDP impossible (port " << udpPort << ")\n";
+  }
+  uint32_t udpSeq = 0;
+  FloorFilter floorF;
+  bool floorValid = false, floorLocked = false;
+  double floorZ = 0, lastFloorT = 0;
   std::cout << "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n";
 
   while (true) {
@@ -620,9 +643,11 @@ int main() {
       double target = NowS() + predS;
       double span = std::min(0.2, std::max(0.0, target - snapT_s));
       Mat3 dRb;
+      Vec3 omegaB;
       if (pi >= 0) {
         std::lock_guard<std::mutex> l(imu.m);
         dRb = IntegrateGyro(imu.gyroBuf, snapT_s, snapT_s + span);
+        omegaB = LastOmega(imu.gyroBuf);
       }
       Mat3 R_Vb = snapRvc * Rcb * dRb;
       Vec3 pV = snapT + snapV * std::min(span, 0.1);
@@ -632,6 +657,27 @@ int main() {
       if (tracking && vo && vo->state == StereoVO::kOk) {
         trail.push_back(poseP);
         if (trail.size() > 1500) trail.erase(trail.begin());
+      }
+      // Sol : plus bas plan horizontal dense parmi les points 3D suivis (estimé toutes les 0,5 s)
+      if (tracking && vo && vo->state == StereoVO::kOk && !floorLocked && (tRead - lastFloorT) > 0.5) {
+        lastFloorT = tRead;
+        std::vector<double> zs;
+        const auto& pts = vo->Points3D();
+        zs.reserve(pts.size());
+        for (const auto& pp : pts) zs.push_back(R_GV.m[2][0] * pp.x + R_GV.m[2][1] * pp.y + R_GV.m[2][2] * pp.z);
+        floorF.Add(EstimateFloor(zs, poseP.z));
+        floorValid = floorF.Valid();
+        if (floorValid) floorZ = floorF.Z();
+      }
+      // Envoi à Unity
+      if (udp.IsOpen() && tracking && vo) {
+        uint16_t fl = 0;
+        if (vo->state == StereoVO::kOk) fl |= kFlagTracking;
+        if (vo->state == StereoVO::kLost) fl |= kFlagLost;
+        if (floorValid) fl |= kFlagFloor;
+        if (floorLocked) fl |= kFlagFloorLocked;
+        auto pkt = PackPose(fl, udpSeq++, poseP, QuatFromMat3(poseR), R_GV * snapV, poseR * omegaB, floorZ);
+        udp.Send(pkt.data(), (int)pkt.size());
       }
     }
 
@@ -711,7 +757,8 @@ int main() {
     cv::imshow("orientation", orient);
 
     // ---- Fenêtre trajectoire ----
-    DrawTrajectory(traj, trail, poseP, poseR, poseValid && haveLast, zoomList[zoomIdx], haveMark, mark, &pxPerM);
+    DrawTrajectory(traj, trail, poseP, poseR, poseValid && haveLast, zoomList[zoomIdx], haveMark, mark, &pxPerM,
+                   floorValid, floorZ);
     {
       char tl[256];
       if (poseValid && haveLast) {
@@ -740,7 +787,15 @@ int main() {
         }
         cv::putText(traj, tl, cv::Point(10, 66), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 200, 255), 1, cv::LINE_AA);
       }
-      std::snprintf(tl, sizeof(tl), ", . zoom (%.0f px/m)%s | m/n repere | t demarrer/recentrer | u prior IMU",
+      if (floorValid) {
+        std::snprintf(tl, sizeof(tl), "sol a %+.2f m %s | hauteur de la tete : %.0f cm", floorZ, floorLocked ? "(verrouille)" : "(estime)",
+                      (poseP.z - floorZ) * 100.0);
+        cv::putText(traj, tl, cv::Point(8, traj.rows - 46), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(120, 255, 120), 1, cv::LINE_AA);
+      } else if (tracking) {
+        cv::putText(traj, "sol : pas encore detecte (regarde le sol, 2 a 4 m devant toi)", cv::Point(8, traj.rows - 46),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 165, 255), 1, cv::LINE_AA);
+      }
+      std::snprintf(tl, sizeof(tl), ", . zoom (%.0f px/m)%s | m/n repere | v verrouiller le sol | t demarrer/recentrer | u prior IMU",
                     pxPerM, zoomList[zoomIdx] <= 0 ? " auto" : "");
       cv::putText(traj, tl, cv::Point(10, traj.rows - 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
       std::snprintf(tl, sizeof(tl), "[ ] delai camera %.0f ms | - = prediction %.0f ms", camDelay * 1000, predS * 1000);
@@ -825,6 +880,9 @@ int main() {
           trail.clear();
           if (vo) vo->Reset();
           trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
+          floorF.Reset();
+          floorValid = false;
+          floorLocked = false;
         }
       } else {
         tracking = false;
@@ -834,6 +892,7 @@ int main() {
       }
     }
     if (k == 'u') usePrior = !usePrior;
+    if (k == 'v' && floorValid) floorLocked = !floorLocked;
     if (k == '[') camDelay = std::max(0.0, camDelay - 0.005);
     if (k == ']') camDelay = std::min(0.2, camDelay + 0.005);
     if (k == '-') predS = std::max(0.0, predS - 0.005);

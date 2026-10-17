@@ -7,7 +7,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui c
 
 add_executable(ar6dof_probe src/main.cpp)
 target_include_directories(ar6dof_probe PRIVATE src)
-target_link_libraries(ar6dof_probe PRIVATE ${OpenCV_LIBS} mfplat mf mfuuid ole32)
+target_link_libraries(ar6dof_probe PRIVATE ${OpenCV_LIBS} mfplat mf mfuuid ole32 ws2_32)
 if(MSVC)
   target_compile_options(ar6dof_probe PRIVATE /W3 /utf-8)
   target_compile_definitions(ar6dof_probe PRIVATE NOMINMAX)
