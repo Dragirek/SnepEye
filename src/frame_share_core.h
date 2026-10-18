@@ -6,8 +6,8 @@
 //   0  uint32 magic 0x46365241 ('AR6F')       +0   uint64 seq   (impair = en cours d'écriture)
 //   4  uint32 version = 1                      +8   uint64 frameId
 //   8  uint32 largeur                          +16  double tWrite (secondes, horloge QueryPerformanceCounter)
-//  12  uint32 hauteur                          +64  pixels BGR 8 bits, ligne par ligne, du HAUT vers le bas
-//  16  uint32 canaux (3)
+//  12  uint32 hauteur                          +64  pixels BGRA 8 bits, ligne par ligne, du HAUT vers le bas
+//  16  uint32 canaux (4 : BGRA)
 //  20  uint32 stride (octets par ligne)
 //  24  uint32 slotBytes (= 64 + stride*hauteur)
 //  28  uint32 slotCount = 2
@@ -39,24 +39,44 @@ inline void Init(uint8_t* base, uint32_t w, uint32_t h, uint32_t ch) {
   std::memcpy(base, &kMagic, 4);  // le magic est écrit EN DERNIER : un lecteur ne voit jamais un en-tête à moitié écrit
 }
 
+// Écriture en deux temps : BeginWrite rend le pointeur où écrire directement les pixels (par exemple le résultat
+// d'une conversion de format) : aucune copie intermédiaire. EndWrite publie l'image.
+inline uint8_t* BeginWrite(uint8_t* base, uint64_t frameId) {
+  uint32_t slot = (uint32_t)(frameId % kSlots);
+  uint32_t w, h, ch;
+  std::memcpy(&w, base + 8, 4);
+  std::memcpy(&h, base + 12, 4);
+  std::memcpy(&ch, base + 16, 4);
+  uint8_t* s = base + kHeaderBytes + slot * SlotBytes(w, h, ch);
+  uint64_t seq = A64(s)->load(std::memory_order_relaxed);
+  A64(s)->store(seq + 1, std::memory_order_release);  // impair : écriture en cours
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  return s + kSlotHeaderBytes;
+}
+
+inline void EndWrite(uint8_t* base, uint64_t frameId, double tWrite) {
+  uint32_t slot = (uint32_t)(frameId % kSlots);
+  uint32_t w, h, ch;
+  std::memcpy(&w, base + 8, 4);
+  std::memcpy(&h, base + 12, 4);
+  std::memcpy(&ch, base + 16, 4);
+  uint8_t* s = base + kHeaderBytes + slot * SlotBytes(w, h, ch);
+  std::memcpy(s + 8, &frameId, 8);
+  std::memcpy(s + 16, &tWrite, 8);
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  uint64_t seq = A64(s)->load(std::memory_order_relaxed);
+  A64(s)->store(seq + 1, std::memory_order_release);  // pair : emplacement cohérent
+  A64(base + 32)->store(frameId, std::memory_order_release);
+  std::memcpy(base + 40, &slot, 4);
+}
+
 inline void Write(uint8_t* base, const uint8_t* pixels, uint64_t frameId, double tWrite) {
   uint32_t w, h, ch;
   std::memcpy(&w, base + 8, 4);
   std::memcpy(&h, base + 12, 4);
   std::memcpy(&ch, base + 16, 4);
-  size_t sb = SlotBytes(w, h, ch);
-  uint32_t slot = (uint32_t)(frameId % kSlots);
-  uint8_t* s = base + kHeaderBytes + slot * sb;
-  uint64_t seq = A64(s)->load(std::memory_order_relaxed);
-  A64(s)->store(seq + 1, std::memory_order_release);  // impair : écriture en cours
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-  std::memcpy(s + 8, &frameId, 8);
-  std::memcpy(s + 16, &tWrite, 8);
-  std::memcpy(s + kSlotHeaderBytes, pixels, (size_t)w * ch * h);
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-  A64(s)->store(seq + 2, std::memory_order_release);  // pair : emplacement cohérent
-  A64(base + 32)->store(frameId, std::memory_order_release);
-  std::memcpy(base + 40, &slot, 4);
+  std::memcpy(BeginWrite(base, frameId), pixels, (size_t)w * ch * h);
+  EndWrite(base, frameId, tWrite);
 }
 
 // Lecture de la dernière image (même protocole que le C#). Retourne vrai si une NOUVELLE image

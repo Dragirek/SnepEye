@@ -8,7 +8,7 @@
 #include "../src/frame_share_core.h"
 
 int main() {
-  const uint32_t W = 640, H = 120, CH = 3;  // taille réduite, protocole identique
+  const uint32_t W = 640, H = 120, CH = 4;  // taille réduite, protocole identique
   size_t total = fshare::TotalBytes(W, H, CH);
   uint8_t* mem = static_cast<uint8_t*>(std::aligned_alloc(64, (total + 63) / 64 * 64));
   fshare::Init(mem, W, H, CH);
@@ -20,7 +20,9 @@ int main() {
     while (run) {
       ++id;
       std::fill(px.begin(), px.end(), (uint8_t)(id & 0xFF));  // toute l'image = id : une image déchirée se voit
-      fshare::Write(mem, px.data(), id, (double)id);
+      uint8_t* dst = fshare::BeginWrite(mem, id);
+      std::memcpy(dst, px.data(), px.size());
+      fshare::EndWrite(mem, id, (double)id);
     }
   });
 

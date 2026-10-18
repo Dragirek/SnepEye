@@ -86,13 +86,19 @@ print("T4 pan: pixel (x=600) de 'b' == pixel (x=600-%d) de 'a' :"%shift, bool(np
 assert np.abs(b[:,700].astype(int)-a[:,700-int(shift)].astype(int)).max()<=2
 
 # ---- T5 : centrage sur l'image avec TA calibration : l'axe de vue rectifié passe par le centre de l'image
-Ucal=assemble(EyeParams(fov_deg=90),cam,W,H)
+Ucal=assemble(EyeParams(fov_deg=90,center_on_image=True),cam,W,H)
 ctr=shade(np.array([0.5,0.5]),Ucal,W,H)
 print("T5 axe de vue -> rayon (x,y,z) =",np.round(Ucal['view_axis'],4)," ; pixel source du centre d'écran =",np.round(ctr[3],1))
 rect_c=np.array([(W-1)/2,(H-1)/2])
 ray=np.array([(rect_c[0]-(P1[0,2]+.5)+.5)/P1[0,0],(rect_c[1]-(P1[1,2]+.5)+.5)/P1[1,1],1])   # rayon rectifié du centre de l'image
 print("   rayon rectifié du centre de l'image                 =",np.round(ray/np.linalg.norm(ray),4))
 assert np.allclose(Ucal['view_axis'],ray/np.linalg.norm(ray),atol=2e-3)
+# sans roulis : l'axe x de l'image reste horizontal (composante y nulle), contrairement à la rotation minimale
+Rv_=rot_yaw_pitch(Ucal['view_axis']); print("   roulis de la vue : composante y de l'axe x image = %.1e (0 = pas de roulis) ; axe z -> %s"%(Rv_[1,0],np.round(Rv_@[0,0,1],4)))
+assert abs(Rv_[1,0])<1e-12 and np.allclose(Rv_@[0,0,1],Ucal['view_axis'],atol=1e-12)
+# par défaut, la vue est centrée sur l'axe optique : aucune rotation
+U_def=assemble(EyeParams(fov_deg=90),cam,W,H); assert np.allclose(U_def['view_axis'],[0,0,1])
+print("   par défaut (center_on_image=False) : axe de vue = (0,0,1), caméras de scène sans rotation")
 
 # ---- T6 : distorsion des lentilles : k1>0 éloigne l'échantillonnage du centre (bords plus "étirés")
 Uk=assemble(EyeParams(fov_deg=fov,k=(0.2,0,0)),cm,W,H)

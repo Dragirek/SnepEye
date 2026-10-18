@@ -42,7 +42,7 @@ namespace AR6DoF
             basePtr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, UIntPtr.Zero);
             if (basePtr == IntPtr.Zero) { Dispose(); return false; }
             if ((uint)Marshal.ReadInt32(basePtr, 0) != Magic || Marshal.ReadInt32(basePtr, 4) != 1
-                || Marshal.ReadInt32(basePtr, 16) != 3) { Dispose(); return false; }
+                || Marshal.ReadInt32(basePtr, 16) != 4) { Dispose(); return false; }
             Width = Marshal.ReadInt32(basePtr, 8);
             Height = Marshal.ReadInt32(basePtr, 12);
             slotBytes = (uint)Marshal.ReadInt32(basePtr, 24);
@@ -52,7 +52,7 @@ namespace AR6DoF
         }
 
         /// <summary>
-        /// Copie la dernière image dans la texture (RGB24, mêmes dimensions) si une nouvelle image cohérente existe.
+        /// Copie la dernière image dans la texture (BGRA32, mêmes dimensions) si une nouvelle image cohérente existe.
         /// ageMs = temps écoulé depuis son écriture par ar6dof_probe (n'inclut pas l'exposition ni le transfert USB).
         /// </summary>
         public bool TryCopyLatest(Texture2D tex, out double ageMs)
@@ -65,7 +65,7 @@ namespace AR6DoF
             IntPtr s = IntPtr.Add(basePtr, (int)(HeaderBytes + slot * slotBytes));
             long s1 = Marshal.ReadInt64(s, 0);
             if ((s1 & 1) != 0) return false;                          // écriture en cours
-            tex.LoadRawTextureData(IntPtr.Add(s, SlotHeaderBytes), Width * 3 * Height);
+            tex.LoadRawTextureData(IntPtr.Add(s, SlotHeaderBytes), Width * 4 * Height);
             long s2 = Marshal.ReadInt64(s, 0);
             if (s1 != s2) return false;                               // écrasée pendant la copie : on jette
             tex.Apply(false, false);

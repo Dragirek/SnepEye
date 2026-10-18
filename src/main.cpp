@@ -14,6 +14,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -41,6 +43,7 @@
 #include "pose_packet.h"
 #include "serial_win.h"
 #include "tracker.h"
+#include "udp_control.h"
 #include "udp_sender.h"
 
 struct ImuState {
@@ -186,25 +189,120 @@ static void ImuThread(std::string port, ImuState* st, VisionSnap* vs, UdpSender*
   }
 }
 
-static int AskInt(const std::string& q, int def, int lo, int hi) {
+// ---- Configuration : les réponses sont sauvegardées ; avec --auto elles sont rejouées sans aucune question ----
+static bool g_auto = false;
+static std::map<std::string, std::string> g_cfg;
+
+static std::string ConfigPath() { return ExeDir() + "\\ar6dof_config.txt"; }
+static void LoadConfig() {
+  std::ifstream f(ConfigPath());
+  std::string line;
+  while (std::getline(f, line)) {
+    size_t e = line.find('=');
+    if (e != std::string::npos) g_cfg[line.substr(0, e)] = line.substr(e + 1);
+  }
+}
+static void SaveConfig() {
+  std::ofstream f(ConfigPath());
+  for (const auto& kv : g_cfg) f << kv.first << "=" << kv.second << "\n";
+}
+
+static int AskInt(const char* key, const std::string& q, int def, int lo, int hi) {
+  if (g_auto) {
+    int v = def;
+    auto it = g_cfg.find(key);
+    if (it != g_cfg.end()) { try { v = std::stoi(it->second); } catch (...) {} }
+    if (v < lo || v > hi) v = def;
+    std::cout << "[auto] " << key << " = " << v << "\n";
+    return v;
+  }
   while (true) {
     std::cout << q << " [" << def << "] : ";
     std::string line;
     std::getline(std::cin, line);
-    if (line.empty()) return def;
-    try {
-      int v = std::stoi(line);
-      if (v >= lo && v <= hi) return v;
-    } catch (...) {}
+    int v = def;
+    bool ok = true;
+    if (!line.empty()) {
+      try { v = std::stoi(line); } catch (...) { ok = false; }
+      if (v < lo || v > hi) ok = false;
+    }
+    if (ok) { g_cfg[key] = std::to_string(v); return v; }
     std::cout << "  valeur invalide\n";
   }
 }
 
-static std::string AskStr(const std::string& q, const std::string& def) {
+static std::string AskStr(const char* key, const std::string& q, const std::string& def) {
+  if (g_auto) {
+    auto it = g_cfg.find(key);
+    std::string v = it != g_cfg.end() ? it->second : def;
+    std::cout << "[auto] " << key << " = " << v << "\n";
+    return v;
+  }
   std::cout << q << " [" << def << "] : ";
   std::string line;
   std::getline(std::cin, line);
-  return line.empty() ? def : line;
+  std::string v = line.empty() ? def : line;
+  g_cfg[key] = v;
+  return v;
+}
+
+// ---- Capture de la caméra dans son propre thread : le décodage et le partage vers Unity ne dépendent plus du suivi ----
+struct Mailbox {
+  std::mutex m;
+  std::condition_variable cond;
+  cv::Mat frame;   // dernière image décodée (BGR)
+  uint64_t id = 0;
+  double tRead = 0;
+  bool failed = false;
+};
+static std::atomic<double> g_camFps{0.0}, g_shareMs{0.0};
+
+static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share, bool shareOn) {
+  bool shareFailed = false;
+  int fails = 0;
+  uint64_t n = 0;
+  auto t0 = std::chrono::steady_clock::now();
+  while (g_run) {
+    cv::Mat f;
+    if (!cap->read(f) || f.empty()) {
+      if (++fails > 100) {
+        std::lock_guard<std::mutex> l(mb->m);
+        mb->failed = true;
+        mb->cond.notify_all();
+        return;
+      }
+      continue;
+    }
+    fails = 0;
+    const double tRead = NowS();  // instant de réception ; l'image a été prise un peu avant (voir camDelay)
+    if (shareOn && !shareFailed) {
+      if (!share->IsOpen()) {
+        if (share->Open("Local\\ar6dof_frame", f))
+          std::cout << "Passthrough : image partagee " << f.cols << "x" << f.rows << " (BGRA, Local\\ar6dof_frame)\n";
+        else {
+          shareFailed = true;
+          std::cout << "Passthrough : partage impossible (image BGR 8 bits requise)\n";
+        }
+      }
+      if (share->IsOpen() && share->Matches(f)) {
+        auto s0 = std::chrono::steady_clock::now();
+        share->Write(f);
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s0).count();
+        g_shareMs = 0.9 * g_shareMs.load() + 0.1 * ms;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> l(mb->m);
+      mb->frame = f;  // le tampon est partagé, pas copié
+      mb->id++;
+      mb->tRead = tRead;
+    }
+    mb->cond.notify_one();
+    ++n;
+    auto now = std::chrono::steady_clock::now();
+    double el = std::chrono::duration<double>(now - t0).count();
+    if (el >= 1.0) { g_camFps = n / el; n = 0; t0 = now; }
+  }
 }
 
 // Modèle 3D "casque" + axes + sol, dessiné avec OpenCV (pas de dépendance 3D).
@@ -407,7 +505,17 @@ static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const V
   cv::line(Bm, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
 }
 
-int main() {
+int main(int argc, char** argv) {
+  bool noWindowsFlag = false;
+  for (int i = 1; i < argc; i++) {
+    std::string a = argv[i];
+    if (a == "--auto") g_auto = true;                 // rejoue les réponses de la dernière fois, sans question
+    else if (a == "--no-windows") noWindowsFlag = true;  // aucune fenêtre OpenCV : bien moins de CPU
+  }
+  if (g_auto) {
+    LoadConfig();
+    if (g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
+  }
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -416,28 +524,40 @@ int main() {
   auto cams = ListCameras();
   if (cams.empty()) { std::cout << "  aucune camera trouvee\n"; return 1; }
   for (size_t i = 0; i < cams.size(); i++) std::cout << "  [" << i << "] " << cams[i] << "\n";
-  int ci = AskInt("Camera stereo", 0, 0, (int)cams.size() - 1);
+  int ci = AskInt("cam", "Camera stereo", 0, 0, (int)cams.size() - 1);
 
   std::cout << "\nPorts serie (IMU) :\n";
   auto ports = ListComPorts();
   for (size_t i = 0; i < ports.size(); i++) std::cout << "  [" << i << "] " << ports[i] << "\n";
   std::cout << "  [-1] pas d'IMU\n";
-  int pi = AskInt("Port IMU", ports.empty() ? -1 : 0, -1, (int)ports.size() - 1);
+  int pi = -1;
+  if (g_auto) {   // les numéros de port COM peuvent changer : on retrouve le port par son nom
+    auto it = g_cfg.find("portname");
+    if (it != g_cfg.end())
+      for (size_t i = 0; i < ports.size(); i++) if (ports[i] == it->second) pi = (int)i;
+    std::cout << "[auto] IMU = " << (pi >= 0 ? ports[pi] : std::string("aucune")) << "\n";
+  } else {
+    pi = AskInt("portidx", "Port IMU", ports.empty() ? -1 : 0, -1, (int)ports.size() - 1);
+    g_cfg["portname"] = pi >= 0 ? ports[pi] : "";
+  }
 
   std::cout << "\nModes MJPEG de ta ELP : 3200x1200@60 | 2560x720@60 (16:9, incompatible avec ta calibration)\n"
                "                       1600x600@120 | 1280x480@120 | 640x240@120\n"
                "Image cote a cote (gauche|droite) : largeur TOTALE des 2 yeux, hauteur, cadence.\n";
-  int W = AskInt("Largeur totale", 1600, 320, 8000);
-  int H = AskInt("Hauteur", 600, 240, 4000);
-  int FPS = AskInt("Cadence demandee (fps)", 120, 5, 240);
-  int udpPort = AskInt("Port UDP vers Unity sur ce PC (0 = desactive)", 9876, 0, 65535);
-  int shareFrames = AskInt("Partager l'image de la camera avec Unity pour le passthrough (1 = oui, 0 = non)", 1, 0, 1);
+  int W = AskInt("width", "Largeur totale", 1600, 320, 8000);
+  int H = AskInt("height", "Hauteur", 600, 240, 4000);
+  int FPS = AskInt("fps", "Cadence demandee (fps)", 120, 5, 240);
+  int udpPort = AskInt("udp", "Port UDP vers Unity sur ce PC (0 = desactive)", 9876, 0, 65535);
+  int shareFrames = AskInt("share", "Partager l'image de la camera avec Unity pour le passthrough (1 = oui, 0 = non)", 1, 0, 1);
+  int showWindows = AskInt("windows", "Afficher les fenetres de controle (1 = oui, 0 = non : plus leger)", 1, 0, 1);
+  int autoTrack = AskInt("autotrack", "Demarrer le tracking automatiquement (1 = oui, 0 = non)", 0, 0, 1);
+  const bool windowsOn = showWindows && !noWindowsFlag;
 
   // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
   StereoCalib calib;
   bool haveCalib = false;
   std::string calibErr = "aucun dossier de calibration";
-  std::string dir = AskStr("\nDossier de calibration RTAB-Map ('-' = aucune)", ExeDir() + "\\calibration");
+  std::string dir = AskStr("calibdir", "\nDossier de calibration RTAB-Map ('-' = aucune)", ExeDir() + "\\calibration");
   if (dir != "-") {
     if (LoadRtabmapStereo(dir, calib, calibErr)) {
       haveCalib = true;
@@ -450,7 +570,7 @@ int main() {
       char defbuf[32];
       std::snprintf(defbuf, sizeof(defbuf), "%.1f", saved);
       std::cout << "Base entre les cameras dans la calibration : " << calibBase << " mm\n";
-      std::string a = AskStr("Base REELLE entre les centres des 2 objectifs, en mm (0 = garder celle de la calibration)", defbuf);
+      std::string a = AskStr("baseline", "Base REELLE entre les centres des 2 objectifs, en mm (0 = garder celle de la calibration)", defbuf);
       double real = 0;
       try { real = std::stod(a); } catch (...) { real = 0; }
       SaveBaseline(real);
@@ -471,7 +591,7 @@ int main() {
   {
     const int apis[2] = {cv::CAP_MSMF, cv::CAP_DSHOW};
     const char* names[2] = {"MSMF", "DSHOW"};
-    int first = AskInt("Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
+    int first = AskInt("backend", "Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
     double best = -1;
     int bestIdx = -1, openIdx = -1;
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -553,28 +673,43 @@ int main() {
   FloorFilter floorF;
   bool floorValid = false, floorLocked = false;
   double floorZ = 0, lastFloorT = 0;
-  std::cout << "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n";
+  if (!g_auto) SaveConfig();   // les réponses servent de configuration pour --auto
+  UdpControl ctl;
+  if (!ctl.Open(9877)) std::cout << "Canal de commande (UDP 9877) indisponible.\n";
+  int injectKey = (autoTrack && haveCalib) ? 't' : -1;   // démarre le tracking dès la première image
+  Mailbox mb;
+  uint64_t lastId = 0;
+  std::thread capThread(CaptureThread, &cap, &mb, &share, shareFrames != 0);
+  std::cout << (windowsOn ? "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n"
+                          : "\nMode sans fenetres : commandes par UDP 9877 (T recentrer, V sol, Z yaw, Q quitter).\n");
 
   while (true) {
-    if (!cap.read(frame) || frame.empty()) {
-      if (++fails > 100) { std::cout << "Plus d'images de la camera.\n"; break; }
-      continue;
-    }
-    fails = 0;
-    const double tRead = NowS();  // instant de réception ; l'image a été prise un peu avant (voir camDelay)
-    ++frames;
-    // Passthrough : l'image brute est partagée avec Unity tout de suite (avant le tracking, pour la latence)
-    if (shareFrames && !shareFailed) {
-      if (!share.IsOpen()) {
-        if (share.Open("Local\\ar6dof_frame", frame)) std::cout << "Passthrough : image partagee " << frame.cols << "x" << frame.rows << " (Local\\ar6dof_frame)\n";
-        else { shareFailed = true; std::cout << "Passthrough : partage impossible (image BGR 8 bits, largeur multiple de 4 requise)\n"; }
+    double tRead = 0;
+    {
+      std::unique_lock<std::mutex> l(mb.m);
+      mb.cond.wait_for(l, std::chrono::milliseconds(30), [&] { return mb.id != lastId || mb.failed; });
+      if (mb.failed) { std::cout << "Plus d'images de la camera.\n"; break; }
+      if (mb.id == lastId) {   // pas de nouvelle image : on reste réactif aux touches et aux commandes
+        l.unlock();
+        int kk = windowsOn ? cv::waitKey(1) : -1;
+        int cc = ctl.Poll();
+        if (kk == 'q' || kk == 27 || cc == 'Q') break;
+        continue;
       }
-      if (share.IsOpen() && share.Matches(frame)) share.Write(frame);
+      frame = mb.frame;   // partage du tampon, aucune copie de pixels
+      tRead = mb.tRead;
+      lastId = mb.id;
     }
+    ++frames;
     const bool displayDue = (tRead - lastDispS) >= 0.033;  // affichage ~30 Hz max, tracking à pleine cadence
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - tf).count();
-    if (dt >= 1.0) { fps = frames / dt; frames = 0; tf = now; }
+    if (dt >= 1.0) {
+      fps = frames / dt; frames = 0; tf = now;
+      if (!windowsOn)  // sans fenêtre : un résumé par seconde dans la console
+        std::printf("camera %.1f fps | suivi %.1f fps | partage %.1f ms | tracking %s | %d points\n", g_camFps.load(), fps, g_shareMs.load(),
+                    tracking ? (vo && vo->state == StereoVO::kOk ? "OK" : "perdu/init") : "arrete", vo ? vo->nPoints() : 0);
+    }
 
     int w = frame.cols / 2;
     cv::Mat left = frame(cv::Rect(0, 0, w, frame.rows));
@@ -608,7 +743,7 @@ int main() {
 
     // ---- Paire rectifiée de travail (<= 800 px par oeil) : tracking + affichage rectifié ----
     cv::Mat tl, tr;
-    const bool needSmall = haveCalib && (tracking || (showRect && displayDue));
+    const bool needSmall = haveCalib && (tracking || (showRect && displayDue && windowsOn));
     if (needSmall) {
       const cv::Size want(w, frame.rows);
       if (!trackReady || smallFor != want) {
@@ -722,7 +857,7 @@ int main() {
       }
     }
 
-    if (displayDue) {
+    if (displayDue && windowsOn) {
     lastDispS = tRead;
     cv::Mat shown;
     if (showRect && !tl.empty()) cv::hconcat(tl, tr, shown);
@@ -744,8 +879,8 @@ int main() {
       cv::putText(disp, s, {10, y}, cv::FONT_HERSHEY_SIMPLEX, 0.6, c, 1);
       y += 24;
     };
-    std::snprintf(line, sizeof(line), "cam %dx%d (oeil %dx%d) %.1f fps  paires: %d  vue: %s%s",
-                  frame.cols, frame.rows, w, frame.rows, fps, saved,
+    std::snprintf(line, sizeof(line), "cam %dx%d | camera %.1f fps | suivi %.1f fps | partage %.1f ms | paires: %d  vue: %s%s",
+                  frame.cols, frame.rows, g_camFps.load(), fps, g_shareMs.load(), saved,
                   (showRect && !tl.empty()) ? "RECTIFIEE" : "brute", swapEyes ? "  [G/D inverses]" : "");
     put(line);
     if (haveCalib && rectReady) {
@@ -845,8 +980,14 @@ int main() {
     cv::imshow("trajectoire", traj);
     }  // fin de l'affichage (displayDue)
 
-    int k = cv::waitKey(1);
-    if (k == 'q' || k == 27) break;
+    int k = windowsOn ? cv::waitKey(1) : -1;
+    int cmd = ctl.Poll();   // commandes envoyées par Unity (1 caractère)
+    if (k < 0 && cmd >= 0) k = cmd;
+    if (k < 0 && injectKey >= 0) { k = injectKey; injectKey = -1; }
+    if (k == 'q' || k == 27 || k == 'Q') break;
+    if (k == 'V') k = 'v';   // commandes d'Unity : V sol, Z yaw
+    if (k == 'Z') k = 'z';
+    if (k == 'T') { tracking = false; haveLast = false; poseValid = false; k = 't'; }   // T = recentrer : arrêt puis redémarrage
     if (k == 'r' && haveCalib && rectReady) showRect = !showRect;
     if (k == 'x') swapEyes = !swapEyes;
     if (k == 'c') {
@@ -943,6 +1084,7 @@ int main() {
   }
 
   g_run = false;
+  if (capThread.joinable()) capThread.join();
   if (th.joinable()) th.join();
   return 0;
 }

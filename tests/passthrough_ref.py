@@ -15,9 +15,17 @@ def rot_from_to(a, b):
     th = math.atan2(s, c)
     return np.eye(3) + math.sin(th)*K + (1-math.cos(th))*K@K
 
+def rot_yaw_pitch(a):
+    """Rotation Ry(lacet)*Rx(tangage) qui amène l'axe z sur le vecteur unitaire a (repère caméra : x droite, y bas, z avant).
+    L'axe x de l'image reste horizontal : pas de roulis. Équivalent Unity : Quaternion.Euler(asin(a.y), atan2(a.x, a.z), 0)."""
+    psi = math.atan2(a[0], a[2]); phi = -math.asin(max(-1.0, min(1.0, a[1])))
+    Ry = np.array([[math.cos(psi),0,math.sin(psi)],[0,1,0],[-math.sin(psi),0,math.cos(psi)]])
+    Rx = np.array([[1,0,0],[0,math.cos(phi),-math.sin(phi)],[0,math.sin(phi),math.cos(phi)]])
+    return Ry @ Rx
+
 class EyeParams:
     def __init__(self, pan=(0,0), lens_center=(0,0), k=(0,0,0), rot=0, mirror_x=False, mirror_y=False,
-                 fov_deg=90.0, center_on_image=True):
+                 fov_deg=90.0, center_on_image=False):
         self.pan=pan; self.lens_center=lens_center; self.k=k; self.rot=rot
         self.mirror_x=mirror_x; self.mirror_y=mirror_y; self.fov_deg=fov_deg; self.center_on_image=center_on_image
 
@@ -45,8 +53,8 @@ def assemble(eye: EyeParams, cam: CamModel, src_w, src_h, src_x0=0, src_y0=0, dR
         tx = ((Wc-1)/2 - cxP)/fP; ty = ((Hc-1)/2 - cyP)/fP
     else:
         tx = ty = 0.0
-    a = np.array([tx, ty, 1.0])
-    Rv = rot_from_to([0,0,1], a)
+    a = np.array([tx, ty, 1.0]); a = a/np.linalg.norm(a)
+    Rv = rot_yaw_pitch(a)           # lacet puis tangage, SANS roulis (la rotation minimale ajoutait ~2° de roulis)
     # dR_cam : rotation de la caméra entre l'instant de capture et maintenant (reprojection), repère caméra
     M = cam.R.T @ (np.eye(3) if dR_cam is None else dR_cam) @ Rv
     return dict(pan=eye.pan, lc=eye.lens_center, k=eye.k, tanH=math.tan(math.radians(eye.fov_deg)/2),

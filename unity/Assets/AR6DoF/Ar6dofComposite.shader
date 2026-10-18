@@ -7,7 +7,7 @@ Shader "AR6DoF/Composite"
 {
     Properties
     {
-        _Cam ("Image camera (donnees BGR lues comme RGB24)", 2D) = "black" {}
+        _Cam ("Image camera (BGRA32)", 2D) = "black" {}
         _SceneL ("Scene oeil gauche", 2D) = "black" {}
         _SceneR ("Scene oeil droit", 2D) = "black" {}
         _Flip ("Inversion verticale (1 ou -1)", Float) = 1
@@ -103,7 +103,7 @@ Shader "AR6DoF/Composite"
                         vs = clamp(vs, 0.0, Hs - 1.0);
                         // Unity : l'origine d'une texture est en BAS a gauche, nos lignes sont comptees depuis le HAUT
                         float2 uvT = float2((S9.y + us + 0.5) / _TexSize.x, 1.0 - (S9.z + vs + 0.5) / _TexSize.y);
-                        col = tex2Dlod(_Cam, float4(uvT, 0.0, 0.0)).bgr;
+                        col = tex2Dlod(_Cam, float4(uvT, 0.0, 0.0)).rgb;   // texture BGRA32 : l'ordre des canaux est déjà correct
                     }
                 }
 

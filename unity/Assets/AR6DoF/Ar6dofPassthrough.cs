@@ -27,7 +27,8 @@ namespace AR6DoF
         public bool swapEyes = false;          // échange gauche / droite
         public Ar6dofStereoLayout layout = Ar6dofStereoLayout.SideBySide;
         public bool useCalibration = true;     // corrige la distorsion de la caméra avec camera_model.json
-        public bool centerOnImage = true;      // centre l'affichage sur le milieu de l'image (et non sur l'axe optique)
+        public bool centerOnImage = false;     // false (conseillé) : le centre de l'écran = l'axe de la caméra = devant toi.
+                                               // true : recentre sur le milieu de l'image (plus de champ, mais TOUT le monde est décalé/penché)
         public float fallbackHorizontalFovDeg = 100f;  // sans calibration : champ horizontal supposé de la caméra
         public bool flipComposite = false;     // à cocher si le rendu est à l'envers
         public bool reproject = true;          // reprojection de rotation : l'image suit la tête à la cadence d'Unity, même si la caméra est plus lente
@@ -59,6 +60,7 @@ namespace AR6DoF
         public Shader compositeShader;
         public Ar6dofReceiver receiver;      // vide : trouvé automatiquement
         public Ar6dofHeadRig headRig;        // vide : trouvé automatiquement
+        public Ar6dofLauncher launcher;      // optionnel : boutons de commande d'ar6dof_probe dans le panneau F1
         [Header("Rendu")]
         public int eyeRenderSize = 1440;
         [Tooltip("La scène 3D est rendue plus large que ce qui est affiché : le décalage IPD ne rogne plus le menu")]
@@ -68,6 +70,8 @@ namespace AR6DoF
         public Ar6dofPassthroughSettings settings = new Ar6dofPassthroughSettings();
 
         public double FrameAgeMs { get; private set; }
+        /// <summary>Temps moyen passé par image à la copier et l'envoyer au GPU (ms).</summary>
+        public double UploadMs { get; private set; }
         /// <summary>Rotation compensée par la reprojection pour l'image affichée (degrés).</summary>
         public double ReprojDeg { get; private set; }
         public bool HasFrames { get; private set; }
@@ -91,7 +95,7 @@ namespace AR6DoF
         Vector2 scroll;
         int layer;
 
-        string SettingsPath => Path.Combine(Application.persistentDataPath, "ar6dof_passthrough.json");
+        string SettingsPath => Path.Combine(Application.persistentDataPath, "ar6dof_passthrough_v2.json");
 
         // ------------------------------------------------------------------ démarrage
         void Start()
@@ -99,6 +103,7 @@ namespace AR6DoF
             Application.runInBackground = true;
             if (receiver == null) receiver = FindFirstObjectByType<Ar6dofReceiver>();
             if (headRig == null) headRig = FindFirstObjectByType<Ar6dofHeadRig>();
+            if (launcher == null) launcher = FindFirstObjectByType<Ar6dofLauncher>();
             LoadModel();
             LoadSettings();
             layer = LayerMask.NameToLayer("TransparentFX");
@@ -242,12 +247,16 @@ namespace AR6DoF
             {
                 if (camTex == null)
                 {
-                    if ((reader.Width * 3) % 4 != 0) { Debug.LogError("AR6DoF : largeur d'image non multiple de 4."); enabled = false; return; }
-                    camTex = new Texture2D(reader.Width, reader.Height, TextureFormat.RGB24, false, false);
+                    camTex = new Texture2D(reader.Width, reader.Height, TextureFormat.BGRA32, false, false);
                     camTex.wrapMode = TextureWrapMode.Clamp;
                     camTex.filterMode = FilterMode.Bilinear;
                 }
-                if (reader.TryCopyLatest(camTex, out double age)) { FrameAgeMs = age; HasFrames = true; uploads++; frameWriteQpc = reader.LastWriteQpc; }
+                double t0 = Ar6dofClock.Now();
+                if (reader.TryCopyLatest(camTex, out double age))
+                {
+                    FrameAgeMs = age; HasFrames = true; uploads++; frameWriteQpc = reader.LastWriteQpc;
+                    UploadMs = UploadMs * 0.9 + (Ar6dofClock.Now() - t0) * 1000.0 * 0.1;   // copie + envoi à la carte graphique (moyenne)
+                }
             }
             fpsTimer += Time.unscaledDeltaTime;
             if (fpsTimer >= 1f) { uploadsPerSec = uploads; uploads = 0; fpsTimer = 0f; }
@@ -289,12 +298,12 @@ namespace AR6DoF
             for (int disp = 0; disp < 2; disp++)
             {
                 int feed = settings.swapEyes ? 1 - disp : disp;     // quelle moitié du flux va sur quel oeil
-                Vector3 axisU = FillEye(disp, feed, EyeSettingsFor(disp), W, H, dR);
+                Quaternion viewRot = FillEye(disp, feed, EyeSettingsFor(disp), W, H, dR);
                 var cam = eyeCams[disp];
                 cam.fieldOfView = sceneFov;   // plus large que l'affichage (marge)
                 float offX = feed == 0 ? 0f : (model != null ? (float)model.right_offset_x_m : 0.063f);
                 cam.transform.localPosition = new Vector3(offX, 0f, 0f);        // la pose du Rig est celle de l'oeil gauche de la caméra
-                cam.transform.localRotation = Quaternion.FromToRotation(Vector3.forward, axisU);
+                cam.transform.localRotation = viewRot;
             }
             mat.SetVectorArray("_U", U);
             mat.SetVector("_TexSize", new Vector4(W, H, 0f, 0f));
@@ -306,8 +315,8 @@ namespace AR6DoF
         }
 
         // Assemble les paramètres d'un oeil pour le shader (même calcul que `assemble` dans tests/passthrough_ref.py).
-        // Retourne l'axe de vue (repère Unity) pour orienter la caméra de scène de la même façon.
-        Vector3 FillEye(int disp, int feed, Ar6dofEyeSettings es, int W, int H, double[] dR)
+        // Retourne l'orientation à donner à la caméra de scène pour qu'elle regarde comme le passthrough.
+        Quaternion FillEye(int disp, int feed, Ar6dofEyeSettings es, int W, int H, double[] dR)
         {
             int Ws, Hs, x0 = 0, y0 = 0;
             if (settings.layout == Ar6dofStereoLayout.SideBySide) { Ws = W / 2; Hs = H; x0 = feed * Ws; }
@@ -343,7 +352,7 @@ namespace AR6DoF
             if (settings.centerOnImage) { tx = ((Wc - 1) / 2.0 - cxP) / fP; ty = ((Hc - 1) / 2.0 - cyP) / fP; }
             double an = Math.Sqrt(tx * tx + ty * ty + 1.0);
             double[] a = { tx / an, ty / an, 1.0 / an };
-            double[] Rv = RotFromTo(new[] { 0.0, 0.0, 1.0 }, a);
+            double[] Rv = RotYawPitch(a);
             // M = R^T * dR * Rv  (rayon de la vue -> repère brut de la caméra, à l'instant de la prise de vue)
             double[] RvT = dR != null ? Ar6dofMath.Mul3(dR, Rv) : Rv;
             double[] M = Ar6dofMath.Mul3(Ar6dofMath.Transpose3(R), RvT);
@@ -361,8 +370,10 @@ namespace AR6DoF
             U[b + 7] = new Vector4((float)M[6], (float)M[7], (float)M[8], 0f);
             U[b + 8] = new Vector4(Wc, Hc, es.mirrorX ? 1f : 0f, es.mirrorY ? 1f : 0f);
             U[b + 9] = new Vector4(quarter, x0, y0, 0f);
-            // axe de vue : repère caméra (x droite, y bas, z avant) -> Unity (x droite, y haut, z avant)
-            return new Vector3((float)a[0], (float)-a[1], (float)a[2]);
+            // orientation de la caméra de scène : mêmes lacet et tangage que la vue du passthrough, SANS roulis
+            // (y de la caméra pointe vers le bas, donc un a.y positif = regarder vers le bas = tangage Unity positif)
+            return Quaternion.Euler((float)(Math.Asin(Math.Max(-1.0, Math.Min(1.0, a[1]))) * 180.0 / Math.PI),
+                                    (float)(Math.Atan2(a[0], a[2]) * 180.0 / Math.PI), 0f);
         }
 
         static double[] Mul3(double[] a, double[] b)
@@ -374,7 +385,18 @@ namespace AR6DoF
             return r;
         }
 
-        // Rotation minimale qui amène le vecteur unitaire a sur le vecteur unitaire b.
+        // Rotation lacet puis tangage (sans roulis) qui amène l'axe z sur le vecteur unitaire a. Repère caméra : x droite, y bas, z avant.
+        static double[] RotYawPitch(double[] a)
+        {
+            double psi = Math.Atan2(a[0], a[2]);
+            double phi = -Math.Asin(Math.Max(-1.0, Math.Min(1.0, a[1])));
+            double cp = Math.Cos(psi), sp = Math.Sin(psi), cf = Math.Cos(phi), sf = Math.Sin(phi);
+            double[] Ry = { cp, 0, sp, 0, 1, 0, -sp, 0, cp };
+            double[] Rx = { 1, 0, 0, 0, cf, -sf, 0, sf, cf };
+            return Ar6dofMath.Mul3(Ry, Rx);
+        }
+
+        // Rotation minimale (ancienne méthode, elle ajoutait du roulis). Conservée pour mémoire.
         static double[] RotFromTo(double[] a, double[] b)
         {
             double vx = a[1] * b[2] - a[2] * b[1], vy = a[2] * b[0] - a[0] * b[2], vz = a[0] * b[1] - a[1] * b[0];
@@ -403,6 +425,20 @@ namespace AR6DoF
             catch (Exception e) { Debug.LogWarning("AR6DoF : sauvegarde impossible : " + e.Message); }
         }
 
+        // FOV (par oeil, carré) au-delà duquel l'image de la caméra ne couvre plus l'écran : des bords noirs apparaissent.
+        // Approximation (sans la distorsion aux coins). Retourne 0 sans calibration.
+        float MaxFovNoBlack()
+        {
+            if (model == null || camTex == null) return 0f;
+            int Wc = settings.layout == Ar6dofStereoLayout.SideBySide ? camTex.width / 2 : camTex.width;
+            int Hc = settings.layout == Ar6dofStereoLayout.SideBySide ? camTex.height : camTex.height / 2;
+            double sx = (double)Wc / model.calib_width, sy = (double)Hc / model.calib_height;
+            double fP = model.rect_f * sx, cxP = (model.rect_cx + 0.5) * sx - 0.5, cyP = (model.rect_cy + 0.5) * sy - 0.5;
+            double m = settings.centerOnImage ? Math.Min(Wc, Hc) * 0.5
+                                              : Math.Min(Math.Min(cxP, Wc - 1 - cxP), Math.Min(cyP, Hc - 1 - cyP));
+            return (float)(2.0 * Math.Atan(m / fP) * 180.0 / Math.PI);
+        }
+
         static float Slider(string label, float v, float min, float max)
         {
             GUILayout.BeginHorizontal();
@@ -415,7 +451,7 @@ namespace AR6DoF
         void OnGUI()
         {
             string info = reader.IsOpen
-                ? "Passthrough : " + reader.Width + "x" + reader.Height + " | " + uploadsPerSec + " img/s | age de l'image " + FrameAgeMs.ToString("0.0") + " ms | reprojection " + ReprojDeg.ToString("0.0") + " deg"
+                ? "Passthrough : " + reader.Width + "x" + reader.Height + " | " + uploadsPerSec + " img/s | age de l'image " + FrameAgeMs.ToString("0.0") + " ms | envoi GPU " + UploadMs.ToString("0.0") + " ms | reprojection " + ReprojDeg.ToString("0.0") + " deg"
                 : "Passthrough : en attente d'ar6dof_probe (partage d'image active ?)";
             info += HasCalibration ? " | calibration OK" : " | SANS calibration";
             GUI.Label(new Rect(10, 30, 1400, 24), info + "   (" + toggleUiKey + " : reglages)");
@@ -425,11 +461,13 @@ namespace AR6DoF
             scroll = GUILayout.BeginScrollView(scroll);
             var s = settings;
             s.displayFovDeg = Slider("FOV affiche (deg)", s.displayFovDeg, 40f, 130f);
+            float maxFov = MaxFovNoBlack();
+            if (maxFov > 0f && GUILayout.Button("FOV max sans bords noirs : " + maxFov.ToString("0") + " deg  (cliquer pour appliquer)")) s.displayFovDeg = maxFov;
             s.ipdShift = Slider("IPD logiciel (ecarte +)", s.ipdShift, -0.4f, 0.4f);
             s.swapEyes = GUILayout.Toggle(s.swapEyes, "Echanger gauche / droite");
             s.linkEyes = GUILayout.Toggle(s.linkEyes, "Yeux lies (droit = miroir du gauche)");
             s.useCalibration = GUILayout.Toggle(s.useCalibration, "Corriger la distorsion de la camera (calibration)");
-            s.centerOnImage = GUILayout.Toggle(s.centerOnImage, "Centrer sur l'image (pas sur l'axe optique)");
+            s.centerOnImage = GUILayout.Toggle(s.centerOnImage, "Recentrer sur le milieu de l'image (DECALE tout le monde : deconseille)");
             s.flipComposite = GUILayout.Toggle(s.flipComposite, "Inverser verticalement le rendu (si a l'envers)");
             s.reproject = GUILayout.Toggle(s.reproject, "Reprojection de rotation (l'image suit la tete a la cadence d'Unity)");
             s.captureDelayMs = Slider("delai capture->ecriture (ms)", s.captureDelayMs, 0f, 120f);
@@ -441,6 +479,16 @@ namespace AR6DoF
             EyeUi("Oeil gauche" + (s.linkEyes ? " (regle aussi le droit)" : ""), s.left);
             if (!s.linkEyes) EyeUi("Oeil droit", s.right);
 
+            if (launcher != null)
+            {
+                GUILayout.Space(6);
+                GUILayout.Label("-- Tracking (ar6dof_probe)");
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Recentrer le tracking")) launcher.Send('T');
+                if (GUILayout.Button("Verrouiller le sol")) launcher.Send('V');
+                if (GUILayout.Button("Yaw a zero")) launcher.Send('Z');
+                GUILayout.EndHorizontal();
+            }
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Sauver")) SaveSettings();
             if (GUILayout.Button("Recharger")) LoadSettings();

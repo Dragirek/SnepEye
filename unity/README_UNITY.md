@@ -23,7 +23,14 @@ Copie `camera_model.json` (écrit par ar6dof_probe à côté de son exe) dans to
 5. Un sol visible à y = 0 pour vérifier l'ancrage.
 6. Fenêtre Game de l'éditeur : résolution fixe **2880 x 1440**.
 
-## 3. Lancer
+## 3. Lancer (une seule fois à la main, puis tout est automatique)
+**Première fois** : lance `ar6dof_probe.exe` normalement, réponds aux questions, fais `g` puis `f` (montage de l'IMU) puis `t`, et quitte avec `q`.
+Tes réponses sont sauvegardées dans `ar6dof_config.txt`.
+
+**Ensuite** : ajoute `Ar6dofLauncher` sur un objet de la scène (champ *Exe Path* = chemin d'`ar6dof_probe.exe`, ou place le dossier `ar6dof_probe-win64` à côté de `Assets`).
+Au Play, Unity lance ar6dof_probe tout seul (sans fenêtre, tracking démarré si tu l'avais choisi) et l'arrête à la fermeture.
+
+(Procédure manuelle d'origine :)
 1. `ar6dof_probe.exe` : port UDP 9876, **partage d'image = 1**, puis `g`, `f`, et `t`.
 2. Play dans Unity. **F1** ouvre les réglages. Le haut de l'écran affiche le débit d'images et l'âge de l'image.
 3. Pour le casque (build) : lance l'exe Unity avec  
