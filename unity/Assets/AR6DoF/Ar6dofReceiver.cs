@@ -20,6 +20,7 @@ namespace AR6DoF
         public float floorZ;
         public double recvTime;      // secondes (QueryPerformanceCounter) à la réception
         public double tPose;         // instant auquel la pose est valable (QueryPerformanceCounter, envoyé par le tracker)
+        public float camDelay;       // délai (s) entre l'arrivée d'une image et sa prise de vue, mesuré par comparaison caméra/gyro
 
         public bool Tracking => (flags & 1) != 0;
         public bool FloorValid => (flags & 2) != 0;
@@ -109,8 +110,8 @@ namespace AR6DoF
                 try { d = client.Receive(ref any); }
                 catch (SocketException) { if (!running) break; continue; }
                 catch (ObjectDisposedException) { break; }
-                if (d.Length != 76) continue;
-                if (BitConverter.ToUInt32(d, 0) != 0x44365241u || BitConverter.ToUInt16(d, 4) != 2) continue;
+                if (d.Length != 80) continue;
+                if (BitConverter.ToUInt32(d, 0) != 0x44365241u || BitConverter.ToUInt16(d, 4) != 3) continue;
 
                 var p = new Ar6dofPoseData();
                 p.valid = true;
@@ -125,6 +126,7 @@ namespace AR6DoF
                 p.angG = new Vector3(BitConverter.ToSingle(d, 52), BitConverter.ToSingle(d, 56), BitConverter.ToSingle(d, 60));
                 p.floorZ = BitConverter.ToSingle(d, 64);
                 p.tPose = BitConverter.ToDouble(d, 68);
+                p.camDelay = BitConverter.ToSingle(d, 76);
                 p.recvTime = Now;
                 lock (lockObj)
                 {

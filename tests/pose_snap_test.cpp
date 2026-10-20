@@ -31,7 +31,7 @@ int main() {
       Mat3 Rvc = Rwb * Rcb.T();
       Vec3 p = {vx * tc + Rnd() * 0.004, Rnd() * 0.004, Rnd() * 0.004};
       Vec3 v = {vx + Rnd() * 0.1, Rnd() * 0.05, 0};
-      UpdateSnap(withCorr, Rvc, p, v, tc, t, R_GV, 1, false, 0, 0.015);
+      UpdateSnap(withCorr, Rvc, p, v, tc, t, R_GV, 1, false, 0, 0.015, 0.03);
       {  // ancien comportement : on remplace sans correction
         std::lock_guard<std::mutex> l(noCorr.m);
         noCorr.d.Rvc = Rvc; noCorr.d.R_GV = R_GV; noCorr.d.t = p; noCorr.d.v = v; noCorr.d.corr = Vec3();
@@ -69,8 +69,8 @@ int main() {
 
   // une image sans nouveauté ne doit pas effacer la correction (même instant) ; Invalidate coupe la publication
   SnapData before = withCorr.d;
-  UpdateSnap(withCorr, before.Rvc, before.t, before.v, before.tcap, before.tUpdate + 0.001, R_GV, 5, true, -1.6, 0.02);
-  assert(withCorr.d.corr.x == before.corr.x && withCorr.d.flags == 5 && withCorr.d.floorZ == -1.6);
+  UpdateSnap(withCorr, before.Rvc, before.t, before.v, before.tcap, before.tUpdate + 0.001, R_GV, 5, true, -1.6, 0.02, 0.041);
+  assert(withCorr.d.corr.x == before.corr.x && withCorr.d.flags == 5 && withCorr.d.floorZ == -1.6 && withCorr.d.camDelay == 0.041);
   InvalidateSnap(withCorr);
   assert(!withCorr.d.valid);
   std::puts("TEST POSE PUBLIEE OK");

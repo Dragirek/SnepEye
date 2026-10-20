@@ -30,14 +30,15 @@ class FrameShare {
   bool Matches(const cv::Mat& f) const { return f.type() == CV_8UC3 && f.cols == w_ && f.rows == h_; }
 
   // La conversion BGR -> BGRA écrit directement dans la mémoire partagée (une seule passe sur les pixels).
-  void Write(const cv::Mat& bgr) {
+  // tCaptureQpc : instant d'arrivée lissé de cette image (secondes, horloge QueryPerformanceCounter).
+  void Write(const cv::Mat& bgr, double tCaptureQpc) {
     uint64_t id = ++id_;
     uint8_t* dst = fshare::BeginWrite(base_, id);
     cv::Mat out(h_, w_, CV_8UC4, dst);
     cv::cvtColor(bgr, out, cv::COLOR_BGR2BGRA);
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);  // horloge système commune aux deux programmes
-    fshare::EndWrite(base_, id, (double)t.QuadPart / (double)freq_.QuadPart);
+    fshare::EndWrite(base_, id, (double)t.QuadPart / (double)freq_.QuadPart, tCaptureQpc);
   }
 
   void Close() {

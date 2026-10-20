@@ -1,11 +1,11 @@
 #pragma once
-// Paquet de pose envoyé en UDP à Unity (76 octets, little-endian, version 2). Repère G :
+// Paquet de pose envoyé en UDP à Unity (80 octets, little-endian, version 3). Repère G :
 // X avant, Y gauche, Z haut (main droite), mètres et radians. Unity convertit
 // (voir unity/Assets/AR6DoF/Ar6dofPose.cs).
 //
 //   offset  type      contenu
 //        0  uint32    magic 0x44365241  (octets 'A','R','6','D')
-//        4  uint16    version = 2
+//        4  uint16    version = 3
 //        6  uint16    flags : bit0 tracking OK | bit1 sol valide | bit2 tracking perdu | bit3 sol verrouillé
 //        8  uint32    numéro de séquence
 //       12  float32x3 position tête (x, y, z)
@@ -15,6 +15,7 @@
 //       64  float32   hauteur du sol Z (repère G), valide si bit1
 //       68  float64   instant auquel cette pose est valable (QueryPerformanceCounter, secondes) : sert à Unity pour
 //                     prédire jusqu'au rendu et à retrouver l'orientation au moment d'une image de la caméra
+//       76  float32   délai (s) entre l'arrivée d'une image et sa prise de vue, estimé par comparaison caméra/gyro
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -23,7 +24,7 @@
 #include "orientation.h"
 
 constexpr uint32_t kPoseMagic = 0x44365241u;
-constexpr size_t kPoseSize = 76;
+constexpr size_t kPoseSize = 80;
 enum PoseFlags : uint16_t { kFlagTracking = 1, kFlagFloor = 2, kFlagLost = 4, kFlagFloorLocked = 8 };
 
 // Matrice de rotation -> quaternion (w, x, y, z).
@@ -59,10 +60,10 @@ inline Quat QuatFromMat3(const Mat3& R) {
 }
 
 inline std::array<uint8_t, kPoseSize> PackPose(uint16_t flags, uint32_t seq, const Vec3& p, const Quat& q,
-                                               const Vec3& v, const Vec3& w, double floorZ, double tPose) {
+                                               const Vec3& v, const Vec3& w, double floorZ, double tPose, float camDelay) {
   std::array<uint8_t, kPoseSize> b{};
   uint8_t* d = b.data();
-  uint16_t ver = 2;
+  uint16_t ver = 3;
   std::memcpy(d + 0, &kPoseMagic, 4);
   std::memcpy(d + 4, &ver, 2);
   std::memcpy(d + 6, &flags, 2);
@@ -71,5 +72,6 @@ inline std::array<uint8_t, kPoseSize> PackPose(uint16_t flags, uint32_t seq, con
                  (float)v.x, (float)v.y, (float)v.z, (float)w.x, (float)w.y, (float)w.z, (float)floorZ};
   std::memcpy(d + 12, f, sizeof(f));
   std::memcpy(d + 68, &tPose, 8);
+  std::memcpy(d + 76, &camDelay, 4);
   return b;
 }

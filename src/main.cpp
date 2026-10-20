@@ -33,8 +33,10 @@
 
 #include "calib.h"
 #include "camera_model_json.h"
+#include "delay_estimator.h"
 #include "devices.h"
 #include "floor.h"
+#include "frame_clock.h"
 #include "frame_share_win.h"
 #include "fusion.h"
 #include "imu_parser.h"
@@ -107,7 +109,7 @@ static void PublishPose(ImuState* st, VisionSnap* vs, UdpSender* udp, uint32_t* 
   { std::lock_guard<std::mutex> l(vs->m); sd = vs->d; }
   if (!sd.valid) return;
   PoseOut po = ComputePose(sd, st->gyroBuf, NowS() + sd.predS, Rcb);
-  auto pkt = PackPose(sd.flags, (*seq)++, po.p, QuatFromMat3(po.R), po.vG, po.wG, sd.floorZ, QpcSeconds() + sd.predS);
+  auto pkt = PackPose(sd.flags, (*seq)++, po.p, QuatFromMat3(po.R), po.vG, po.wG, sd.floorZ, QpcSeconds() + sd.predS, (float)sd.camDelay);
   udp->Send(pkt.data(), (int)pkt.size());
 }
 
@@ -207,20 +209,26 @@ static void SaveConfig() {
   for (const auto& kv : g_cfg) f << kv.first << "=" << kv.second << "\n";
 }
 
+static int SavedInt(const char* key, int def, int lo, int hi) {
+  auto it = g_cfg.find(key);
+  if (it != g_cfg.end()) {
+    try { int v = std::stoi(it->second); if (v >= lo && v <= hi) return v; } catch (...) {}
+  }
+  return def;
+}
+
+// La dernière réponse devient la valeur proposée par défaut (touche Entrée) ; avec --auto elle est utilisée sans question.
 static int AskInt(const char* key, const std::string& q, int def, int lo, int hi) {
+  const int shown = SavedInt(key, def, lo, hi);
   if (g_auto) {
-    int v = def;
-    auto it = g_cfg.find(key);
-    if (it != g_cfg.end()) { try { v = std::stoi(it->second); } catch (...) {} }
-    if (v < lo || v > hi) v = def;
-    std::cout << "[auto] " << key << " = " << v << "\n";
-    return v;
+    std::cout << "[auto] " << key << " = " << shown << "\n";
+    return shown;
   }
   while (true) {
-    std::cout << q << " [" << def << "] : ";
+    std::cout << q << " [" << shown << "] : ";
     std::string line;
     std::getline(std::cin, line);
-    int v = def;
+    int v = shown;
     bool ok = true;
     if (!line.empty()) {
       try { v = std::stoi(line); } catch (...) { ok = false; }
@@ -232,19 +240,39 @@ static int AskInt(const char* key, const std::string& q, int def, int lo, int hi
 }
 
 static std::string AskStr(const char* key, const std::string& q, const std::string& def) {
+  auto it = g_cfg.find(key);
+  const std::string shown = it != g_cfg.end() ? it->second : def;
   if (g_auto) {
-    auto it = g_cfg.find(key);
-    std::string v = it != g_cfg.end() ? it->second : def;
-    std::cout << "[auto] " << key << " = " << v << "\n";
-    return v;
+    std::cout << "[auto] " << key << " = " << shown << "\n";
+    return shown;
   }
-  std::cout << q << " [" << def << "] : ";
+  std::cout << q << " [" << shown << "] : ";
   std::string line;
   std::getline(std::cin, line);
-  std::string v = line.empty() ? def : line;
+  std::string v = line.empty() ? shown : line;
   g_cfg[key] = v;
   return v;
 }
+
+// Tout ce qui s'affiche dans la console est aussi écrit dans ar6dof_probe.log (utile quand Unity lance le programme sans fenêtre).
+class TeeBuf : public std::streambuf {
+ public:
+  TeeBuf(std::streambuf* a, std::streambuf* b) : a_(a), b_(b) {}
+ protected:
+  int overflow(int c) override {
+    if (c == EOF) return !EOF;
+    int r1 = a_->sputc((char)c), r2 = b_->sputc((char)c);
+    return (r1 == EOF || r2 == EOF) ? EOF : c;
+  }
+  int sync() override {
+    int r1 = a_->pubsync(), r2 = b_->pubsync();
+    return (r1 == 0 && r2 == 0) ? 0 : -1;
+  }
+ private:
+  std::streambuf *a_, *b_;
+};
+
+static double g_qpcOffset = 0;  // QueryPerformanceCounter - NowS : permet de donner des instants "système" à Unity
 
 // ---- Capture de la caméra dans son propre thread : le décodage et le partage vers Unity ne dépendent plus du suivi ----
 struct Mailbox {
@@ -252,7 +280,8 @@ struct Mailbox {
   std::condition_variable cond;
   cv::Mat frame;   // dernière image décodée (BGR)
   uint64_t id = 0;
-  double tRead = 0;
+  double tRead = 0;     // instant d'arrivée brut
+  double tSmooth = 0;   // instant d'arrivée lissé (sans gigue de décodage)
   bool failed = false;
 };
 static std::atomic<double> g_camFps{0.0}, g_shareMs{0.0};
@@ -260,7 +289,8 @@ static std::atomic<double> g_camFps{0.0}, g_shareMs{0.0};
 static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share, bool shareOn) {
   bool shareFailed = false;
   int fails = 0;
-  uint64_t n = 0;
+  uint64_t n = 0, frameNo = 0;
+  FrameClock clk;
   auto t0 = std::chrono::steady_clock::now();
   while (g_run) {
     cv::Mat f;
@@ -275,6 +305,7 @@ static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share,
     }
     fails = 0;
     const double tRead = NowS();  // instant de réception ; l'image a été prise un peu avant (voir camDelay)
+    const double tSm = clk.Update(frameNo++, tRead);
     if (shareOn && !shareFailed) {
       if (!share->IsOpen()) {
         if (share->Open("Local\\ar6dof_frame", f))
@@ -286,7 +317,7 @@ static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share,
       }
       if (share->IsOpen() && share->Matches(f)) {
         auto s0 = std::chrono::steady_clock::now();
-        share->Write(f);
+        share->Write(f, tSm + g_qpcOffset);
         double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s0).count();
         g_shareMs = 0.9 * g_shareMs.load() + 0.1 * ms;
       }
@@ -296,6 +327,7 @@ static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share,
       mb->frame = f;  // le tampon est partagé, pas copié
       mb->id++;
       mb->tRead = tRead;
+      mb->tSmooth = tSm;
     }
     mb->cond.notify_one();
     ++n;
@@ -507,15 +539,20 @@ static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const V
 
 int main(int argc, char** argv) {
   bool noWindowsFlag = false;
+  std::ofstream logFile(ExeDir() + "\\ar6dof_probe.log", std::ios::trunc);
+  TeeBuf tee(std::cout.rdbuf(), logFile.rdbuf());
+  std::streambuf* origCout = std::cout.rdbuf(&tee);
+  std::cout << std::unitbuf;   // chaque ligne est écrite tout de suite (console ET fichier)
+  struct CoutRestore { std::streambuf* o; ~CoutRestore() { std::cout.rdbuf(o); } } coutRestore{origCout};
+  g_qpcOffset = QpcSeconds() - NowS();
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--auto") g_auto = true;                 // rejoue les réponses de la dernière fois, sans question
     else if (a == "--no-windows") noWindowsFlag = true;  // aucune fenêtre OpenCV : bien moins de CPU
   }
-  if (g_auto) {
-    LoadConfig();
-    if (g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
-  }
+  LoadConfig();   // les réponses précédentes servent de valeurs par défaut, même sans --auto
+  if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
+  std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -537,7 +574,12 @@ int main(int argc, char** argv) {
       for (size_t i = 0; i < ports.size(); i++) if (ports[i] == it->second) pi = (int)i;
     std::cout << "[auto] IMU = " << (pi >= 0 ? ports[pi] : std::string("aucune")) << "\n";
   } else {
-    pi = AskInt("portidx", "Port IMU", ports.empty() ? -1 : 0, -1, (int)ports.size() - 1);
+    int defPort = ports.empty() ? -1 : 0;   // le port est retrouvé par son NOM (les numéros COM peuvent changer)
+    auto sp = g_cfg.find("portname");
+    if (sp != g_cfg.end())
+      for (size_t i = 0; i < ports.size(); i++) if (ports[i] == sp->second) defPort = (int)i;
+    g_cfg.erase("portidx");
+    pi = AskInt("portidx", "Port IMU", defPort, -1, (int)ports.size() - 1);
     g_cfg["portname"] = pi >= 0 ? ports[pi] : "";
   }
 
@@ -641,6 +683,10 @@ int main(int argc, char** argv) {
   // ---- Tracking 6DoF ----
   bool tracking = false, usePrior = true, trackReady = false, haveLast = false;
   double camDelay = 0.030, predS = 0.015, voMs = 0, lastFrameT = 0, snapT_s = 0;
+  DelayEstimator delayEst;   // délai caméra mesuré en comparant la rotation vue par la caméra à celle du gyro
+  bool autoDelay = true, havePrevOk = false;
+  double prevArr = 0, lastDelayEst = 0, delayQuality = 0;
+  Mat3 prevRvc;
   cv::Size wk;
   cv::Matx33d Kt;
   double Bt = 0;
@@ -684,7 +730,7 @@ int main(int argc, char** argv) {
                           : "\nMode sans fenetres : commandes par UDP 9877 (T recentrer, V sol, Z yaw, Q quitter).\n");
 
   while (true) {
-    double tRead = 0;
+    double tRead = 0, tSm = 0;
     {
       std::unique_lock<std::mutex> l(mb.m);
       mb.cond.wait_for(l, std::chrono::milliseconds(30), [&] { return mb.id != lastId || mb.failed; });
@@ -698,6 +744,7 @@ int main(int argc, char** argv) {
       }
       frame = mb.frame;   // partage du tampon, aucune copie de pixels
       tRead = mb.tRead;
+      tSm = mb.tSmooth;
       lastId = mb.id;
     }
     ++frames;
@@ -706,9 +753,14 @@ int main(int argc, char** argv) {
     double dt = std::chrono::duration<double>(now - tf).count();
     if (dt >= 1.0) {
       fps = frames / dt; frames = 0; tf = now;
-      if (!windowsOn)  // sans fenêtre : un résumé par seconde dans la console
-        std::printf("camera %.1f fps | suivi %.1f fps | partage %.1f ms | tracking %s | %d points\n", g_camFps.load(), fps, g_shareMs.load(),
-                    tracking ? (vo && vo->state == StereoVO::kOk ? "OK" : "perdu/init") : "arrete", vo ? vo->nPoints() : 0);
+      if (!windowsOn) {  // sans fenêtre : un résumé par seconde dans la console et le journal
+        char sb[256];
+        std::snprintf(sb, sizeof(sb), "camera %.1f fps | suivi %.1f fps | partage %.1f ms | tracking %s | %d points | delai camera %.1f ms (%s)\n",
+                      g_camFps.load(), fps, g_shareMs.load(),
+                      tracking ? (vo && vo->state == StereoVO::kOk ? "OK" : "perdu/init") : "arrete", vo ? vo->nPoints() : 0,
+                      camDelay * 1000.0, autoDelay ? "auto" : "manuel");
+        std::cout << sb;
+      }
     }
 
     int w = frame.cols / 2;
@@ -779,7 +831,7 @@ int main(int argc, char** argv) {
     // ---- Tracking 6DoF ----
     if (tracking && haveCalib) {
       if (trackReady && vo && !tl.empty()) {
-        const double tcap = tRead - camDelay;
+        const double tcap = tSm - camDelay;   // instant de prise de vue = arrivée lissée - délai
         if (!haveLast) {
           // Première image : le monde est aligné sur la gravité (haut = Z) grace a l'IMU
           Vec3 upc = {0, -1, 0};
@@ -809,6 +861,22 @@ int main(int argc, char** argv) {
           lastFrameT = tcap;
         }
         snapRvc = FromCv(vo->R);
+        // Mesure du délai : rotation vue par la caméra entre deux images, comparée à l'intégrale du gyro
+        if (vo->state == StereoVO::kOk) {
+          if (havePrevOk && tSm - prevArr < 0.1) delayEst.AddStep(prevArr, tSm, prevRvc.T() * snapRvc);
+          prevArr = tSm;
+          prevRvc = snapRvc;
+          havePrevOk = true;
+        } else {
+          havePrevOk = false;
+        }
+        if (autoDelay && pi >= 0 && tRead - lastDelayEst > 0.5) {
+          lastDelayEst = tRead;
+          std::deque<GyroSample> gcopy;
+          { std::lock_guard<std::mutex> l(imu.m); gcopy = imu.gyroBuf; }   // copie rapide, le calcul se fait hors verrou
+          double dEst = 0, qEst = 0;
+          if (delayEst.Estimate(gcopy, Rcb, dEst, qEst)) { camDelay = 0.8 * camDelay + 0.2 * dEst; delayQuality = qEst; }
+        }
         snapT = Vec3{vo->t[0], vo->t[1], vo->t[2]};
         snapV = Vec3{vo->v[0], vo->v[1], vo->v[2]};
         snapT_s = tcap;
@@ -824,7 +892,7 @@ int main(int argc, char** argv) {
       }
       if (floorValid) fl |= kFlagFloor;
       if (floorLocked) fl |= kFlagFloorLocked;
-      UpdateSnap(vsnap, snapRvc, snapT, snapV, snapT_s, NowS(), R_GV, fl, floorValid, floorZ, predS);
+      UpdateSnap(vsnap, snapRvc, snapT, snapV, snapT_s, NowS(), R_GV, fl, floorValid, floorZ, predS, camDelay);
       PoseOut po;
       {
         SnapData sd;
@@ -852,7 +920,7 @@ int main(int argc, char** argv) {
       }
       // Sans IMU il n'y a pas de thread de publication : on envoie à la cadence de la caméra
       if (pi < 0 && udp.IsOpen() && tracking && vo) {
-        auto pkt = PackPose(fl, udpSeq++, po.p, QuatFromMat3(po.R), po.vG, po.wG, floorZ, QpcSeconds() + predS);
+        auto pkt = PackPose(fl, udpSeq++, po.p, QuatFromMat3(po.R), po.vG, po.wG, floorZ, QpcSeconds() + predS, (float)camDelay);
         udp.Send(pkt.data(), (int)pkt.size());
       }
     }
@@ -974,7 +1042,7 @@ int main(int argc, char** argv) {
       std::snprintf(tl, sizeof(tl), ", . zoom (%.0f px/m)%s | m/n repere | v verrouiller le sol | t demarrer/recentrer | u prior IMU",
                     pxPerM, zoomList[zoomIdx] <= 0 ? " auto" : "");
       cv::putText(traj, tl, cv::Point(10, traj.rows - 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
-      std::snprintf(tl, sizeof(tl), "[ ] delai camera %.0f ms | - = prediction %.0f ms", camDelay * 1000, predS * 1000);
+      std::snprintf(tl, sizeof(tl), "[ ] delai camera %.0f ms (%s, a = auto) | - = prediction %.0f ms", camDelay * 1000, autoDelay ? "auto" : "manuel", predS * 1000);
       cv::putText(traj, tl, cv::Point(10, traj.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
     }
     cv::imshow("trajectoire", traj);
@@ -1061,6 +1129,8 @@ int main(int argc, char** argv) {
           poseValid = false;
           trail.clear();
           InvalidateSnap(vsnap);
+          delayEst.Reset();
+          havePrevOk = false;
           if (vo) vo->Reset();
           trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
           floorF.Reset();
@@ -1077,8 +1147,9 @@ int main(int argc, char** argv) {
     }
     if (k == 'u') usePrior = !usePrior;
     if (k == 'v' && floorValid) floorLocked = !floorLocked;
-    if (k == '[') camDelay = std::max(0.0, camDelay - 0.005);
-    if (k == ']') camDelay = std::min(0.2, camDelay + 0.005);
+    if (k == '[') { camDelay = std::max(0.0, camDelay - 0.005); autoDelay = false; }   // réglage manuel : coupe l'automatique
+    if (k == ']') { camDelay = std::min(0.2, camDelay + 0.005); autoDelay = false; }
+    if (k == 'a') autoDelay = !autoDelay;
     if (k == '-') predS = std::max(0.0, predS - 0.005);
     if (k == '=') predS = std::min(0.1, predS + 0.005);
   }

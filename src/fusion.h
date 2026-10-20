@@ -44,10 +44,16 @@ struct GyroSample { double t; Vec3 w; };  // t en secondes (horloge PC), w en ra
 inline Mat3 IntegrateGyro(const std::deque<GyroSample>& s, double t0, double t1) {
   Mat3 R;
   if (s.empty() || t1 <= t0) return R;
+  // premier échantillon strictement après t0 (le tampon est trié par le temps)
+  size_t lo = 0, hi = s.size();
+  while (lo < hi) {
+    size_t mid = (lo + hi) / 2;
+    if (s[mid].t <= t0) lo = mid + 1; else hi = mid;
+  }
   double prev = t0;
-  Vec3 w_prev = s.front().w;
-  for (const auto& g : s) {
-    if (g.t <= t0) { w_prev = g.w; continue; }
+  Vec3 w_prev = lo > 0 ? s[lo - 1].w : s.front().w;
+  for (size_t i = lo; i < s.size(); i++) {
+    const auto& g = s[i];
     double te = std::min(g.t, t1);
     if (te > prev) { R = R * ExpMap(w_prev * (te - prev)); prev = te; }
     w_prev = g.w;

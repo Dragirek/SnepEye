@@ -71,3 +71,35 @@ R recentrer · M rappeler le menu · F suivi automatique du menu · F1 réglages
 - Zoom : un FOV affiché plus petit que celui de la caméra laisse de la marge à la reprojection.
 - Flux unique côte à côte (ou haut-bas) uniquement. Deux caméras séparées : il faut d'abord les assembler en un seul flux.
 - Pas de réglage automatique des lentilles : k1/k2/k3 et le FOV se règlent à l'oeil.
+
+
+---
+
+# Nouveautés : fenêtres Windows, clavier, télécommande, écran, délai automatique
+
+## Écran du casque
+Ajoute `Ar6dofDisplayStarter` sur un objet de la scène. Dans un build, il place la fenêtre du jeu, sans bordure, sur l'écran de
+2880x1440 (le casque), même si Windows l'avait ouverte minimisée ou sur l'écran principal. Réglages conseillés
+(Project Settings > Player) : *Fullscreen Mode = Windowed*, *Run In Background* coché.
+
+## Délai de la caméra (reprojection)
+Le délai entre l'arrivée d'une image et sa prise de vue est **mesuré automatiquement** par ar6dof_probe en comparant la rotation
+vue par la caméra à celle du gyro. Il faut tourner la tête quelques secondes au démarrage. Le panneau F1 affiche « delai X ms ».
+Les touches `[` et `]` de ar6dof_probe (ou le curseur manuel de F1) le règlent à la main ; `a` dans ar6dof_probe revient à l'automatique.
+
+## Télécommande gyroscopique sans fil
+1. Flashe `firmware/ar6dof_remote/ar6dof_remote.ino` (ESP32-C3 + BNO085 + 2 boutons) après avoir mis ton SSID et ton mot de passe WiFi (2,4 GHz).
+2. Dans Unity : un objet avec `Ar6dofRemote` (port 9878) et `Ar6dofPointer` (liste *Canvases* = tes menus en World Space).
+3. Panneau F1 > Télécommande : *Calibration 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
+4. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
+
+## Fenêtre Windows cliquable
+1. Un Quad avec le composant `UwcWindowTexture` (uWindowCapture) pour afficher la fenêtre, plus `Ar6dofWindowPanel` sur le même objet
+   (*Window Title Contains* = une partie du titre).
+2. Si les clics tombent à l'opposé : cocher *Mirror Horizontal* / *Flip Vertical*.
+3. La fenêtre doit rester visible sur un écran (pas minimisée, pas recouverte). Mets-la sur l'écran principal.
+
+## Clavier virtuel
+Un objet vide avec `Ar6dofKeyboard`. **K** : afficher/cacher, **B** : replacer sous ta vue. Maj, Ctrl et Alt restent actives pour la
+touche suivante (Ctrl puis C = copier). Les lettres sont envoyées en Unicode : AZERTY ou QWERTY sans dépendre du clavier de Windows.
+Les touches de direction et PgPr/PgSv permettent de faire défiler.

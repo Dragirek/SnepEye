@@ -19,7 +19,7 @@ struct SnapData {
   Mat3 Rvc, R_GV;
   Vec3 t, v, corr;            // position et vitesse (repère V), correction de continuité qui s'efface
   uint16_t flags = 0;
-  double floorZ = 0, predS = 0.015;
+  double floorZ = 0, predS = 0.015, camDelay = 0.03;
 };
 struct VisionSnap { std::mutex m; SnapData d; };
 struct PoseOut { Vec3 p, vG, wG; Mat3 R; };
@@ -42,12 +42,13 @@ static PoseOut ComputePose(const SnapData& s, const std::deque<GyroSample>& gyro
 // Nouvelle pose de la vision, arrivée à l'instant tNow. La correction de continuité évite un saut de position
 // à chaque image : à cet instant, la pose publiée reste ce qu'elle était, puis rejoint la nouvelle mesure en ~80 ms.
 static void UpdateSnap(VisionSnap& s, const Mat3& Rvc, const Vec3& t, const Vec3& v, double tcap, double tNow,
-                       const Mat3& R_GV, uint16_t flags, bool floorValid, double floorZ, double predS) {
+                       const Mat3& R_GV, uint16_t flags, bool floorValid, double floorZ, double predS, double camDelay) {
   std::lock_guard<std::mutex> l(s.m);
   SnapData& d = s.d;
   d.flags = flags;
   d.floorZ = floorValid ? floorZ : 0.0;
   d.predS = predS;
+  d.camDelay = camDelay;
   if (d.valid && tcap == d.tcap) return;  // pas de nouvelle image : seuls les indicateurs changent
   Vec3 corr;
   if (d.valid && tNow - d.tUpdate < 0.3) {

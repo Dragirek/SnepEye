@@ -6,8 +6,8 @@
 //   0  uint32 magic 0x46365241 ('AR6F')       +0   uint64 seq   (impair = en cours d'écriture)
 //   4  uint32 version = 1                      +8   uint64 frameId
 //   8  uint32 largeur                          +16  double tWrite (secondes, horloge QueryPerformanceCounter)
-//  12  uint32 hauteur                          +64  pixels BGRA 8 bits, ligne par ligne, du HAUT vers le bas
-//  16  uint32 canaux (4 : BGRA)
+//  12  uint32 hauteur                          +24  double tCapture (idem : instant d'arrivée lissé, sans gigue de décodage)
+//  16  uint32 canaux (4 : BGRA)                +64  pixels BGRA 8 bits, ligne par ligne, du HAUT vers le bas
 //  20  uint32 stride (octets par ligne)
 //  24  uint32 slotBytes (= 64 + stride*hauteur)
 //  28  uint32 slotCount = 2
@@ -54,7 +54,7 @@ inline uint8_t* BeginWrite(uint8_t* base, uint64_t frameId) {
   return s + kSlotHeaderBytes;
 }
 
-inline void EndWrite(uint8_t* base, uint64_t frameId, double tWrite) {
+inline void EndWrite(uint8_t* base, uint64_t frameId, double tWrite, double tCapture) {
   uint32_t slot = (uint32_t)(frameId % kSlots);
   uint32_t w, h, ch;
   std::memcpy(&w, base + 8, 4);
@@ -63,6 +63,7 @@ inline void EndWrite(uint8_t* base, uint64_t frameId, double tWrite) {
   uint8_t* s = base + kHeaderBytes + slot * SlotBytes(w, h, ch);
   std::memcpy(s + 8, &frameId, 8);
   std::memcpy(s + 16, &tWrite, 8);
+  std::memcpy(s + 24, &tCapture, 8);
   std::atomic_thread_fence(std::memory_order_seq_cst);
   uint64_t seq = A64(s)->load(std::memory_order_relaxed);
   A64(s)->store(seq + 1, std::memory_order_release);  // pair : emplacement cohérent
@@ -70,18 +71,18 @@ inline void EndWrite(uint8_t* base, uint64_t frameId, double tWrite) {
   std::memcpy(base + 40, &slot, 4);
 }
 
-inline void Write(uint8_t* base, const uint8_t* pixels, uint64_t frameId, double tWrite) {
+inline void Write(uint8_t* base, const uint8_t* pixels, uint64_t frameId, double tWrite, double tCapture) {
   uint32_t w, h, ch;
   std::memcpy(&w, base + 8, 4);
   std::memcpy(&h, base + 12, 4);
   std::memcpy(&ch, base + 16, 4);
   std::memcpy(BeginWrite(base, frameId), pixels, (size_t)w * ch * h);
-  EndWrite(base, frameId, tWrite);
+  EndWrite(base, frameId, tWrite, tCapture);
 }
 
 // Lecture de la dernière image (même protocole que le C#). Retourne vrai si une NOUVELLE image
 // cohérente a été copiée dans out (taille >= w*h*ch).
-inline bool Read(const uint8_t* base, uint8_t* out, size_t outBytes, uint64_t& lastId, uint64_t& frameId, double& tWrite) {
+inline bool Read(const uint8_t* base, uint8_t* out, size_t outBytes, uint64_t& lastId, uint64_t& frameId, double& tWrite, double& tCapture) {
   uint32_t magic, w, h, ch;
   std::memcpy(&magic, base, 4);
   if (magic != kMagic) return false;
@@ -103,6 +104,7 @@ inline bool Read(const uint8_t* base, uint8_t* out, size_t outBytes, uint64_t& l
   if (s1 != s2) return false;  // l'écrivain a repris cet emplacement pendant la copie : on jette
   std::memcpy(&frameId, s + 8, 8);
   std::memcpy(&tWrite, s + 16, 8);
+  std::memcpy(&tCapture, s + 24, 8);
   lastId = frameId;
   return true;
 }

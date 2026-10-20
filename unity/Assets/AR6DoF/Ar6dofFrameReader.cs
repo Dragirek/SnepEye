@@ -32,6 +32,8 @@ namespace AR6DoF
         public bool IsOpen => basePtr != IntPtr.Zero;
         /// <summary>Instant (QueryPerformanceCounter, secondes) où ar6dof_probe a écrit la dernière image copiée.</summary>
         public double LastWriteQpc { get; private set; }
+        /// <summary>Instant d'arrivée LISSÉ (sans gigue de décodage) de la dernière image copiée (QueryPerformanceCounter, secondes).</summary>
+        public double LastCaptureQpc { get; private set; }
 
         /// <summary>Ouvre la mémoire créée par ar6dof_probe (nom : "Local\\ar6dof_frame").</summary>
         public bool Open(string name)
@@ -73,6 +75,7 @@ namespace AR6DoF
             double tWrite = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(s, 16));
             QueryPerformanceCounter(out long now);
             LastWriteQpc = tWrite;
+            LastCaptureQpc = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(s, 24));
             ageMs = ((double)now / freq - tWrite) * 1000.0;
             return true;
         }

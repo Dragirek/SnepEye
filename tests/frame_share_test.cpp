@@ -22,20 +22,20 @@ int main() {
       std::fill(px.begin(), px.end(), (uint8_t)(id & 0xFF));  // toute l'image = id : une image déchirée se voit
       uint8_t* dst = fshare::BeginWrite(mem, id);
       std::memcpy(dst, px.data(), px.size());
-      fshare::EndWrite(mem, id, (double)id);
+      fshare::EndWrite(mem, id, (double)id, (double)id + 0.5);
     }
   });
 
   std::vector<uint8_t> out((size_t)W * CH * H);
   uint64_t last = 0, fid = 0, accepted = 0, torn_seen = 0;
-  double t;
+  double t, tc;
   auto t0 = std::chrono::steady_clock::now();
   while (std::chrono::steady_clock::now() - t0 < std::chrono::seconds(3)) {
-    if (fshare::Read(mem, out.data(), out.size(), last, fid, t)) {
+    if (fshare::Read(mem, out.data(), out.size(), last, fid, t, tc)) {
       ++accepted;
       uint8_t v = (uint8_t)(fid & 0xFF);
       for (uint8_t b : out) if (b != v) { ++torn_seen; break; }   // image acceptée mais incohérente = BUG
-      assert(t == (double)fid);
+      assert(t == (double)fid && tc == (double)fid + 0.5);
     }
   }
   run = false;

@@ -19,6 +19,7 @@ namespace AR6DoF
         public float heightOffset = -0.05f;       // par rapport aux yeux (m)
         public float minHeightAboveFloor = 0.9f;  // le menu ne descend pas plus bas (m, y = 0 = sol)
         public bool summonOnStart = true;
+        public bool showPanel = true;             // panneau de réglages dans F1 (désactivé pour le clavier virtuel)
 
         [Header("Suivi automatique")]
         public bool follow = false;               // case à cocher (aussi dans le panneau F1)
@@ -122,7 +123,7 @@ namespace AR6DoF
         // Réglages du menu : dans le panneau F1 (à droite des réglages du passthrough)
         void OnGUI()
         {
-            if (!Ar6dofUi.Visible || head == null) return;
+            if (!showPanel || !Ar6dofUi.Visible || head == null) return;
             GUILayout.BeginArea(new Rect(450, 60, 380, 330), GUI.skin.box);
             GUILayout.Label("-- Menu flottant");
             follow = GUILayout.Toggle(follow, "Suivi automatique (OFF = fixe dans la piece)");

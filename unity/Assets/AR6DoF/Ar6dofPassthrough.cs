@@ -32,7 +32,8 @@ namespace AR6DoF
         public float fallbackHorizontalFovDeg = 100f;  // sans calibration : champ horizontal supposé de la caméra
         public bool flipComposite = false;     // à cocher si le rendu est à l'envers
         public bool reproject = true;          // reprojection de rotation : l'image suit la tête à la cadence d'Unity, même si la caméra est plus lente
-        public float captureDelayMs = 40f;     // délai entre la prise de vue et l'écriture de l'image par ar6dof_probe (à régler : tourne la tête vite)
+        public bool autoDelay = true;          // délai mesuré automatiquement par ar6dof_probe (comparaison caméra / gyro) : tourne la tête quelques secondes
+        public float captureDelayMs = 40f;     // délai manuel (utilisé si autoDelay est décoché ou tant que la mesure n'est pas disponible)
         public bool clampEdges = false;        // étire les bords de l'image au lieu de les laisser noirs
     }
 
@@ -254,7 +255,7 @@ namespace AR6DoF
                 double t0 = Ar6dofClock.Now();
                 if (reader.TryCopyLatest(camTex, out double age))
                 {
-                    FrameAgeMs = age; HasFrames = true; uploads++; frameWriteQpc = reader.LastWriteQpc;
+                    FrameAgeMs = age; HasFrames = true; uploads++; frameWriteQpc = reader.LastCaptureQpc;   // arrivée lissée de l'image (le délai est retiré plus bas)
                     UploadMs = UploadMs * 0.9 + (Ar6dofClock.Now() - t0) * 1000.0 * 0.1;   // copie + envoi à la carte graphique (moyenne)
                 }
             }
@@ -277,6 +278,16 @@ namespace AR6DoF
             };
         }
 
+        /// <summary>Délai utilisé entre l'arrivée d'une image et sa prise de vue : mesuré par ar6dof_probe, sinon le réglage manuel.</summary>
+        public double DelayUsedMs { get; private set; }
+        double CurrentDelaySeconds()
+        {
+            double d = settings.captureDelayMs * 0.001;
+            if (settings.autoDelay && receiver != null && receiver.TryGetLatest(out var pd, out _) && pd.camDelay > 0.001f) d = pd.camDelay;
+            DelayUsedMs = d * 1000.0;
+            return d;
+        }
+
         void UpdateRendering()
         {
             if (mat == null) return;
@@ -286,7 +297,7 @@ namespace AR6DoF
             // dR = R_cam * (R_casque(capture)^T * R_casque(maintenant)) * R_cam^T  (voir tests/passthrough_ref.py : delta_cam)
             double[] dR = null;
             if (settings.reproject && HasFrames && receiver != null && headRig != null && headRig.RenderRotationG != null
-                && receiver.TryGetRotationG(frameWriteQpc - settings.captureDelayMs * 0.001, out double[] Rcap))
+                && receiver.TryGetRotationG(frameWriteQpc - CurrentDelaySeconds(), out double[] Rcap))
             {
                 double[] delta = Ar6dofMath.Mul3(Ar6dofMath.Transpose3(Rcap), headRig.RenderRotationG);
                 dR = Ar6dofMath.Mul3(Ar6dofMath.Mul3(RCB, delta), Ar6dofMath.Transpose3(RCB));
@@ -451,7 +462,7 @@ namespace AR6DoF
         void OnGUI()
         {
             string info = reader.IsOpen
-                ? "Passthrough : " + reader.Width + "x" + reader.Height + " | " + uploadsPerSec + " img/s | age de l'image " + FrameAgeMs.ToString("0.0") + " ms | envoi GPU " + UploadMs.ToString("0.0") + " ms | reprojection " + ReprojDeg.ToString("0.0") + " deg"
+                ? "Passthrough : " + reader.Width + "x" + reader.Height + " | " + uploadsPerSec + " img/s | age de l'image " + FrameAgeMs.ToString("0.0") + " ms | envoi GPU " + UploadMs.ToString("0.0") + " ms | reprojection " + ReprojDeg.ToString("0.0") + " deg | delai " + DelayUsedMs.ToString("0") + " ms"
                 : "Passthrough : en attente d'ar6dof_probe (partage d'image active ?)";
             info += HasCalibration ? " | calibration OK" : " | SANS calibration";
             GUI.Label(new Rect(10, 30, 1400, 24), info + "   (" + toggleUiKey + " : reglages)");
@@ -470,7 +481,8 @@ namespace AR6DoF
             s.centerOnImage = GUILayout.Toggle(s.centerOnImage, "Recentrer sur le milieu de l'image (DECALE tout le monde : deconseille)");
             s.flipComposite = GUILayout.Toggle(s.flipComposite, "Inverser verticalement le rendu (si a l'envers)");
             s.reproject = GUILayout.Toggle(s.reproject, "Reprojection de rotation (l'image suit la tete a la cadence d'Unity)");
-            s.captureDelayMs = Slider("delai capture->ecriture (ms)", s.captureDelayMs, 0f, 120f);
+            s.autoDelay = GUILayout.Toggle(s.autoDelay, "Delai capture mesure automatiquement (tourne la tete)");
+            s.captureDelayMs = Slider("delai manuel (ms)", s.captureDelayMs, 0f, 120f);
             s.clampEdges = GUILayout.Toggle(s.clampEdges, "Etirer les bords au lieu du noir");
             GUILayout.Label("Disposition du flux : " + s.layout + (s.layout == Ar6dofStereoLayout.SideBySide ? "" : " (haut = oeil gauche)"));
             if (GUILayout.Button("Basculer cote a cote / haut-bas"))
