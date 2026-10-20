@@ -33,6 +33,7 @@
 
 #include "calib.h"
 #include "camera_model_json.h"
+#include "ble_remote.h"
 #include "delay_estimator.h"
 #include "devices.h"
 #include "floor.h"
@@ -271,6 +272,27 @@ class TeeBuf : public std::streambuf {
  private:
   std::streambuf *a_, *b_;
 };
+
+// Charge CPU de ce programme depuis le dernier appel, en % de la machine entière (tous coeurs confondus)
+static double ProcCpuPercent() {
+  static ULONGLONG lastWall = 0, lastCpu = 0;
+  FILETIME c, e, k, u;
+  if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) return 0;
+  auto ft = [](const FILETIME& f) { return ((ULONGLONG)f.dwHighDateTime << 32) | f.dwLowDateTime; };
+  ULONGLONG cpu = ft(k) + ft(u);
+  FILETIME now;
+  GetSystemTimeAsFileTime(&now);
+  ULONGLONG wall = ft(now);
+  double pct = 0;
+  if (lastWall != 0 && wall > lastWall) {
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    pct = 100.0 * (double)(cpu - lastCpu) / (double)(wall - lastWall) / (double)(si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1);
+  }
+  lastWall = wall;
+  lastCpu = cpu;
+  return pct;
+}
 
 static double g_qpcOffset = 0;  // QueryPerformanceCounter - NowS : permet de donner des instants "système" à Unity
 
@@ -538,7 +560,7 @@ static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const V
 }
 
 int main(int argc, char** argv) {
-  bool noWindowsFlag = false;
+  bool noWindowsFlag = false, noBle = false;
   std::ofstream logFile(ExeDir() + "\\ar6dof_probe.log", std::ios::trunc);
   TeeBuf tee(std::cout.rdbuf(), logFile.rdbuf());
   std::streambuf* origCout = std::cout.rdbuf(&tee);
@@ -548,11 +570,15 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--auto") g_auto = true;                 // rejoue les réponses de la dernière fois, sans question
+    else if (a == "--no-ble") noBle = true;            // ne pas ecouter la telecommande Bluetooth
     else if (a == "--no-windows") noWindowsFlag = true;  // aucune fenêtre OpenCV : bien moins de CPU
   }
   LoadConfig();   // les réponses précédentes servent de valeurs par défaut, même sans --auto
   if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
   std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";
+  // Télécommande Bluetooth -> UDP local (Unity). Se reconnecte seule ; --no-ble pour la désactiver.
+  struct BleStop { ~BleStop() { ar6ble::Stop(); } } bleStop;
+  if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -755,10 +781,10 @@ int main(int argc, char** argv) {
       fps = frames / dt; frames = 0; tf = now;
       if (!windowsOn) {  // sans fenêtre : un résumé par seconde dans la console et le journal
         char sb[256];
-        std::snprintf(sb, sizeof(sb), "camera %.1f fps | suivi %.1f fps | partage %.1f ms | tracking %s | %d points | delai camera %.1f ms (%s)\n",
+        std::snprintf(sb, sizeof(sb), "camera %.1f fps | suivi %.1f fps | partage %.1f ms | tracking %s | %d points | delai camera %.1f ms (%s) | cpu %.0f%%\n",
                       g_camFps.load(), fps, g_shareMs.load(),
                       tracking ? (vo && vo->state == StereoVO::kOk ? "OK" : "perdu/init") : "arrete", vo ? vo->nPoints() : 0,
-                      camDelay * 1000.0, autoDelay ? "auto" : "manuel");
+                      camDelay * 1000.0, autoDelay ? "auto" : "manuel", ProcCpuPercent());
         std::cout << sb;
       }
     }

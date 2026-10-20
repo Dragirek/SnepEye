@@ -12,4 +12,10 @@ namespace AR6DoF
         void OnPointerDown(Vector3 worldPoint, int button);
         void OnPointerUp(Vector3 worldPoint, int button);
     }
+
+    /// <summary>Objet qui suit le laser tant que le bouton est maintenu, même si le laser sort de son Collider (déplacer / redimensionner).</summary>
+    public interface IAr6dofPointerDrag
+    {
+        void OnDrag(Ray ray);
+    }
 }

@@ -8,8 +8,8 @@ using UnityEngine;
 namespace AR6DoF
 {
     /// <summary>
-    /// Télécommande gyroscopique sans fil (ESP32-C3 + BNO085 + 2 boutons, firmware firmware/ar6dof_remote) : reçoit son
-    /// orientation et ses boutons en UDP (WiFi), et en déduit la direction visée.
+    /// Télécommande gyroscopique Bluetooth (ESP32-C3 + BNO085 + 2 boutons, firmware firmware/ar6dof_remote) : ar6dof_probe reçoit
+    /// le Bluetooth et relaie son orientation et ses boutons en UDP local (127.0.0.1) ; ce composant en déduit la direction visée.
     /// Paquet de 28 octets : magic 0x52365241 | version u8 | boutons u8 (bit0 gauche, bit1 droit) | seq u16 | quaternion w,x,y,z (4 float) | micros u32.
     /// </summary>
     public class Ar6dofRemote : MonoBehaviour

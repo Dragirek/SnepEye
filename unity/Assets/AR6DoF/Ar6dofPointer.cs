@@ -24,6 +24,19 @@ namespace AR6DoF
         public float beta = 0.04f;           // plus haut = plus réactif en mouvement
         public float recenterHoldSeconds = 0.6f;
 
+        /// <summary>Dernier rayon du laser (origine = main, direction lissée) : utilisé pour déplacer / redimensionner les écrans.</summary>
+        public static Ray LastRay;
+
+        /// <summary>Ajoute un Canvas World Space cliquable au pointeur (menus créés par code).</summary>
+        public void AddCanvas(Canvas c)
+        {
+            if (c == null) return;
+            var l = new List<Canvas>(canvases ?? new Canvas[0]);
+            if (!l.Contains(c)) l.Add(c);
+            canvases = l.ToArray();
+            if (EventSystem.current == null) new GameObject("EventSystem", typeof(EventSystem));
+        }
+
         LineRenderer laser;
         Vector3 dirSmooth = Vector3.forward;
         bool haveDir;
@@ -88,6 +101,7 @@ namespace AR6DoF
 
             Vector3 origin = head.position + Quaternion.Euler(0f, Yaw(headFwd), 0f) * originOffset;
             var ray = new Ray(origin, dirSmooth);
+            LastRay = ray;
 
             // 1) objets 3D (fenêtres, touches)
             IAr6dofPointerTarget target = null;
@@ -140,6 +154,8 @@ namespace AR6DoF
             if (!left && prevLeft) { pressedL?.OnPointerUp(point, 0); pressedL = null; UiUp(ref uiPressL, uiGo, 0); }
             if (right && !prevRight) { pressedR = hovered; pressedR?.OnPointerDown(point, 1); UiDown(ref uiPressR, uiGo, 1); }
             if (!right && prevRight) { pressedR?.OnPointerUp(point, 1); pressedR = null; UiUp(ref uiPressR, uiGo, 1); }
+            if (left && pressedL is IAr6dofPointerDrag dragL) dragL.OnDrag(ray);
+            if (right && pressedR is IAr6dofPointerDrag dragR) dragR.OnDrag(ray);
             prevLeft = left;
             prevRight = right;
         }

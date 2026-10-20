@@ -19,6 +19,7 @@ namespace AR6DoF
         public float heightOffset = -0.05f;       // par rapport aux yeux (m)
         public float minHeightAboveFloor = 0.9f;  // le menu ne descend pas plus bas (m, y = 0 = sol)
         public bool summonOnStart = true;
+        public bool useScreensAnchor = false;     // clavier virtuel : se centre sous les écrans virtuels s'il y en a
         public bool showPanel = true;             // panneau de réglages dans F1 (désactivé pour le clavier virtuel)
 
         [Header("Suivi automatique")]
@@ -85,6 +86,12 @@ namespace AR6DoF
         public void Summon()
         {
             if (head == null) return;
+            if (useScreensAnchor && Ar6dofScreens.TryGetKeyboardPose(head.position, out Vector3 ap, out Quaternion ar))
+            {
+                transform.SetPositionAndRotation(ap, ar);
+                velocity = Vector3.zero; outsideTimer = 0f; moving = false;
+                return;
+            }
             transform.position = FrontPoint();
             velocity = Vector3.zero;
             outsideTimer = 0f;

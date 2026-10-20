@@ -57,6 +57,7 @@ namespace AR6DoF
             fm.summonKey = summonKey;
             fm.followKey = KeyCode.F9;
             fm.showPanel = false;
+            fm.useScreensAnchor = true;
             Build();
         }
 

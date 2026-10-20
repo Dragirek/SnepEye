@@ -18,6 +18,10 @@ namespace AR6DoF
         [Tooltip("Utilisé si aucun écran n'a exactement la taille ci-dessus. -1 = premier écran qui n'est pas le principal")]
         public int monitorIndex = -1;
         public bool borderless = true;
+        [Tooltip("Exclut la fenêtre du casque de toute capture d'écran : les écrans virtuels ne peuvent jamais se capturer eux-mêmes (écran dans l'écran). Windows 10 2004 ou plus récent.")]
+        public bool excludeFromCapture = true;
+        [Tooltip("EXPERIMENTAL : la fenêtre du casque laisse passer les clics de souris vers les fenêtres Windows situées dessous. Utile seulement si le casque est le SEUL écran et sans écran virtuel. Désactivé par défaut.")]
+        public bool clickThrough = false;
         [Tooltip("Pendant combien de secondes on réessaie (Unity repositionne parfois la fenêtre au démarrage)")]
         public float retrySeconds = 4f;
 
@@ -36,6 +40,9 @@ namespace AR6DoF
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int cmd);
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint key, byte alpha, uint flags);
 
         const int GWL_STYLE = -16;
         const uint SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
@@ -83,6 +90,13 @@ namespace AR6DoF
             if (borderless) SetWindowLongPtr(hwnd, GWL_STYLE, new IntPtr(0x90000000L));   // WS_POPUP | WS_VISIBLE
             SetWindowPos(hwnd, IntPtr.Zero, m.left, m.top, m.right - m.left, m.bottom - m.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
             SetForegroundWindow(hwnd);
+            if (excludeFromCapture) SetWindowDisplayAffinity(hwnd, 0x11);   // WDA_EXCLUDEFROMCAPTURE
+            if (clickThrough)
+            {
+                long ex = GetWindowLongPtr(hwnd, -20).ToInt64();             // GWL_EXSTYLE
+                SetWindowLongPtr(hwnd, -20, new IntPtr(ex | 0x80000L | 0x20L));   // WS_EX_LAYERED | WS_EX_TRANSPARENT
+                SetLayeredWindowAttributes(hwnd, 0, 255, 2);                  // LWA_ALPHA, opaque
+            }
             return true;
         }
 

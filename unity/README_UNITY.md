@@ -87,17 +87,32 @@ Le délai entre l'arrivée d'une image et sa prise de vue est **mesuré automati
 vue par la caméra à celle du gyro. Il faut tourner la tête quelques secondes au démarrage. Le panneau F1 affiche « delai X ms ».
 Les touches `[` et `]` de ar6dof_probe (ou le curseur manuel de F1) le règlent à la main ; `a` dans ar6dof_probe revient à l'automatique.
 
-## Télécommande gyroscopique sans fil
-1. Flashe `firmware/ar6dof_remote/ar6dof_remote.ino` (ESP32-C3 + BNO085 + 2 boutons) après avoir mis ton SSID et ton mot de passe WiFi (2,4 GHz).
-2. Dans Unity : un objet avec `Ar6dofRemote` (port 9878) et `Ar6dofPointer` (liste *Canvases* = tes menus en World Space).
-3. Panneau F1 > Télécommande : *Calibration 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
-4. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
+## Télécommande gyroscopique Bluetooth
+1. Flashe `firmware/ar6dof_remote/ar6dof_remote.ino` (ESP32-C3 + BNO085 + 2 boutons). Aucun réglage : pas de WiFi, pas de mot de passe.
+2. Active le Bluetooth du PC. **Ne l'appaire pas** dans les paramètres Windows : c'est inutile.
+3. Lance ar6dof_probe.exe (via le lanceur Unity ou à la main) : il cherche tout seul « AR6DoF-Remote », s'y connecte
+   et se reconnecte si elle est éteinte puis rallumée. Dans le journal : `[ble] telecommande connectee`.
+   (`--no-ble` désactive cette écoute.) Le Bluetooth passe par ar6dof_probe : la télécommande ne marche que s'il tourne.
+4. Dans Unity : un objet avec `Ar6dofRemote` (port 9878, ne pas changer) et `Ar6dofPointer` (liste *Canvases* = tes menus en World Space).
+5. Panneau F1 > Télécommande : *Calibration 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
+6. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
 
-## Fenêtre Windows cliquable
-1. Un Quad avec le composant `UwcWindowTexture` (uWindowCapture) pour afficher la fenêtre, plus `Ar6dofWindowPanel` sur le même objet
-   (*Window Title Contains* = une partie du titre).
-2. Si les clics tombent à l'opposé : cocher *Mirror Horizontal* / *Flip Vertical*.
-3. La fenêtre doit rester visible sur un écran (pas minimisée, pas recouverte). Mets-la sur l'écran principal.
+## Écrans virtuels (remplace uWindowCapture)
+**Tu peux supprimer uWindowCapture** : plus rien n'en dépend. La capture est faite par `ar6dof_screen.dll` (construite en même temps que
+ar6dof_probe.exe par GitHub) : DXGI Desktop Duplication, GPU vers GPU, aucune lecture CPU, et aucun travail quand le bureau ne change pas.
+1. Copie `ar6dof_screen.dll` dans `Assets/AR6DoF/Plugins/x86_64/` (Unity : sélectionne la DLL, coche *Windows x86_64*).
+2. Ajoute `Ar6dofScreen.shader` à *Project Settings > Graphics > Always Included Shaders*, et mets-le dans le champ *Screen Shader* de
+   `Ar6dofScreens` (un objet vide de la scène, HORS du Rig). Renseigne aussi *Passthrough* et *Pointer*.
+3. **Écran dans l'écran** : quand le casque sera ton seul écran, installe un pilote d'écran virtuel Windows (ex. *Virtual Display Driver*,
+   open source signé) réglé en 1920x1080 / 60 Hz : Windows le voit comme un 2e moniteur, tu y glisses tes fenêtres, il est
+   capturé et cliquable, et Unity n'est jamais dessus. De plus, `Ar6dofDisplayStarter` exclut la fenêtre du casque de toute capture
+   (*Exclude From Capture*), donc même si tu captures l'écran du casque, il n'y a pas d'effet miroir.
+4. Dans le casque : barre sous chaque écran = déplacer (bouton **gauche** : tout le groupe collé ; bouton **droit** : cet écran seul, il se
+   décolle) ; **coins** = agrandir / réduire cet écran seulement ; bouton **Param.** = source (moniteur), images/s (30, 60, 90), coller aux
+   bords, courbure entre écrans, ajouter (3 maximum) / retirer / dissocier, recentrer. Deux bords proches se collent au relâchement.
+5. Le clavier virtuel (K / B) se place centré sous l'ensemble des écrans. La disposition est mémorisée.
+6. Si l'image est à l'envers : décocher *Flip Y* sur `Ar6dofScreens`. Si les clics tombent à côté : mettre le moniteur capturé à 100 % de mise à l'échelle.
+Limites : bureau en SDR (pas HDR), même carte graphique pour Unity et le moniteur capturé, le curseur Windows n'est pas dessiné (le laser sert de curseur).
 
 ## Clavier virtuel
 Un objet vide avec `Ar6dofKeyboard`. **K** : afficher/cacher, **B** : replacer sous ta vue. Maj, Ctrl et Alt restent actives pour la
