@@ -12,7 +12,7 @@ if(MSVC)
   target_compile_options(ar6dof_probe PRIVATE /W3 /utf-8)
   target_compile_definitions(ar6dof_probe PRIVATE NOMINMAX)
   # Pont Bluetooth (C++/WinRT) : mode conforme demandé par cppwinrt
-  set_source_files_properties(src/ble_remote.cpp PROPERTIES COMPILE_OPTIONS "/permissive-")
+  set_source_files_properties(src/ble_remote.cpp PROPERTIES COMPILE_OPTIONS "/permissive-" COMPILE_DEFINITIONS "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS=1")
 endif()
 
 # Capture d'ecran GPU pour Unity (a copier dans Assets/AR6DoF/Plugins/x86_64/ ; remplace uWindowCapture)

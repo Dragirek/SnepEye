@@ -1,4 +1,7 @@
 // Pont BLE -> UDP (C++/WinRT). Fichier isolé : il n'inclut ni OpenCV ni le reste du programme.
+#ifndef _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+#define _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS 1   // cppwinrt en C++17 utilise <experimental/coroutine>
+#endif
 #include "udp_sender.h"   // Winsock d'abord, avant tout en-tête Windows
 #include "ble_remote.h"
 

@@ -6,8 +6,12 @@
 //    sur le thread de rendu d'Unity. Aucun en-tête Unity n'est nécessaire : le périphérique D3D11 d'Unity est retrouvé à
 //    partir du pointeur de sa texture (GetNativeTexturePtr).
 //  - Limites : même carte graphique pour Unity et l'écran capturé ; bureau en SDR (B8G8R8A8) ; le curseur n'est pas dessiné.
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
