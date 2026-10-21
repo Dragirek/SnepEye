@@ -29,7 +29,6 @@ namespace AR6DoF
         [Tooltip("Multiplie la taille des lettres si elles sont trop petites ou trop grandes")]
         public float labelScale = 1f;
         public Shader keyShader;   // vide : AR6DoF/Flat, sinon Sprites/Default
-        public KeyCode toggleKey = KeyCode.K;
         public KeyCode summonKey = KeyCode.B;
 
         bool shift, ctrl, alt, visible = true;
@@ -61,10 +60,8 @@ namespace AR6DoF
             Build();
         }
 
-        void Update()
-        {
-            if (Ar6dofInput.Down(toggleKey)) SetVisible(!visible);
-        }
+        /// <summary>Le clavier s'affiche et se range depuis la barre de tâches (Ar6dofDock).</summary>
+        public bool IsVisible { get { return visible; } }
 
         public void SetVisible(bool v)
         {
@@ -108,7 +105,7 @@ namespace AR6DoF
                 new KeyDef { label = "Espace", ch = ' ', shiftCh = ' ', width = 5f, kind = Kind.Char },
                 Vk("Echap", 0x1B, 1.3f), Vk("Suppr", 0x2E, 1.3f), Vk("<", 0x25), Vk("^", 0x26), Vk("v", 0x28), Vk(">", 0x27),
                 Vk("PgPr", 0x21, 1.2f), Vk("PgSv", 0x22, 1.2f),
-                Mod(azerty ? "QWERTY" : "AZERTY", Kind.Layout, 1.8f), Mod("Cacher", Kind.Hide, 1.5f)
+                Mod(azerty ? "QWERTY" : "AZERTY", Kind.Layout, 1.8f)
             });
             return rows;
         }

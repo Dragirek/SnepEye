@@ -430,7 +430,7 @@ namespace AR6DoF
             catch (Exception e) { Debug.LogWarning("AR6DoF : réglages illisibles : " + e.Message); }
         }
 
-        void SaveSettings()
+        public void SaveSettings()
         {
             try { File.WriteAllText(SettingsPath, JsonUtility.ToJson(settings, true)); }
             catch (Exception e) { Debug.LogWarning("AR6DoF : sauvegarde impossible : " + e.Message); }

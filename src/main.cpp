@@ -578,7 +578,6 @@ int main(int argc, char** argv) {
   std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";
   // Télécommande Bluetooth -> UDP local (Unity). Se reconnecte seule ; --no-ble pour la désactiver.
   struct BleStop { ~BleStop() { ar6ble::Stop(); } } bleStop;
-  if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -660,6 +659,8 @@ int main(int argc, char** argv) {
     const int apis[2] = {cv::CAP_MSMF, cv::CAP_DSHOW};
     const char* names[2] = {"MSMF", "DSHOW"};
     int first = AskInt("backend", "Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
+    // La télécommande Bluetooth démarre APRÈS toutes les questions (ses messages ne se mélangent plus aux réponses)
+    if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
     double best = -1;
     int bestIdx = -1, openIdx = -1;
     for (int attempt = 0; attempt < 2; attempt++) {

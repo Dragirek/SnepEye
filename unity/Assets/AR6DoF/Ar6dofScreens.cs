@@ -47,10 +47,11 @@ namespace AR6DoF
 
         const string PrefKey = "ar6dof_screens_v1";
         bool built;
+        public bool Built { get { return built; } }
         Font font;
 
         // ---- données sauvegardées ----
-        [Serializable] class Item { public int monitor, fps, parent, side; public Vector3 pos, euler; public float width; }
+        [Serializable] class Item { public int monitor, fps, parent, side; public bool closed; public Vector3 pos, euler; public float width; }
         [Serializable] class Cfg { public List<Item> items = new List<Item>(); public float hinge = 25f; public bool snap = true; }
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
@@ -103,6 +104,7 @@ namespace AR6DoF
                     if (panels.Count >= maxScreens) break;
                     var p = NewPanel(Mathf.Clamp(it.monitor, 0, Mathf.Max(0, Ar6dofScreenNative.MonitorCount() - 1)), it.fps > 0 ? it.fps : defaultFps, Mathf.Clamp(it.width, 0.3f, 8f));
                     p.transform.SetPositionAndRotation(it.pos, Quaternion.Euler(it.euler));
+                    if (it.closed) p.SetContentActive(false);   // rangé dans la barre de tâches
                 }
                 for (int i = 0; i < cfg.items.Count && i < panels.Count; i++)
                 {
@@ -314,7 +316,7 @@ namespace AR6DoF
                     {
                         monitor = p.monitor, fps = p.fps, width = p.width,
                         pos = p.transform.position, euler = p.transform.rotation.eulerAngles,
-                        parent = p.parent != null ? panels.IndexOf(p.parent) : -1, side = p.side
+                        parent = p.parent != null ? panels.IndexOf(p.parent) : -1, side = p.side, closed = !p.open
                     });
                 PlayerPrefs.SetString(PrefKey, JsonUtility.ToJson(cfg));
                 PlayerPrefs.Save();
@@ -440,7 +442,7 @@ namespace AR6DoF
             Save();
         }
 
-        void CycleHinge()
+        public void CycleHinge()
         {
             float[] opts = { 0f, 15f, 25f, 35f, 45f };
             int idx = 0;
@@ -448,6 +450,13 @@ namespace AR6DoF
             hingeDegrees = opts[(idx + 1) % opts.Length];
             RelayoutAttached();
             Refresh();
+            Save();
+        }
+
+        public void SetAllFps(int f)
+        {
+            defaultFps = f;
+            foreach (var p in panels) p.SetFps(f);
             Save();
         }
 

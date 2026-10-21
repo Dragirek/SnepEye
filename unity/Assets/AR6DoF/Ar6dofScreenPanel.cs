@@ -20,6 +20,7 @@ namespace AR6DoF
         public float width = 1.6f;
         [NonSerialized] public Ar6dofScreenPanel parent;   // écran auquel celui-ci est collé (null = libre)
         public int side;                                    // +1 : à droite du parent, -1 : à gauche
+        public bool open = true;                            // fermé = rangé dans la barre de tâches : objet désactivé, capture arrêtée, aucun calcul
 
         public float Width { get { return width; } }
         public float Height { get { return width / aspect; } }
@@ -190,6 +191,15 @@ namespace AR6DoF
             lastFrames = 0;
             Ar6dofScreenNative.Start(slot, monitor, fps);
             RefreshRect();
+        }
+
+        /// <summary>Affiche l'écran (reprend la capture) ou le range (arrête tout : aucun calcul tant qu'il est rangé).</summary>
+        public void SetContentActive(bool on)
+        {
+            open = on;
+            gameObject.SetActive(on);
+            if (on) { lastFrames = 0; Ar6dofScreenNative.Start(slot, monitor, fps); }
+            else Ar6dofScreenNative.Stop(slot);
         }
 
         public void SetFps(int f) { fps = f; Ar6dofScreenNative.SetFps(slot, f); }

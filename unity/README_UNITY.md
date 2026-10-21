@@ -107,14 +107,26 @@ ar6dof_probe.exe par GitHub) : DXGI Desktop Duplication, GPU vers GPU, aucune le
    open source signé) réglé en 1920x1080 / 60 Hz : Windows le voit comme un 2e moniteur, tu y glisses tes fenêtres, il est
    capturé et cliquable, et Unity n'est jamais dessus. De plus, `Ar6dofDisplayStarter` exclut la fenêtre du casque de toute capture
    (*Exclude From Capture*), donc même si tu captures l'écran du casque, il n'y a pas d'effet miroir.
-4. Dans le casque : barre sous chaque écran = déplacer (bouton **gauche** : tout le groupe collé ; bouton **droit** : cet écran seul, il se
+4. Dans le casque (les écrans se rangent / s'affichent depuis la barre de tâches, voir plus bas) : barre sous chaque écran = déplacer (bouton **gauche** : tout le groupe collé ; bouton **droit** : cet écran seul, il se
    décolle) ; **coins** = agrandir / réduire cet écran seulement ; bouton **Param.** = source (moniteur), images/s (30, 60, 90), coller aux
    bords, courbure entre écrans, ajouter (3 maximum) / retirer / dissocier, recentrer. Deux bords proches se collent au relâchement.
-5. Le clavier virtuel (K / B) se place centré sous l'ensemble des écrans. La disposition est mémorisée.
+5. Le clavier virtuel (icône de la barre de tâches / B) se place centré sous l'ensemble des écrans. La disposition est mémorisée.
 6. Si l'image est à l'envers : décocher *Flip Y* sur `Ar6dofScreens`. Si les clics tombent à côté : mettre le moniteur capturé à 100 % de mise à l'échelle.
 Limites : bureau en SDR (pas HDR), même carte graphique pour Unity et le moniteur capturé, le curseur Windows n'est pas dessiné (le laser sert de curseur).
 
 ## Clavier virtuel
-Un objet vide avec `Ar6dofKeyboard`. **K** : afficher/cacher, **B** : replacer sous ta vue. Maj, Ctrl et Alt restent actives pour la
-touche suivante (Ctrl puis C = copier). Les lettres sont envoyées en Unicode : AZERTY ou QWERTY sans dépendre du clavier de Windows.
-Les touches de direction et PgPr/PgSv permettent de faire défiler.
+Un objet vide avec `Ar6dofKeyboard`. Il s'affiche et se range depuis la **barre de tâches** (icône « KB »). **B** le replace sous les écrans.
+Maj, Ctrl et Alt restent actives pour la touche suivante (Ctrl puis C = copier). Les lettres sont envoyées en Unicode : AZERTY ou QWERTY
+sans dépendre du clavier de Windows. Les touches de direction et PgPr/PgSv permettent de faire défiler.
+
+## Barre de tâches VR (Ar6dofDock)
+Un objet vide avec `Ar6dofDock` (hors du Rig) ; il retrouve tout seul le passthrough, le pointeur, le clavier et le lanceur.
+- Toujours présente, fixe dans la pièce, sous les écrans. Une icône par application : **écrans virtuels**, **clavier**, **tes menus personnalisés**.
+- **Un clic** sur l'icône affiche l'application (elle sort de la barre avec une animation), **un second clic** la range (elle y rentre).
+  Rangée, elle est désactivée : aucune capture, aucun calcul, juste une icône. Un trait sous l'icône = application affichée.
+- **La roue à droite** ouvre les réglages en VR (le panneau F1) : onglet *Passthrough* (FOV, IPD, délai, calibration, reprojection...),
+  onglet *Ecrans* (images/s de tous les écrans, collage, courbure, ajouter un écran) et onglet *Système* (recentrer la barre / le clavier / le tracking).
+- **Menus personnalisés** : fichier `ar6dof_widgets.json` à côté de l'exécutable (créé avec un exemple au premier lancement ; à la racine du projet dans
+  l'éditeur). Types de contrôles : `toggle`, `slider` (min, max, value), `button`. Chaque menu = une icône (`icon` = 3 lettres). Chaque changement
+  est envoyé en texte UDP vers 127.0.0.1:9880, une ligne `menu/controle=valeur`, et par l'évènement C# `Ar6dofWidgets.Changed`.
+  Exemple : `suit/bright=200`. Le relais vers ton appareil Bluetooth (fursuit) reste à brancher sur ce flux.

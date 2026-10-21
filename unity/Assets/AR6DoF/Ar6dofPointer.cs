@@ -47,6 +47,7 @@ namespace AR6DoF
         // Unity UI
         readonly List<RaycastResult> results = new List<RaycastResult>();
         GameObject uiHover, uiPressL, uiPressR;
+        Camera eventCam;
         PointerEventData uiData;
 
         void Start()
@@ -116,6 +117,7 @@ namespace AR6DoF
             GameObject uiGo = null;
             Vector3 uiPoint = point;
             Camera ec = passthrough != null && passthrough.HeadView != null ? passthrough.HeadView.GetComponent<Camera>() : null;
+            eventCam = ec;
             if (canvases != null && ec != null)
                 foreach (var c in canvases)
                 {
@@ -154,6 +156,7 @@ namespace AR6DoF
             if (!left && prevLeft) { pressedL?.OnPointerUp(point, 0); pressedL = null; UiUp(ref uiPressL, uiGo, 0); }
             if (right && !prevRight) { pressedR = hovered; pressedR?.OnPointerDown(point, 1); UiDown(ref uiPressR, uiGo, 1); }
             if (!right && prevRight) { pressedR?.OnPointerUp(point, 1); pressedR = null; UiUp(ref uiPressR, uiGo, 1); }
+            if (left && uiPressL != null) UiDrag(ray, uiPressL);   // curseurs (Slider) : suit le laser tant que le bouton est maintenu
             if (left && pressedL is IAr6dofPointerDrag dragL) dragL.OnDrag(ray);
             if (right && pressedR is IAr6dofPointerDrag dragR) dragR.OnDrag(ray);
             prevLeft = left;
@@ -180,9 +183,26 @@ namespace AR6DoF
             if (go == null || uiData == null) { slot = null; return; }
             uiData.button = button == 0 ? PointerEventData.InputButton.Left : PointerEventData.InputButton.Right;
             slot = ExecuteEvents.GetEventHandler<IPointerClickHandler>(go);
+            if (slot == null) slot = ExecuteEvents.GetEventHandler<IPointerDownHandler>(go);   // curseur (Slider)
             if (slot == null) slot = go;
+            uiData.pressEventCamera = eventCam;
             uiData.pointerPress = slot;
             ExecuteEvents.Execute(slot, uiData, ExecuteEvents.pointerDownHandler);
+        }
+
+        void UiDrag(Ray ray, GameObject slot)
+        {
+            if (uiData == null || eventCam == null || slot == null) return;
+            var cv = slot.GetComponentInParent<Canvas>();
+            if (cv == null) return;
+            var rt = (RectTransform)cv.transform;
+            var plane = new Plane(rt.forward, rt.position);
+            float d;
+            if (!plane.Raycast(ray, out d) || d <= 0f) return;
+            uiData.position = eventCam.WorldToScreenPoint(ray.GetPoint(d));
+            uiData.pressEventCamera = eventCam;
+            uiData.button = PointerEventData.InputButton.Left;
+            ExecuteEvents.Execute(slot, uiData, ExecuteEvents.dragHandler);
         }
 
         void UiUp(ref GameObject slot, GameObject go, int button)
