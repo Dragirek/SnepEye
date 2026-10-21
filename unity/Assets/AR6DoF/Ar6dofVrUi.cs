@@ -41,6 +41,8 @@ namespace AR6DoF
             return c;
         }
 
+        public static RectTransform Rect(Transform parent, string name, Vector2 pos, Vector2 size) { return Child(parent, name, pos, size); }
+
         static RectTransform Child(Transform parent, string name, Vector2 pos, Vector2 size)
         {
             var g = new GameObject(name, typeof(RectTransform));
@@ -113,6 +115,23 @@ namespace AR6DoF
             s.SetValueWithoutNotify(Mathf.Clamp(value, min, max));
             if (onChange != null) s.onValueChanged.AddListener(onChange);
             return s;
+        }
+
+        /// <summary>Conteneur collé en haut du canvas, de hauteur nulle : placer les éléments avec des y négatifs (vers le bas), puis appeler FitHeight.</summary>
+        public static RectTransform NewContent(Canvas c)
+        {
+            var rt = Child(c.transform, "Contenu", Vector2.zero, Vector2.zero);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = Vector2.zero;
+            return rt;
+        }
+
+        /// <summary>Ajuste la hauteur du canvas au contenu (hauteur en pixels). Le haut reste en place.</summary>
+        public static void FitHeight(Canvas c, float height)
+        {
+            var rt = (RectTransform)c.transform;
+            rt.sizeDelta = new Vector2(rt.sizeDelta.x, height);
         }
 
         /// <summary>Roue crantée dessinée par code (icône du bouton Réglages).</summary>

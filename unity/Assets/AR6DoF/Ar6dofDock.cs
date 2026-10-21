@@ -11,8 +11,13 @@ namespace AR6DoF
     {
         public string title = "", icon = "";
         public bool open;
-        public Image indicator;
+        public Image indicator, statusDot;
         public abstract Transform AnimRoot { get; }
+        /// <summary>Pastille d'état sur l'icône (menus d'appareils : connecté ou non).</summary>
+        public virtual bool HasStatus { get { return false; } }
+        public virtual Color StatusColor { get { return Color.clear; } }
+        /// <summary>Texte affiché quand on pointe l'icône.</summary>
+        public virtual string TooltipText() { return title; }
         /// <summary>Active ou désactive le contenu ET tous ses calculs (fermé = juste une icône).</summary>
         public abstract void Activate(bool on);
         public virtual void BeforeFirstShow() { }
@@ -47,7 +52,7 @@ namespace AR6DoF
     /// Barre de tâches en réalité virtuelle, toujours présente et fixe dans la pièce, sous les écrans. Chaque icône est une application :
     /// un clic l'affiche (elle sort de la barre avec une animation), un second clic la range (elle y rentre). Rangée, elle est désactivée :
     /// aucun calcul, aucune capture. La roue à droite ouvre les réglages (le panneau F1 en VR).
-    /// Contient : les écrans virtuels, le clavier, tes menus personnalisés (ar6dof_widgets.json) et les réglages.
+    /// Contient : les écrans virtuels, le clavier, tes menus d'appareils Bluetooth (Ar6dofDeviceMenus, bouton +) et les réglages.
     /// À mettre sur un objet de la scène, hors du Rig.
     /// </summary>
     public class Ar6dofDock : MonoBehaviour
@@ -104,6 +109,7 @@ namespace AR6DoF
             }
             int sig = ScreenSignature();
             if (sig != lastSig) { SyncScreens(); RebuildIcons(); }
+            foreach (var a in apps) if (a.statusDot != null) a.statusDot.color = a.StatusColor;
         }
 
         int ScreenSignature()
@@ -142,25 +148,19 @@ namespace AR6DoF
             vrSettings.canvas.gameObject.SetActive(false);
             if (pointer != null) pointer.AddCanvas(vrSettings.canvas);
 
-            // menus personnalisés
-            int k = 0;
-            foreach (var m in Ar6dofWidgets.Load())
-            {
-                var cv = Ar6dofWidgets.Build(m);
-                cv.gameObject.SetActive(false);
-                if (pointer != null) pointer.AddCanvas(cv);
-                float yaw = (k % 2 == 0 ? -35f : 35f) * (1 + k / 2);
-                var app = new CanvasApp { canvas = cv, title = m.title, icon = string.IsNullOrEmpty(m.icon) ? (m.title.Length > 3 ? m.title.Substring(0, 3) : m.title) : m.icon, open = false };
-                app.place = t => PlaceBeside(t, yaw);
-                widgetApps.Add(app);
-                k++;
-            }
+            // menus d'appareils Bluetooth (client Bluetooth + menus enregistrés dans ar6dof_devices.json)
+            ble = GetComponent<Ar6dofBle>();
+            if (ble == null) ble = gameObject.AddComponent<Ar6dofBle>();
+            devMenus = gameObject.AddComponent<Ar6dofDeviceMenus>();
+            devMenus.dock = this;
+            devMenus.Load();
 
             Place();
             // états mémorisés (clavier, menus) : affichés tout de suite, sans animation
             foreach (var a in ExtraApps())
             {
-                bool want = PlayerPrefs.GetInt("ar6dof_dock_open_" + a.title, a == kbApp ? 1 : 0) != 0;
+                var dm = a as DeviceMenu;
+                bool want = dm != null ? dm.def.open : PlayerPrefs.GetInt("ar6dof_dock_open_" + a.title, a == kbApp ? 1 : 0) != 0;
                 if (want) { a.BeforeFirstShow(); }
                 a.Activate(want);
                 a.open = want;
@@ -169,13 +169,30 @@ namespace AR6DoF
             RebuildIcons();
         }
 
-        readonly List<CanvasApp> widgetApps = new List<CanvasApp>();
+        Ar6dofBle ble;
+        Ar6dofDeviceMenus devMenus;
 
         IEnumerable<Ar6dofDockApp> ExtraApps()
         {
             if (kbApp != null) yield return kbApp;
-            foreach (var w in widgetApps) yield return w;
+            foreach (var m in devMenus.menus) yield return m;
             yield return settingsApp;
+        }
+
+        /// <summary>Appelé par le gestionnaire quand un menu d'appareil apparaît : branche le pointeur et choisit son emplacement.</summary>
+        public void Adopt(DeviceMenu m)
+        {
+            if (pointer != null) pointer.AddCanvas(m.canvas);
+            float yaw = -35f - 30f * (devMenus.menus.Count - 1);
+            m.place = t => PlaceBeside(t, yaw, 0.28f);   // le haut du menu à peine au-dessus des yeux : il descend vers les mains
+        }
+
+        public void RefreshIcons() { if (built) RebuildIcons(); }
+
+        /// <summary>Affiche le clavier virtuel (appelé quand un champ de texte est cliqué).</summary>
+        public void ShowKeyboard()
+        {
+            if (kbApp != null && !kbApp.open && !animating.Contains(kbApp)) Toggle(kbApp);
         }
 
         void SyncScreens()
@@ -209,13 +226,15 @@ namespace AR6DoF
                     n++;
                 }
             if (kbApp != null) apps.Add(kbApp);
-            foreach (var w in widgetApps) apps.Add(w);
+            foreach (var m in devMenus.menus) apps.Add(m);
 
             const float cell = 108f, size = 96f;
-            float total = apps.Count * cell + 30f + size + 40f;
+            float total = (apps.Count + 1) * cell + 30f + size + 40f;   // + le bouton "ajouter un menu"
             barRt.sizeDelta = new Vector2(Mathf.Max(260f, total), 130f);
             float x = -total * 0.5f + 20f + size * 0.5f;
             foreach (var a in apps) { MakeIcon(a, x, size, false); x += cell; }
+            MakeAddButton(x, size);
+            x += cell;
             x += 30f - (cell - size);
             // séparateur + roue des réglages
             var sep = new GameObject("Separateur", typeof(RectTransform));
@@ -227,6 +246,20 @@ namespace AR6DoF
             simg.color = new Color(1f, 1f, 1f, 0.25f);
             simg.raycastTarget = false;
             MakeIcon(settingsApp, x, size, true);
+        }
+
+        void MakeAddButton(float x, float size)
+        {
+            Text lbl;
+            var b = Ar6dofVrUi.MakeButton(iconsRoot, "+", new Vector2(x, 4f), new Vector2(size, size), () =>
+            {
+                var m = devMenus.Create();
+                RebuildIcons();
+                Toggle(m);   // s'ouvre tout de suite : on est dans ses parametres a choisir l'appareil
+            }, out lbl, 54);
+            lbl.color = Ar6dofVrUi.Accent;
+            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
+            tip.text = () => "Nouveau menu d'appareil Bluetooth";
         }
 
         void MakeIcon(Ar6dofDockApp a, float x, float size, bool isGear)
@@ -249,7 +282,21 @@ namespace AR6DoF
             else
             {
                 lbl.rectTransform.anchoredPosition = new Vector2(0f, 12f);
-                Ar6dofVrUi.Label(rt, a.title, new Vector2(0f, -32f), new Vector2(size, 24f), 15);
+                string shown = a.title.Length > 10 ? a.title.Substring(0, 9) + ".." : a.title;
+                Ar6dofVrUi.Label(rt, shown, new Vector2(0f, -32f), new Vector2(size, 24f), 15);
+            }
+            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
+            tip.text = () => app.TooltipText();
+            if (a.HasStatus)
+            {
+                var dot = new GameObject("Etat", typeof(RectTransform));
+                dot.transform.SetParent(rt, false);
+                var drt = (RectTransform)dot.transform;
+                drt.anchoredPosition = new Vector2(size * 0.5f - 14f, size * 0.5f - 14f);
+                drt.sizeDelta = new Vector2(18f, 18f);
+                a.statusDot = dot.AddComponent<Image>();
+                a.statusDot.raycastTarget = false;
+                a.statusDot.color = a.StatusColor;
             }
             // trait sous l'icône = application affichée
             var ind = new GameObject("Indicateur", typeof(RectTransform));
@@ -302,7 +349,7 @@ namespace AR6DoF
                 t.position = rest;
                 t.localScale = restScale;
             }
-            if (!(app is ScreenApp)) PlayerPrefs.SetInt("ar6dof_dock_open_" + app.title, app.open ? 1 : 0);
+            if (app is KeyboardApp || app == settingsApp) PlayerPrefs.SetInt("ar6dof_dock_open_" + app.title, app.open ? 1 : 0);
             animating.Remove(app);
         }
 
@@ -347,7 +394,7 @@ namespace AR6DoF
         }
 
         /// <summary>Menus (réglages, menus perso) : à côté des écrans, à hauteur du regard.</summary>
-        void PlaceBeside(Transform t, float yawDeg)
+        void PlaceBeside(Transform t, float yawDeg, float dy = 0f)
         {
             Transform h = Head;
             if (h == null) return;
@@ -355,7 +402,7 @@ namespace AR6DoF
             if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
             Vector3 d = Quaternion.Euler(0f, yawDeg, 0f) * f.normalized;
             Vector3 pos = h.position + d * 1.2f;
-            pos.y = h.position.y - 0.05f;
+            pos.y = h.position.y - 0.05f + dy;
             t.SetPositionAndRotation(pos, Quaternion.LookRotation(d));
         }
     }

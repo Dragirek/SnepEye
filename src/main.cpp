@@ -33,6 +33,7 @@
 
 #include "calib.h"
 #include "camera_model_json.h"
+#include "ble_hub.h"
 #include "ble_remote.h"
 #include "delay_estimator.h"
 #include "devices.h"
@@ -577,7 +578,7 @@ int main(int argc, char** argv) {
   if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
   std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";
   // Télécommande Bluetooth -> UDP local (Unity). Se reconnecte seule ; --no-ble pour la désactiver.
-  struct BleStop { ~BleStop() { ar6ble::Stop(); } } bleStop;
+  struct BleStop { ~BleStop() { ar6ble::Stop(); ar6hub::Stop(); } } bleStop;
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -661,6 +662,7 @@ int main(int argc, char** argv) {
     int first = AskInt("backend", "Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
     // La télécommande Bluetooth démarre APRÈS toutes les questions (ses messages ne se mélangent plus aux réponses)
     if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
+    if (!noBle) ar6hub::Start([](const std::string& m) { std::cout << m << std::endl; });   // appareils Bluetooth des menus Unity
     double best = -1;
     int bestIdx = -1, openIdx = -1;
     for (int attempt = 0; attempt < 2; attempt++) {

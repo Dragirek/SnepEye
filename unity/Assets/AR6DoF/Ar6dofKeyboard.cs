@@ -10,7 +10,7 @@ namespace AR6DoF
     /// </summary>
     public class Ar6dofKeyboard : MonoBehaviour
     {
-        public enum Kind { Char, Vk, Shift, Ctrl, Alt, Layout, Hide }
+        public enum Kind { Char, Vk, Shift, Ctrl, Alt, Layout }
 
         public class KeyDef
         {
@@ -21,6 +21,9 @@ namespace AR6DoF
             public Kind kind;
         }
 
+        /// <summary>Si renseignés (champ de texte d'un menu VR en cours de saisie), les touches vont ici au lieu d'être envoyées à Windows.</summary>
+        public static System.Action<char> CharSink;
+        public static System.Action<ushort> VkSink;
         public Ar6dofPassthrough passthrough;
         public bool azerty = true;
         public float keySize = 0.045f, gap = 0.006f;
@@ -39,8 +42,7 @@ namespace AR6DoF
 
         void Start()
         {
-            try { font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); } catch (System.Exception) { }
-            if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", 64);
+            font = Ar6dofVrUi.GetFont();
             shader = keyShader != null ? keyShader : Shader.Find("AR6DoF/Flat");
             if (shader == null) shader = Shader.Find("Sprites/Default");
             if (shader == null) shader = Shader.Find("Unlit/Color");
@@ -208,14 +210,20 @@ namespace AR6DoF
                 case Kind.Ctrl: ctrl = !ctrl; RefreshAll(); return;
                 case Kind.Alt: alt = !alt; RefreshAll(); return;
                 case Kind.Layout: azerty = !azerty; Build(); return;
-                case Kind.Hide: SetVisible(false); return;
                 case Kind.Vk:
+                    if (VkSink != null) { VkSink(d.vk); shift = ctrl = alt = false; RefreshAll(); return; }
                     ModsDown();
                     Ar6dofWinInput.Key(d.vk, true);
                     Ar6dofWinInput.Key(d.vk, false);
                     ModsUp();
                     break;
                 case Kind.Char:
+                    if (CharSink != null && !ctrl && !alt)
+                    {
+                        CharSink(shift && d.shiftCh != '\0' ? d.shiftCh : d.ch);
+                        shift = false; RefreshAll();
+                        return;
+                    }
                     if (ctrl || alt)
                     {   // raccourcis (Ctrl+C...) : touche virtuelle de la disposition actuelle de Windows
                         ushort vk = Ar6dofWinInput.VkForChar(d.ch);

@@ -48,7 +48,6 @@ namespace AR6DoF
         const string PrefKey = "ar6dof_screens_v1";
         bool built;
         public bool Built { get { return built; } }
-        Font font;
 
         // ---- données sauvegardées ----
         [Serializable] class Item { public int monitor, fps, parent, side; public bool closed; public Vector3 pos, euler; public float width; }
@@ -90,8 +89,6 @@ namespace AR6DoF
             if (screenShader == null) { Debug.LogError("AR6DoF : renseigne 'Screen Shader' (Ar6dofScreen.shader) sur Ar6dofScreens."); return; }
             if (!Ar6dofScreenNative.Available) return;
             if (Ar6dofScreenNative.MonitorCount() == 0) { Debug.LogWarning("AR6DoF : aucun moniteur capturable."); return; }
-            try { font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); } catch (Exception) { }
-            if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", 64);
 
             Cfg cfg = null;
             try { string j = PlayerPrefs.GetString(PrefKey, ""); if (j.Length > 0) cfg = JsonUtility.FromJson<Cfg>(j); } catch (Exception) { }
@@ -331,52 +328,20 @@ namespace AR6DoF
 
         Text MakeText(Transform parent, string label, Vector2 pos, Vector2 size, int fontSize, TextAnchor anchor)
         {
-            var g = new GameObject("T", typeof(RectTransform));
-            g.transform.SetParent(parent, false);
-            var rt = (RectTransform)g.transform;
-            rt.anchoredPosition = pos; rt.sizeDelta = size;
-            var t = g.AddComponent<Text>();
-            t.font = font; t.fontSize = fontSize; t.alignment = anchor; t.color = Color.white; t.text = label;
-            t.horizontalOverflow = HorizontalWrapMode.Overflow;
-            t.raycastTarget = false;
-            return t;
+            return Ar6dofVrUi.Label(parent, label, pos, size, fontSize, anchor);
         }
 
         Text MakeButton(string label, Vector2 pos, Vector2 size, UnityAction onClick)
         {
-            var g = new GameObject("B", typeof(RectTransform));
-            g.transform.SetParent(settings.transform, false);
-            var rt = (RectTransform)g.transform;
-            rt.anchoredPosition = pos; rt.sizeDelta = size;
-            var img = g.AddComponent<Image>();
-            img.color = new Color(0.22f, 0.26f, 0.32f, 1f);
-            var b = g.AddComponent<Button>();
-            b.targetGraphic = img;
-            var cb = b.colors;
-            cb.highlightedColor = new Color(0.5f, 1.2f, 1.4f, 1f);
-            cb.pressedColor = new Color(0.3f, 0.7f, 0.9f, 1f);
-            b.colors = cb;
-            b.onClick.AddListener(onClick);
-            return MakeText(g.transform, label, Vector2.zero, size, 26, TextAnchor.MiddleCenter);
+            Text t;
+            Ar6dofVrUi.MakeButton(settings.transform, label, pos, size, onClick, out t, 26);
+            return t;
         }
 
         void BuildSettings()
         {
-            var go = new GameObject("Parametres ecrans");
-            go.transform.SetParent(null, false);
-            settings = go.AddComponent<Canvas>();
-            settings.renderMode = RenderMode.WorldSpace;
-            go.AddComponent<GraphicRaycaster>();
-            var rt = (RectTransform)go.transform;
-            rt.sizeDelta = new Vector2(440, 580);
-            rt.localScale = Vector3.one * 0.001f;
-            var bg = new GameObject("Fond", typeof(RectTransform));
-            bg.transform.SetParent(go.transform, false);
-            var brt = (RectTransform)bg.transform;
-            brt.anchorMin = Vector2.zero; brt.anchorMax = Vector2.one; brt.offsetMin = brt.offsetMax = Vector2.zero;
-            var bimg = bg.AddComponent<Image>();
-            bimg.color = new Color(0.08f, 0.09f, 0.11f, 1f);
-            bimg.raycastTarget = false;
+            settings = Ar6dofVrUi.NewCanvas("Parametres ecrans", new Vector2(440, 580));
+            var go = settings.gameObject;
 
             Vector2 W = new Vector2(400, 46);
             float y = 255;

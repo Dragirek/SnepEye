@@ -57,8 +57,7 @@ namespace AR6DoF
             monitor = monitorIndex;
             fps = fpsValue;
             width = widthMeters;
-            try { font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); } catch (Exception) { }
-            if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", 64);
+            font = Ar6dofVrUi.GetFont();
 
             screenMat = new Material(owner.ScreenShader);
             screenMat.SetFloat("_UseTex", 1f);

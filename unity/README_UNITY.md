@@ -126,7 +126,24 @@ Un objet vide avec `Ar6dofDock` (hors du Rig) ; il retrouve tout seul le passthr
   Rangée, elle est désactivée : aucune capture, aucun calcul, juste une icône. Un trait sous l'icône = application affichée.
 - **La roue à droite** ouvre les réglages en VR (le panneau F1) : onglet *Passthrough* (FOV, IPD, délai, calibration, reprojection...),
   onglet *Ecrans* (images/s de tous les écrans, collage, courbure, ajouter un écran) et onglet *Système* (recentrer la barre / le clavier / le tracking).
-- **Menus personnalisés** : fichier `ar6dof_widgets.json` à côté de l'exécutable (créé avec un exemple au premier lancement ; à la racine du projet dans
-  l'éditeur). Types de contrôles : `toggle`, `slider` (min, max, value), `button`. Chaque menu = une icône (`icon` = 3 lettres). Chaque changement
-  est envoyé en texte UDP vers 127.0.0.1:9880, une ligne `menu/controle=valeur`, et par l'évènement C# `Ar6dofWidgets.Changed`.
-  Exemple : `suit/bright=200`. Le relais vers ton appareil Bluetooth (fursuit) reste à brancher sur ce flux.
+- **Menus d'appareils Bluetooth** : le bouton **+** de la barre crée un menu lié à un appareil (fursuit, bande LED...). Voir la section suivante.
+- Pointer une icône affiche son nom (et, pour un appareil, son état). Une pastille verte / orange / rouge sur l'icône = connecté / en cours / déconnecté.
+
+## Menus d'appareils Bluetooth (Ar6dofDeviceMenus + Ar6dofBle)
+Rien à ajouter dans la scène : `Ar6dofDock` crée tout seul `Ar6dofBle` et `Ar6dofDeviceMenus`. **ar6dof_probe doit tourner** (sans `--no-ble`) :
+il parle au Bluetooth de Windows ; Unity lui parle en UDP local (ports 9881 commandes, 9882 évènements).
+1. Clique **+** dans la barre : un menu s'ouvre sur ses paramètres. **Changer d'appareil** liste les appareils Bluetooth à portée (allume le tien) ;
+   clique le tien. Il est enregistré et se reconnecte tout seul (aussi après un redémarrage).
+2. En haut du menu : une pastille + une ligne d'état (*Connecte*, *Connexion en cours...*, *Deconnecte*, *ar6dof_probe absent*), puis le **nom** :
+   celui que tu as saisi dans *Nom affiche*, sinon le nom Bluetooth de l'appareil. Tu peux aussi choisir l'icône (3 lettres).
+3. **Envoi par défaut** : *Service* et *Caractéristique* (UUID courts comme `FFE0` / `FFE1`, ou complets). Ils dépendent de ton appareil (voir sa
+   documentation ou une appli comme nRF Connect). Chaque contrôle peut avoir sa propre cible.
+4. **Contrôles** : Interrupteur, Curseur (min / max), Bouton, Roue de couleur (+ luminosité), Code RGB, Texte, Choix (liste), Etiquette. Tu peux en mettre
+   plusieurs du même type, les monter / descendre (*Haut* / *Bas*), les modifier (*Edit*), les dupliquer (*Dup*) ou les supprimer (*Suppr*).
+5. **Comment l'information est envoyée** (écran *Edit*) : un *modèle* d'octets. Modèles prêts (clic pour changer) : 1 octet, 2 octets, flottant 32 bits,
+   RGB 3 octets, RGB en texte, valeur en texte, texte. Ou le tien : octets hexa fixes + `{v}` (valeur, 1 octet), `{v16}` / `{v16be}` (2 octets),
+   `{f32}`, `{r} {g} {b}`, `{rgb}`, `{hex}`, `{text}`, `{vtext}`. Exemple : `7E 07 05 {r} {g} {b} 00 EF`. L'aperçu montre les octets pour la valeur actuelle,
+   et *Tester l'envoi maintenant* les envoie.
+6. Les champs de texte ouvrent le clavier virtuel ; ce qui est tapé va dans le champ, pas dans Windows. Entrée valide.
+7. Les curseurs et la roue envoient au plus 20 fois par seconde (le dernier état est toujours envoyé). Tout est enregistré dans `ar6dof_devices.json`
+   à côté de l'exécutable (à la racine du projet dans l'éditeur). Pour tes propres scripts : évènement C# `Ar6dofDeviceMenus.Changed(menu, controle, valeur)`.
