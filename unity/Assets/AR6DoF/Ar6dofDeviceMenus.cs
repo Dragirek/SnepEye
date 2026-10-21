@@ -146,7 +146,7 @@ namespace AR6DoF
         float y;
         const float W = 600f, Gap = 8f;
         Text statusText;
-        Image statusDot;
+        Image headDot;
         string lastStatus = "";
         int pickSig = -1;
         float pickRefresh;
@@ -234,7 +234,7 @@ namespace AR6DoF
             if (canvas == null || !canvas.gameObject.activeSelf) { FlushPending(); return; }
             string st = StatusString();
             if (st != lastStatus && statusText != null) { lastStatus = st; statusText.text = st; }
-            if (statusDot != null) statusDot.color = StatusColorOf();
+            if (headDot != null) headDot.color = StatusColorOf();
             FlushPending();
             if (mode == Mode.Pick && Time.unscaledTime > pickRefresh)
             {
@@ -287,7 +287,7 @@ namespace AR6DoF
             var cur = Ar6dofVrTextField.Current;
             if (cur != null && cur.transform.IsChildOf(canvas.transform)) cur.Blur();   // valide la saisie en cours avant de reconstruire
             if (content != null) UnityEngine.Object.Destroy(content.gameObject);
-            statusText = null; statusDot = null; previewText = null; titleText = null;
+            statusText = null; headDot = null; previewText = null; titleText = null;
             content = Ar6dofVrUi.NewContent(canvas);
             y = 14f;
             Header();
@@ -343,8 +343,8 @@ namespace AR6DoF
             // ligne d'état (au-dessus du nom) + roue des paramètres
             float cy = RowY(40f);
             var dot = Ar6dofVrUi.Rect(content, "Pastille", new Vector2(-W * 0.5f + 40f, cy), new Vector2(22f, 22f));
-            statusDot = dot.gameObject.AddComponent<Image>();
-            statusDot.raycastTarget = false;
+            headDot = dot.gameObject.AddComponent<Image>();
+            headDot.raycastTarget = false;
             statusText = Ar6dofVrUi.Label(content, "", new Vector2(-40f, cy), new Vector2(380f, 36f), 22, TextAnchor.MiddleLeft);
             Text g;
             var gearBtn = Ar6dofVrUi.MakeButton(content, "", new Vector2(W * 0.5f - 52f, cy), new Vector2(64f, 42f), () => { confirmDelete = false; mode = mode == Mode.Use ? Mode.Settings : Mode.Use; LeavePick(); Rebuild(); }, out g, 20);

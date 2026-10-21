@@ -115,6 +115,7 @@ void ManagerLoop() {
   wa::BluetoothLEAdvertisementWatcher watcher{nullptr};
   winrt::event_token tok{};
   bool scanning = false;
+  auto scanMode = wa::BluetoothLEScanningMode::Active;   // certains adaptateurs refusent le scan actif : repli sur le scan passif
   while (!g_stop) {
     int64_t now = NowMs();
     // scan à la demande
@@ -122,7 +123,7 @@ void ManagerLoop() {
     if (want && !scanning) {
       try {
         watcher = wa::BluetoothLEAdvertisementWatcher();
-        watcher.ScanningMode(wa::BluetoothLEScanningMode::Active);
+        watcher.ScanningMode(scanMode);
         tok = watcher.Received([](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementReceivedEventArgs const& a) {
           uint64_t addr = a.BluetoothAddress();
           std::string name = ToUtf8(a.Advertisement().LocalName());
@@ -140,7 +141,10 @@ void ManagerLoop() {
         });
         watcher.Start();
         scanning = true;
-      } catch (...) { scanning = false; }
+      } catch (...) {
+        scanning = false;
+        if (scanMode == wa::BluetoothLEScanningMode::Active) scanMode = wa::BluetoothLEScanningMode::Passive;
+      }
     } else if (!want && scanning) {
       try { watcher.Stop(); watcher.Received(tok); } catch (...) {}
       scanning = false;

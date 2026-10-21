@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include <winrt/base.h>
@@ -71,26 +72,60 @@ void Forward(Ctx& c, const uint8_t* b, uint32_t n) {
 }
 
 uint64_t FindRemote(const LogFn& log) {
-  wa::BluetoothLEAdvertisementWatcher watcher;
-  watcher.ScanningMode(wa::BluetoothLEScanningMode::Active);
   std::atomic<uint64_t> found{0};
-  auto tok = watcher.Received([&found](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementReceivedEventArgs const& a) {
-    auto adv = a.Advertisement();
-    bool ok = false;
-    for (auto const& u : adv.ServiceUuids())
-      if (u == kService) ok = true;
-    if (!ok && adv.LocalName() == L"AR6DoF-Remote") ok = true;
-    if (ok) found = a.BluetoothAddress();
-  });
-  watcher.Start();
+  std::atomic<uint32_t> seen{0};
+  std::atomic<int> stopErr{0};
+  wa::BluetoothLEAdvertisementWatcher watcher{nullptr};
+  winrt::event_token tok{}, tokStop{};
+  bool started = false;
+  std::string lastError;
+  // Scan actif d'abord (reçoit aussi le nom) ; certains adaptateurs le refusent ("le périphérique ne reconnaît pas la commande") :
+  // on retombe alors sur le scan passif, suffisant car le service est dans l'annonce elle-même.
+  const wa::BluetoothLEScanningMode modes[2] = {wa::BluetoothLEScanningMode::Active, wa::BluetoothLEScanningMode::Passive};
+  for (int mi = 0; mi < 2 && !started; mi++) {
+    try {
+      watcher = wa::BluetoothLEAdvertisementWatcher();
+      watcher.ScanningMode(modes[mi]);
+      tokStop = watcher.Stopped([&stopErr](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementWatcherStoppedEventArgs const& e) {
+        stopErr = static_cast<int>(e.Error());   // 0 = arrêt normal ; sinon l'adaptateur Bluetooth est absent, coupé ou refusé
+      });
+      tok = watcher.Received([&found, &seen](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementReceivedEventArgs const& a) {
+        seen++;
+        auto adv = a.Advertisement();
+        bool ok = false;
+        for (auto const& u : adv.ServiceUuids())
+          if (u == kService) ok = true;
+        if (!ok && adv.LocalName() == L"AR6DoF-Remote") ok = true;
+        if (ok) found = a.BluetoothAddress();
+      });
+      watcher.Start();
+      started = true;
+      if (mi == 1) log("[ble] scan actif refuse par l'adaptateur : scan passif utilise");
+    } catch (winrt::hresult_error const& e) {
+      lastError = winrt::to_string(e.message());
+      try { watcher.Received(tok); watcher.Stopped(tokStop); } catch (...) {}
+    }
+  }
+  if (!started) {
+    log("[ble] impossible de lancer la recherche Bluetooth : " + lastError + " (adaptateur absent, Bluetooth coupe ou pilote incompatible ?)");
+    SleepMs(3000);
+    return 0;
+  }
+
   int64_t t0 = NowMs();
   bool said = false;
   while (!g_stop && found == 0) {
     SleepMs(100);
-    if (!said && NowMs() - t0 > 5000) { log("[ble] telecommande introuvable : allume-la (le Bluetooth du PC doit etre actif), je continue de chercher"); said = true; }
+    if (!said && NowMs() - t0 > 5000) {
+      if (stopErr != 0) log("[ble] adaptateur Bluetooth inutilisable (code " + std::to_string(stopErr.load()) + ") : branche-le, active le Bluetooth de Windows, installe son pilote");
+      else if (seen == 0) log("[ble] aucune annonce Bluetooth recue : l'adaptateur ne voit rien (pilote ? Bluetooth coupe dans Windows ?), je continue de chercher");
+      else log("[ble] " + std::to_string(seen.load()) + " annonces recues mais pas la telecommande : allume-la et regarde sa console serie, je continue de chercher");
+      said = true;
+    }
   }
   watcher.Stop();
   watcher.Received(tok);
+  watcher.Stopped(tokStop);
   return found;
 }
 

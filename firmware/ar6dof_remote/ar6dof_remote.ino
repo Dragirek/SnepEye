@@ -6,8 +6,8 @@
 // (sur le PC) cherche tout seul l'appareil "AR6DoF-Remote" et s'y reconnecte dès qu'il est allumé. Il faut seulement que
 // le Bluetooth du PC soit activé.
 //
-// Câblage (à adapter ci-dessous) : BNO085 SDA -> GPIO5, SCL -> GPIO6, 3V3, GND.
-//   Bouton GAUCHE -> GPIO3 et GND ; bouton DROIT -> GPIO4 et GND (résistances internes activées).
+// Câblage (à adapter ci-dessous) : BNO085 SDA -> GPIO9, SCL -> GPIO8, 3V3, GND.
+//   Bouton GAUCHE -> GPIO21 et GND ; bouton DROIT -> GPIO0 et GND (résistances internes activées).
 // Arduino IDE : carte "ESP32C3 Dev Module" ; bibliothèque "Adafruit BNO08x". Le BLE est déjà fourni avec le support ESP32
 // (rien d'autre à installer).
 //
@@ -26,10 +26,10 @@
 #define SERVICE_UUID "a6d0f001-5a1e-4c7b-9d3e-6f2a8c1b0001"   // identique à src/ble_remote.cpp
 #define CHAR_UUID    "a6d0f001-5a1e-4c7b-9d3e-6f2a8c1b0002"
 #define DEVICE_NAME  "AR6DoF-Remote"
-#define PIN_SDA 5
-#define PIN_SCL 6
-#define PIN_BTN_LEFT 3
-#define PIN_BTN_RIGHT 4
+#define PIN_SDA 9
+#define PIN_SCL 8
+#define PIN_BTN_LEFT 21
+#define PIN_BTN_RIGHT 0
 #define BNO_RESET_PIN -1                 // GPIO relié à la broche RST du BNO085, ou -1
 #define REPORT_INTERVAL_US 8000          // 125 Hz
 #define MIN_SEND_US 8000                 // au plus ~125 notifications par seconde
@@ -46,10 +46,9 @@ uint8_t lastButtons = 0;
 uint32_t lastSendUs = 0;
 
 class ServerCb : public BLEServerCallbacks {
-  void onConnect(BLEServer* s, esp_ble_gatts_cb_param_t* p) override {
+  // Version à un seul paramètre : elle existe dans toutes les versions du support ESP32 (les versions à 2 paramètres changent d'une version à l'autre)
+  void onConnect(BLEServer* s) override {
     connected = true;
-    // Demande un intervalle de connexion court (7,5 à 15 ms) : latence minimale
-    s->updateConnParams(p->connect.remote_bda, 6, 12, 0, 200);
   }
   void onDisconnect(BLEServer* s) override {
     connected = false;
@@ -80,15 +79,25 @@ void sendPacket(uint8_t buttons) {
   lastSendUs = us;
 }
 
+bool bnoOk = false;
+uint32_t lastBnoTryMs = 0, lastInfoMs = 0;
+
+bool startBno() {
+  if (bno08x.begin_I2C(0x4A, &Wire) || bno08x.begin_I2C(0x4B, &Wire)) {
+    Wire.setClock(400000);
+    enableReports();
+    return true;
+  }
+  return false;
+}
+
 void setup() {
+  Serial.begin(115200);                  // diagnostic (Arduino IDE : Outils > USB CDC On Boot > Enabled)
   pinMode(PIN_BTN_LEFT, INPUT_PULLUP);
   pinMode(PIN_BTN_RIGHT, INPUT_PULLUP);
   Wire.begin(PIN_SDA, PIN_SCL);
-  delay(300);                            // laisse le BNO085 démarrer
-  while (!(bno08x.begin_I2C(0x4A, &Wire) || bno08x.begin_I2C(0x4B, &Wire))) delay(500);
-  Wire.setClock(400000);
-  enableReports();
 
+  // Le Bluetooth démarre EN PREMIER : la télécommande est visible du PC même si le BNO085 ne répond pas (câblage...).
   BLEDevice::init(DEVICE_NAME);
   BLEDevice::setPower(ESP_PWR_LVL_P9);   // puissance d'émission maximale
   server = BLEDevice::createServer();
@@ -101,9 +110,27 @@ void setup() {
   adv->addServiceUUID(SERVICE_UUID);
   adv->setScanResponse(true);            // le nom part dans la réponse de scan
   BLEDevice::startAdvertising();
+  Serial.println("AR6DoF-Remote : Bluetooth demarre, visible sous le nom " DEVICE_NAME);
+
+  delay(300);                            // laisse le BNO085 démarrer
+  bnoOk = startBno();
+  Serial.println(bnoOk ? "BNO085 : OK" : "BNO085 : INTROUVABLE (verifie SDA/SCL, 3V3, GND) - nouvel essai toutes les 2 s");
 }
 
 void loop() {
+  uint32_t nowMs = millis();
+  if (!bnoOk) {
+    if (nowMs - lastBnoTryMs >= 2000) {
+      lastBnoTryMs = nowMs;
+      bnoOk = startBno();
+      if (bnoOk) Serial.println("BNO085 : OK");
+    }
+    return;
+  }
+  if (nowMs - lastInfoMs >= 3000) {
+    lastInfoMs = nowMs;
+    Serial.println(connected ? "PC connecte" : "en attente du PC (visible en Bluetooth)");
+  }
   if (bno08x.wasReset()) enableReports();
 
   uint8_t buttons = (digitalRead(PIN_BTN_LEFT) == LOW ? 1 : 0) | (digitalRead(PIN_BTN_RIGHT) == LOW ? 2 : 0);

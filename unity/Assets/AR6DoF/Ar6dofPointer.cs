@@ -49,6 +49,7 @@ namespace AR6DoF
         GameObject uiHover, uiPressL, uiPressR;
         Camera eventCam;
         PointerEventData uiData;
+        RaycastResult uiRes, pressRes;   // le résultat du raycast garde le GraphicRaycaster : c'est lui qui donne la caméra (pressEventCamera est en lecture seule)
 
         void Start()
         {
@@ -133,7 +134,7 @@ namespace AR6DoF
                     uiData.position = ec.WorldToScreenPoint(wp);
                     results.Clear();
                     EventSystem.current.RaycastAll(uiData, results);
-                    if (results.Count > 0) { uiGo = results[0].gameObject; uiPoint = wp; best = dist; target = null; }
+                    if (results.Count > 0) { uiGo = results[0].gameObject; uiRes = results[0]; uiPoint = wp; best = dist; target = null; }
                 }
 
             laser.enabled = true;
@@ -185,7 +186,9 @@ namespace AR6DoF
             slot = ExecuteEvents.GetEventHandler<IPointerClickHandler>(go);
             if (slot == null) slot = ExecuteEvents.GetEventHandler<IPointerDownHandler>(go);   // curseur (Slider)
             if (slot == null) slot = go;
-            uiData.pressEventCamera = eventCam;
+            pressRes = uiRes;
+            uiData.pointerPressRaycast = uiRes;
+            uiData.pointerCurrentRaycast = uiRes;
             uiData.pointerPress = slot;
             ExecuteEvents.Execute(slot, uiData, ExecuteEvents.pointerDownHandler);
         }
@@ -200,7 +203,7 @@ namespace AR6DoF
             float d;
             if (!plane.Raycast(ray, out d) || d <= 0f) return;
             uiData.position = eventCam.WorldToScreenPoint(ray.GetPoint(d));
-            uiData.pressEventCamera = eventCam;
+            uiData.pointerPressRaycast = pressRes;
             uiData.button = PointerEventData.InputButton.Left;
             ExecuteEvents.Execute(slot, uiData, ExecuteEvents.dragHandler);
         }

@@ -21,14 +21,14 @@ namespace AR6DoF
         public Image bg;
         bool focused;
 
-        static readonly Color Normal = new Color(0.14f, 0.16f, 0.2f, 1f);
-        static readonly Color Focus = new Color(0.12f, 0.3f, 0.4f, 1f);
+        static readonly Color NormalColor = new Color(0.14f, 0.16f, 0.2f, 1f);
+        static readonly Color FocusColor = new Color(0.12f, 0.3f, 0.4f, 1f);
 
         public static Ar6dofVrTextField Make(Transform parent, Vector2 pos, Vector2 size, string value, string placeholder, Action<string> onChanged, Action<string> onSubmit, int fontSize = 22)
         {
             var t = Ar6dofVrUi.Rect(parent, "Champ", pos, size);
             var img = t.gameObject.AddComponent<Image>();
-            img.color = Normal;
+            img.color = NormalColor;
             var f = t.gameObject.AddComponent<Ar6dofVrTextField>();
             f.bg = img;
             f.text = value ?? "";
@@ -49,7 +49,7 @@ namespace AR6DoF
             focused = true;
             Ar6dofKeyboard.CharSink = Type;
             Ar6dofKeyboard.VkSink = Key;
-            bg.color = Focus;
+            bg.color = FocusColor;
             Refresh();
             if (Ar6dofDock.Instance != null) Ar6dofDock.Instance.ShowKeyboard();
         }
@@ -59,7 +59,7 @@ namespace AR6DoF
             if (!focused) return;
             focused = false;
             if (Current == this) { Current = null; Ar6dofKeyboard.CharSink = null; Ar6dofKeyboard.VkSink = null; }
-            bg.color = Normal;
+            bg.color = NormalColor;
             Refresh();
             if (onSubmit != null) onSubmit(text);
         }
