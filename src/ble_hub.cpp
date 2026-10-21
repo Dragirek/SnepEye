@@ -207,7 +207,8 @@ bool DoWrite(const WriteCmd& w) {
     if (cr.Status() != wg::GattCommunicationStatus::Success || cr.Characteristics().Size() == 0) return false;
     ch = cr.Characteristics().GetAt(0);
     std::lock_guard<std::mutex> l(c->m);
-    c->chars[w.key] = ch;
+    c->chars.erase(w.key);
+    c->chars.emplace(w.key, ch);   // pas de operator[] : les types WinRT n'ont pas de constructeur par défaut
   }
   ws::DataWriter dw;
   if (!w.data.empty()) dw.WriteBytes(winrt::array_view<const uint8_t>(w.data.data(), w.data.data() + w.data.size()));
