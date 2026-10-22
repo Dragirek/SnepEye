@@ -107,8 +107,14 @@ void setup() {
   txChar->addDescriptor(new BLE2902());
   svc->start();
   BLEAdvertising* adv = BLEDevice::getAdvertising();
-  adv->addServiceUUID(SERVICE_UUID);
-  adv->setScanResponse(true);            // le nom part dans la réponse de scan
+  // Le NOM est dans l'annonce principale (les scans "passifs" de Windows ne lisent pas la réponse de scan) ; le service est dans la réponse de scan.
+  BLEAdvertisementData advData, scanData;
+  advData.setFlags(0x06);                // visible, Bluetooth classique non supporté
+  advData.setName(DEVICE_NAME);
+  scanData.setCompleteServices(BLEUUID(SERVICE_UUID));
+  adv->setAdvertisementData(advData);
+  adv->setScanResponseData(scanData);
+  adv->setScanResponse(true);
   BLEDevice::startAdvertising();
   Serial.println("AR6DoF-Remote : Bluetooth demarre, visible sous le nom " DEVICE_NAME);
 

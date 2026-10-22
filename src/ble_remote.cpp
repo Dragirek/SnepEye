@@ -73,6 +73,8 @@ void Forward(Ctx& c, const uint8_t* b, uint32_t n) {
   c.count++;
 }
 
+const char* g_step = "";   // dernière étape tentée (pour savoir où une erreur Windows s'est produite)
+
 uint64_t FindRemote(const LogFn& log) {
   std::atomic<uint64_t> found{0};
   std::atomic<uint32_t> seen{0};
@@ -143,18 +145,22 @@ uint64_t FindRemote(const LogFn& log) {
 
 void RunOnce(UdpSender& udp, const LogFn& log) {
   log("[ble] recherche de la telecommande...");
+  g_step = "recherche";
   uint64_t addr = FindRemote(log);
   if (g_stop || addr == 0) return;
+  log("[ble] telecommande trouvee, connexion...");
 
+  g_step = "ouverture de l'appareil";
   wb::BluetoothLEDevice dev = wb::BluetoothLEDevice::FromBluetoothAddressAsync(addr).get();
   if (!dev) { log("[ble] connexion impossible"); SleepMs(1500); return; }
 
-#ifndef AR6DOF_BLE_NO_PREFERRED_PARAMS
+#ifdef AR6DOF_BLE_PREFERRED_PARAMS   // desactive par defaut : certains pilotes (Realtek) refusent cette commande HCI
   // Demande à Windows un intervalle de connexion court (faible latence). Facultatif : ignoré si non supporté.
   wb::BluetoothLEPreferredConnectionParametersRequest prefReq{nullptr};
   try { prefReq = dev.RequestPreferredConnectionParameters(wb::BluetoothLEPreferredConnectionParameters::ThroughputOptimized()); } catch (...) {}
 #endif
 
+  g_step = "lecture du service GATT";
   auto sr = dev.GetGattServicesForUuidAsync(kService, wb::BluetoothCacheMode::Uncached).get();
   if (sr.Status() != wg::GattCommunicationStatus::Success || sr.Services().Size() == 0) {
     log("[ble] service de la telecommande introuvable, nouvel essai");
@@ -163,6 +169,7 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
     return;
   }
   wg::GattDeviceService svc = sr.Services().GetAt(0);
+  g_step = "lecture de la caracteristique";
   auto cr = svc.GetCharacteristicsForUuidAsync(kChar, wb::BluetoothCacheMode::Uncached).get();
   if (cr.Status() != wg::GattCommunicationStatus::Success || cr.Characteristics().Size() == 0) {
     log("[ble] caracteristique introuvable, nouvel essai");
@@ -184,6 +191,7 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
     reader.ReadBytes(winrt::array_view<uint8_t>(buf, buf + n));
     Forward(*ctx, buf, n);
   });
+  g_step = "activation des notifications";
   auto st = ch.WriteClientCharacteristicConfigurationDescriptorAsync(wg::GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
   if (st != wg::GattCommunicationStatus::Success) {
     log("[ble] activation des notifications refusee, nouvel essai");
@@ -216,7 +224,7 @@ void Worker(int port, LogFn log) {
     try {
       RunOnce(udp, log);
     } catch (winrt::hresult_error const& e) {
-      log("[ble] erreur Bluetooth : " + winrt::to_string(e.message()) + " (le Bluetooth est-il active ?)");
+      log("[ble] erreur Bluetooth a l'etape \"" + std::string(g_step) + "\" : " + winrt::to_string(e.message()) + " (code " + std::to_string((unsigned)e.code().value) + ")");
       for (int i = 0; i < 30 && !g_stop; i++) SleepMs(100);
     } catch (...) {
       log("[ble] erreur inconnue");
