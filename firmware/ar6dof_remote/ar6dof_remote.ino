@@ -26,8 +26,8 @@
 #define SERVICE_UUID "a6d0f001-5a1e-4c7b-9d3e-6f2a8c1b0001"   // identique à src/ble_remote.cpp
 #define CHAR_UUID    "a6d0f001-5a1e-4c7b-9d3e-6f2a8c1b0002"
 #define DEVICE_NAME  "AR6DoF-Remote"
-#define PIN_SDA 9
-#define PIN_SCL 8
+#define PIN_SDA 8
+#define PIN_SCL 9
 #define PIN_BTN_LEFT 21
 #define PIN_BTN_RIGHT 0
 #define BNO_RESET_PIN -1                 // GPIO relié à la broche RST du BNO085, ou -1

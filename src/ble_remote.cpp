@@ -161,14 +161,33 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
 #endif
 
   g_step = "lecture du service GATT";
-  auto sr = dev.GetGattServicesForUuidAsync(kService, wb::BluetoothCacheMode::Uncached).get();
-  if (sr.Status() != wg::GattCommunicationStatus::Success || sr.Services().Size() == 0) {
-    log("[ble] service de la telecommande introuvable, nouvel essai");
+  // Certains pilotes Bluetooth (Realtek...) refusent « GetGattServicesForUuid » avec l'erreur 0x80070016 : on essaie plusieurs méthodes,
+  // plusieurs fois (la première découverte peut échouer pendant que la connexion s'établit).
+  wg::GattDeviceService svc{nullptr};
+  std::string lastErr;
+  for (int attempt = 0; attempt < 3 && !svc && !g_stop; attempt++) {
+    for (int method = 0; method < 3 && !svc; method++) {
+      try {
+        wg::GattDeviceServicesResult sr{nullptr};
+        if (method == 0) sr = dev.GetGattServicesForUuidAsync(kService, wb::BluetoothCacheMode::Uncached).get();
+        else if (method == 1) sr = dev.GetGattServicesAsync(wb::BluetoothCacheMode::Uncached).get();
+        else sr = dev.GetGattServicesAsync(wb::BluetoothCacheMode::Cached).get();
+        if (sr.Status() == wg::GattCommunicationStatus::Success)
+          for (auto const& sv : sr.Services())
+            if (sv.Uuid() == kService) { svc = sv; break; }
+      } catch (winrt::hresult_error const& e) {
+        lastErr = "methode " + std::to_string(method + 1) + " : " + winrt::to_string(e.message()) + " (code " + std::to_string((unsigned)e.code().value) + ")";
+      }
+    }
+    if (!svc) SleepMs(800);
+  }
+  if (!svc) {
+    log(std::string("[ble] service de la telecommande introuvable") + (lastErr.empty() ? "" : " (" + lastErr + ")") +
+        " : si l'appareil AR6DoF-Remote est dans les parametres Bluetooth de Windows, SUPPRIME-le (Peripheriques > ... > Supprimer) puis rallume la telecommande ; nouvel essai");
     dev.Close();
     SleepMs(1500);
     return;
   }
-  wg::GattDeviceService svc = sr.Services().GetAt(0);
   g_step = "lecture de la caracteristique";
   auto cr = svc.GetCharacteristicsForUuidAsync(kChar, wb::BluetoothCacheMode::Uncached).get();
   if (cr.Status() != wg::GattCommunicationStatus::Success || cr.Characteristics().Size() == 0) {

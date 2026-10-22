@@ -63,8 +63,8 @@ namespace AR6DoF
         public Ar6dofPointer pointer;
         public Ar6dofKeyboard keyboard;
         public Ar6dofLauncher launcher;
-        public Ar6dofEyeTracker eyes;           // eye tracking (inactif tant qu'on ne l'active pas)
-        public Ar6dofEyeCalibration eyeCal;
+        [HideInInspector] public Ar6dofEyeTracker eyes;           // eye tracking (créé automatiquement, inactif tant qu'on ne l'active pas)
+        [HideInInspector] public Ar6dofEyeCalibration eyeCal;
         public float animSeconds = 0.25f;
         public float distance = 1.0f;
 
