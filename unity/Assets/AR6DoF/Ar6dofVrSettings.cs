@@ -13,6 +13,9 @@ namespace AR6DoF
         readonly List<RectTransform> pages = new List<RectTransform>();
         readonly List<Image> tabImages = new List<Image>();
         readonly List<Action> refreshers = new List<Action>();
+        readonly List<Action> live = new List<Action>();   // textes qui changent tout seuls (onglet Yeux)
+        int curTab;
+        float nextLive;
 
         const float W = 640f, H = 780f;
 
@@ -21,15 +24,15 @@ namespace AR6DoF
             dock = d;
             canvas = Ar6dofVrUi.NewCanvas("Reglages VR", new Vector2(W, H));
             Ar6dofVrUi.Label(canvas.transform, "Reglages", new Vector2(0f, H * 0.5f - 36f), new Vector2(W - 40f, 50f), 34);
-            string[] names = { "Passthrough", "Ecrans", "Systeme" };
-            for (int i = 0; i < 3; i++)
+            string[] names = { "Passthrough", "Ecrans", "Systeme", "Yeux" };
+            for (int i = 0; i < names.Length; i++)
             {
                 int idx = i;
                 Text t;
-                var b = Ar6dofVrUi.MakeButton(canvas.transform, names[i], new Vector2(-200f + 200f * i, H * 0.5f - 96f), new Vector2(190f, 48f), () => ShowTab(idx), out t, 24);
+                var b = Ar6dofVrUi.MakeButton(canvas.transform, names[i], new Vector2(-232.5f + 155f * i, H * 0.5f - 96f), new Vector2(150f, 48f), () => ShowTab(idx), out t, 22);
                 tabImages.Add(b.GetComponent<Image>());
             }
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < names.Length; i++)
             {
                 var go = new GameObject("Page" + i, typeof(RectTransform));
                 go.transform.SetParent(canvas.transform, false);
@@ -41,17 +44,28 @@ namespace AR6DoF
             BuildPassthrough(pages[0]);
             BuildScreens(pages[1]);
             BuildSystem(pages[2]);
+            BuildEyes(pages[3]);
             ShowTab(0);
+        }
+
+        /// <summary>Appelé à chaque image par la barre de tâches : met à jour les textes vivants de l'onglet Yeux (4 fois par seconde, seulement s'il est affiché).</summary>
+        public void Tick()
+        {
+            if (curTab != 3 || canvas == null || !canvas.gameObject.activeInHierarchy || Time.unscaledTime < nextLive) return;
+            nextLive = Time.unscaledTime + 0.25f;
+            foreach (var a in live) a();
         }
 
         public void ShowTab(int i)
         {
+            curTab = i;
             for (int k = 0; k < pages.Count; k++)
             {
                 pages[k].gameObject.SetActive(k == i);
                 tabImages[k].color = k == i ? new Color(0.2f, 0.55f, 0.7f, 1f) : Ar6dofVrUi.Btn;
             }
             foreach (var r in refreshers) r();
+            foreach (var a in live) a();
         }
 
         // ---- éléments ----
@@ -135,6 +149,46 @@ namespace AR6DoF
                 Button(page, 0f, y, 420f, "Verrouiller le sol", () => dock.launcher.Send('V')); y -= 64f;
                 Button(page, 0f, y, 420f, "Remettre le cap a zero", () => dock.launcher.Send('Z'));
             }
+        }
+
+        static string CamTxt(int state, float fps)
+        {
+            if (state < 0) return "aucune";
+            return state == 0 ? "arretee" : Mathf.RoundToInt(fps) + " fps";
+        }
+
+        void BuildEyes(RectTransform page)
+        {
+            var et = dock.eyes;
+            float y = TopY;
+            if (et == null) { Ar6dofVrUi.Label(page, "Eye tracking introuvable", new Vector2(0f, y), new Vector2(W - 60f, 40f), 24); return; }
+            Toggle(page, 0f, y, "Eye tracking actif", () => et.Enabled, v => et.SetEnabled(v)); y -= 70f;
+            Text l1 = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 60f, 32f), 21, TextAnchor.MiddleLeft); y -= 36f;
+            Text l2 = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 60f, 32f), 21, TextAnchor.MiddleLeft); y -= 36f;
+            Text l3 = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 60f, 32f), 21, TextAnchor.MiddleLeft); y -= 36f;
+            Text l4 = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 60f, 32f), 21, TextAnchor.MiddleLeft); y -= 56f;
+            live.Add(() =>
+            {
+                var st = et.Status;
+                var g = et.Gaze;
+                if (!et.Enabled) l1.text = "Desactive : aucune camera, aucun port, aucune charge";
+                else if (!et.EngineOnline) l1.text = "ar6dof_probe ne repond pas (lance-le avec Eye tracking = 1)";
+                else l1.text = "ar6dof_probe : en ligne" + (st.on ? "" : " (cameras arretees)");
+                bool on = et.Enabled && et.EngineOnline;
+                l2.text = on ? "Cameras : gauche " + CamTxt(st.camL, st.fpsL) + "   droite " + CamTxt(st.camR, st.fpsR) : "";
+                l3.text = on ? "Etalonnage : " + ((st.calL || st.calR) ? "fait" : "a faire") + "   pupille : gauche " + (st.seeL ? "vue" : "non") + ", droite " + (st.seeR ? "vue" : "non") : "";
+                if (on && et.Receiving)
+                    l4.text = g.valid ? "Regard : " + g.yaw.ToString("+0.0;-0.0;0.0") + " deg (horizontal)   " + g.pitch.ToString("+0.0;-0.0;0.0") + " deg (vertical)" + ((g.blinkL || g.blinkR) ? "   clignement" : "") : "Regard : " + (g.calibrated ? "oeil non detecte" : "pas d'etalonnage");
+                else l4.text = "";
+            });
+            Button(page, 0f, y, 440f, "Etalonner (9 points)", () =>
+            {
+                et.SetEnabled(true);
+                if (dock.eyeCal != null) dock.eyeCal.Begin(et);
+            }); y -= 64f;
+            Button(page, 0f, y, 440f, "Recentrer (regarde droit devant)", () => et.Recenter(), 22); y -= 64f;
+            Button(page, 0f, y, 440f, "Effacer l'etalonnage", () => et.ClearCalibration()); y -= 84f;
+            Ar6dofVrUi.Label(page, "Pendant l'etalonnage, garde la tete immobile et suis la cible\ndes yeux. Les donnees du regard sont lues par Unity dans\nAr6dofEyeTracker.Instance.Gaze (pour tes animations).", new Vector2(0f, y - 30f), new Vector2(W - 60f, 100f), 19, TextAnchor.UpperLeft);
         }
     }
 }

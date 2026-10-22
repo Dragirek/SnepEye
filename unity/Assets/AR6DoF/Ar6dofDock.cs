@@ -63,6 +63,8 @@ namespace AR6DoF
         public Ar6dofPointer pointer;
         public Ar6dofKeyboard keyboard;
         public Ar6dofLauncher launcher;
+        public Ar6dofEyeTracker eyes;           // eye tracking (inactif tant qu'on ne l'active pas)
+        public Ar6dofEyeCalibration eyeCal;
         public float animSeconds = 0.25f;
         public float distance = 1.0f;
 
@@ -110,6 +112,7 @@ namespace AR6DoF
             int sig = ScreenSignature();
             if (sig != lastSig) { SyncScreens(); RebuildIcons(); }
             foreach (var a in apps) if (a.statusDot != null) a.statusDot.color = a.StatusColor;
+            if (vrSettings != null) vrSettings.Tick();
         }
 
         int ScreenSignature()
@@ -142,6 +145,10 @@ namespace AR6DoF
             {
                 kbApp = new KeyboardApp { kb = keyboard, title = "Clavier", icon = "KB", open = keyboard.IsVisible };
             }
+            if (eyes == null) eyes = GetComponent<Ar6dofEyeTracker>();
+            if (eyes == null) eyes = gameObject.AddComponent<Ar6dofEyeTracker>();
+            if (eyeCal == null) eyeCal = GetComponent<Ar6dofEyeCalibration>();
+            if (eyeCal == null) eyeCal = gameObject.AddComponent<Ar6dofEyeCalibration>();
             vrSettings = new Ar6dofVrSettings(this);
             settingsApp = new CanvasApp { canvas = vrSettings.canvas, title = "Reglages", icon = "", open = false };
             settingsApp.place = t => PlaceBeside(t, 35f);

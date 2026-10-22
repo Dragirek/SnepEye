@@ -37,6 +37,7 @@
 #include "ble_remote.h"
 #include "delay_estimator.h"
 #include "devices.h"
+#include "eye_tracker.h"
 #include "floor.h"
 #include "frame_clock.h"
 #include "frame_share_win.h"
@@ -578,7 +579,7 @@ int main(int argc, char** argv) {
   if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
   std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";
   // Télécommande Bluetooth -> UDP local (Unity). Se reconnecte seule ; --no-ble pour la désactiver.
-  struct BleStop { ~BleStop() { ar6ble::Stop(); ar6hub::Stop(); } } bleStop;
+  struct BleStop { ~BleStop() { ar6ble::Stop(); ar6hub::Stop(); ar6eye::Stop(); } } bleStop;
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -620,6 +621,20 @@ int main(int argc, char** argv) {
   int showWindows = AskInt("windows", "Afficher les fenetres de controle (1 = oui, 0 = non : plus leger)", 1, 0, 1);
   int autoTrack = AskInt("autotrack", "Demarrer le tracking automatiquement (1 = oui, 0 = non)", 0, 0, 1);
   const bool windowsOn = showWindows && !noWindowsFlag;
+  // Eye tracking (2 cameras infrarouges d'oeil). Reponse 0 = rien n'est cree : ni camera, ni thread, ni socket.
+  int eyeOn = AskInt("eye", "Eye tracking avec 2 cameras d'oeil (1 = oui, 0 = non : aucune charge)", 0, 0, 1);
+  int eyeCamL = -1, eyeCamR = -1, eyeFps = 90, eyeBackend = 0;
+  if (eyeOn) {
+    std::cout << "  (les numeros ci-dessus sont ceux des cameras ; -1 = pas de camera pour cet oeil)\n";
+    eyeCamL = AskInt("eyecamL", "  Numero de la camera de l'oeil GAUCHE", 1, -1, (int)cams.size() - 1);
+    eyeCamR = AskInt("eyecamR", "  Numero de la camera de l'oeil DROIT", 2, -1, (int)cams.size() - 1);
+    eyeFps = AskInt("eyefps", "  Cadence de traitement par oeil (fps ; 60 = tres leger, 120 = maximum)", 90, 10, 240);
+    eyeBackend = AskInt("eyebackend", "  Backend des cameras d'oeil (0 = MSMF : meme numerotation que la liste ci-dessus, 1 = DSHOW)", 0, 0, 1);
+    if ((eyeCamL >= 0 && eyeCamL == ci) || (eyeCamR >= 0 && eyeCamR == ci) || (eyeCamL >= 0 && eyeCamL == eyeCamR)) {
+      std::cout << "  ATTENTION : une meme camera est utilisee deux fois (stereo / oeil gauche / oeil droit) : eye tracking desactive.\n";
+      eyeOn = 0;
+    }
+  }
 
   // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
   StereoCalib calib;
@@ -663,6 +678,11 @@ int main(int argc, char** argv) {
     // La télécommande Bluetooth démarre APRÈS toutes les questions (ses messages ne se mélangent plus aux réponses)
     if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
     if (!noBle) ar6hub::Start([](const std::string& m) { std::cout << m << std::endl; });   // appareils Bluetooth des menus Unity
+    if (eyeOn) {
+      ar6eye::Options eo;
+      eo.camL = eyeCamL; eo.camR = eyeCamR; eo.fps = eyeFps; eo.backend = eyeBackend; eo.dataDir = ExeDir();
+      ar6eye::Start(eo, [](const std::string& m) { std::cout << m << std::endl; });
+    }
     double best = -1;
     int bestIdx = -1, openIdx = -1;
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -1075,6 +1095,10 @@ int main(int argc, char** argv) {
       cv::putText(traj, tl, cv::Point(10, traj.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
     }
     cv::imshow("trajectoire", traj);
+    if (eyeOn && ar6eye::Running()) {
+      cv::Mat ev;
+      if (ar6eye::GetPreview(&ev)) cv::imshow("yeux", ev);
+    }
     }  // fin de l'affichage (displayDue)
 
     int k = windowsOn ? cv::waitKey(1) : -1;

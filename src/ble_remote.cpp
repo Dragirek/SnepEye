@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -75,6 +77,8 @@ uint64_t FindRemote(const LogFn& log) {
   std::atomic<uint64_t> found{0};
   std::atomic<uint32_t> seen{0};
   std::atomic<int> stopErr{0};
+  std::mutex namesM;
+  std::set<std::string> names;   // noms des appareils vus (pour le diagnostic)
   wa::BluetoothLEAdvertisementWatcher watcher{nullptr};
   winrt::event_token tok{}, tokStop{};
   bool started = false;
@@ -89,9 +93,13 @@ uint64_t FindRemote(const LogFn& log) {
       tokStop = watcher.Stopped([&stopErr](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementWatcherStoppedEventArgs const& e) {
         stopErr = static_cast<int>(e.Error());   // 0 = arrêt normal ; sinon l'adaptateur Bluetooth est absent, coupé ou refusé
       });
-      tok = watcher.Received([&found, &seen](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementReceivedEventArgs const& a) {
+      tok = watcher.Received([&found, &seen, &namesM, &names](wa::BluetoothLEAdvertisementWatcher const&, wa::BluetoothLEAdvertisementReceivedEventArgs const& a) {
         seen++;
         auto adv = a.Advertisement();
+        {
+          std::string nm = winrt::to_string(adv.LocalName());
+          if (!nm.empty()) { std::lock_guard<std::mutex> l(namesM); if (names.size() < 12) names.insert(nm); }
+        }
         bool ok = false;
         for (auto const& u : adv.ServiceUuids())
           if (u == kService) ok = true;
@@ -119,7 +127,11 @@ uint64_t FindRemote(const LogFn& log) {
     if (!said && NowMs() - t0 > 5000) {
       if (stopErr != 0) log("[ble] adaptateur Bluetooth inutilisable (code " + std::to_string(stopErr.load()) + ") : branche-le, active le Bluetooth de Windows, installe son pilote");
       else if (seen == 0) log("[ble] aucune annonce Bluetooth recue : l'adaptateur ne voit rien (pilote ? Bluetooth coupe dans Windows ?), je continue de chercher");
-      else log("[ble] " + std::to_string(seen.load()) + " annonces recues mais pas la telecommande : allume-la et regarde sa console serie, je continue de chercher");
+      else {
+        std::string list;
+        { std::lock_guard<std::mutex> l(namesM); for (auto const& n : names) list += (list.empty() ? "" : ", ") + n; }
+        log("[ble] " + std::to_string(seen.load()) + " annonces recues mais pas la telecommande. Noms vus : " + (list.empty() ? "(aucun nom)" : list) + ". Allume-la et regarde sa console serie ; je continue de chercher");
+      }
       said = true;
     }
   }

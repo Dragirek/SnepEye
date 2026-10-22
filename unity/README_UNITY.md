@@ -147,3 +147,19 @@ il parle au Bluetooth de Windows ; Unity lui parle en UDP local (ports 9881 comm
 6. Les champs de texte ouvrent le clavier virtuel ; ce qui est tapé va dans le champ, pas dans Windows. Entrée valide.
 7. Les curseurs et la roue envoient au plus 20 fois par seconde (le dernier état est toujours envoyé). Tout est enregistré dans `ar6dof_devices.json`
    à côté de l'exécutable (à la racine du projet dans l'éditeur). Pour tes propres scripts : évènement C# `Ar6dofDeviceMenus.Changed(menu, controle, valeur)`.
+
+## Eye tracking (Ar6dofEyeTracker + Ar6dofEyeCalibration)
+Rien à ajouter dans la scène : `Ar6dofDock` crée les deux composants. **Désactivé par défaut** : aucun port, aucun thread, caméras d'oeil arrêtées.
+1. Dans ar6dof_probe (lancé une fois à la main) répondre **1** à *Eye tracking*, puis donner les numéros des caméras gauche et droite.
+   Avec `--auto` (lancement par Unity) ces réponses sont rejouées.
+2. Panneau F1 (roue) -> onglet **Yeux** -> *Eye tracking actif*. L'onglet montre l'état : programme en ligne, cadence de chaque caméra, pupille vue ou non.
+3. **Etalonner (9 points)** : une cible collée à la tête (à 0,8 m) passe par 9 positions. Garde la tête immobile et regarde le point noir au centre de la cible
+   (orange = attends, vert = mesure). Tu peux annuler avec le bouton. A la fin : l'erreur moyenne en degrés (bon : moins de 1,5) et un point vert qui suit ton regard
+   pour vérifier. L'étalonnage est enregistré (`ar6dof_eye_cal.txt`) : à refaire si le casque bouge sur ta tête.
+4. **Recentrer** : regarde droit devant et clique : ce regard devient (0, 0) (corrige un petit biais).
+5. Désactiver l'eye tracking arrête les caméras et ferme les ports.
+
+Pour tes animations de fursuit, lis `Ar6dofEyeTracker.Instance.Gaze` à chaque image : `yaw` / `pitch` (degrés, 0 = droit devant, yaw > 0 vers la droite,
+pitch > 0 vers le haut, par rapport à la tête), `yawL/pitchL/yawR/pitchR`, `blinkL/blinkR`, `openL/openR` (0 fermé, 1 ouvert), `valid`, `calibrated`.
+`GazeDirectionLocal` donne la direction du regard (repère de la tête). Le regard est lissé pour être stable à l'arrêt sans retard sur les saccades.
+
