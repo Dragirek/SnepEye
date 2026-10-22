@@ -21,6 +21,9 @@ namespace AR6DoF
         [Tooltip("Affiche aussi les lignes de statistiques (une par seconde) dans la Console")]
         public bool showStatsInConsole = false;
         public int controlPort = 9877;
+        [Tooltip("Si un ar6dof_probe tourne déjà (resté ouvert après un plantage, lancé à la main) : l'arrêter et le relancer proprement, lié à cet Unity. " +
+                 "Décoche seulement pour réutiliser un exe lancé à la main avec ses fenêtres.")]
+        public bool restartRunningProbe = true;
 
         /// <summary>Dernière ligne de statistiques d'ar6dof_probe (cadence caméra, suivi, délai...).</summary>
         public string LastStats { get; private set; } = "";
@@ -28,6 +31,7 @@ namespace AR6DoF
 
         Process proc;
         UdpClient udp;
+        volatile bool stopping;
 
         string ResolveExe()
         {
@@ -39,10 +43,18 @@ namespace AR6DoF
 
         public void Launch()
         {
-            if (Process.GetProcessesByName("ar6dof_probe").Length > 0)
+            var old = Process.GetProcessesByName("ar6dof_probe");
+            if (old.Length > 0)
             {
-                UnityEngine.Debug.Log("AR6DoF : ar6dof_probe tourne déjà, il est réutilisé.");
-                return;
+                if (!restartRunningProbe)
+                {
+                    UnityEngine.Debug.Log("AR6DoF : ar6dof_probe tourne déjà, il est réutilisé (Restart Running Probe décoché).");
+                    return;
+                }
+                // Un exe resté ouvert (Unity planté...) garde la caméra et peut bloquer les ports : on le remplace.
+                UnityEngine.Debug.Log("AR6DoF : un ancien ar6dof_probe tournait (" + old.Length + "), il est arrêté puis relancé proprement.");
+                Send('Q');
+                foreach (var p in old) { try { if (!p.WaitForExit(2500)) { p.Kill(); p.WaitForExit(2000); } } catch { } }
             }
             string exe = ResolveExe();
             if (!File.Exists(exe))
@@ -53,7 +65,7 @@ namespace AR6DoF
             string dir = Path.GetDirectoryName(exe);
             string cfg = Path.Combine(dir, "ar6dof_config.txt");
             UnityEngine.Debug.Log("AR6DoF : lancement de " + exe + "\n  configuration : " + cfg + (File.Exists(cfg) ? " (trouvée)" : " (ABSENTE : lance l'exe une fois à la main)"));
-            var psi = new ProcessStartInfo(exe, "--auto" + (hideProbeWindows ? " --no-windows" : ""))
+            var psi = new ProcessStartInfo(exe, "--auto" + (hideProbeWindows ? " --no-windows" : "") + " --parent " + Process.GetCurrentProcess().Id)
             {
                 WorkingDirectory = dir,
                 UseShellExecute = false,
@@ -63,6 +75,7 @@ namespace AR6DoF
             };
             try
             {
+                stopping = false;
                 proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
                 proc.OutputDataReceived += (s, e) =>
                 {
@@ -71,7 +84,7 @@ namespace AR6DoF
                     UnityEngine.Debug.Log("[probe] " + e.Data);
                 };
                 proc.ErrorDataReceived += (s, e) => { if (!string.IsNullOrEmpty(e.Data)) UnityEngine.Debug.LogWarning("[probe] " + e.Data); };
-                proc.Exited += (s, e) => UnityEngine.Debug.LogWarning("AR6DoF : ar6dof_probe s'est arrêté. Détails : " + Path.Combine(dir, "ar6dof_probe.log"));
+                proc.Exited += (s, e) => { if (!stopping) UnityEngine.Debug.LogWarning("AR6DoF : ar6dof_probe s'est arrêté. Détails : " + Path.Combine(dir, "ar6dof_probe.log")); };
                 proc.Start();
                 proc.BeginOutputReadLine();   // la sortie DOIT être lue en continu, sinon le programme finirait par se bloquer
                 proc.BeginErrorReadLine();
@@ -84,18 +97,29 @@ namespace AR6DoF
         {
             try
             {
-                if (udp == null) udp = new UdpClient();
+                if (udp == null) udp = Ar6dofSocket.NoInherit(new UdpClient());
                 udp.Send(new[] { (byte)command }, 1, "127.0.0.1", controlPort);
             }
             catch (System.Exception e) { UnityEngine.Debug.LogWarning("AR6DoF : commande non envoyée : " + e.Message); }
         }
 
+        /// <summary>Arrête ar6dof_probe : d'abord poliment (Q : libère caméras et Bluetooth), puis de force si besoin.</summary>
         public void Stop()
         {
-            try { if (proc != null && !proc.HasExited) proc.Kill(); } catch { }
+            stopping = true;
+            try
+            {
+                if (proc != null && !proc.HasExited)
+                {
+                    Send('Q');
+                    if (!proc.WaitForExit(1500)) proc.Kill();
+                }
+            }
+            catch { }
             proc = null;
         }
 
-        void OnApplicationQuit() { Stop(); udp?.Close(); }
+        void OnApplicationQuit() { Stop(); try { udp?.Close(); } catch { } }
+        void OnDestroy() { Stop(); }
     }
 }

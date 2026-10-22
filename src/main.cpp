@@ -561,6 +561,21 @@ static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const V
   cv::line(Bm, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
 }
 
+// --parent <pid> : Unity lance ce programme et donne son propre numero de processus. Quand Unity se ferme (ou plante),
+// le programme s'arrete tout seul : plus d'exe orphelin qui garde la camera et les ports.
+static std::atomic<bool> g_parentGone{false};
+static void StartParentWatch(DWORD pid) {
+  std::thread([pid] {
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!h) return;   // processus deja disparu ou inaccessible : on ne surveille rien
+    WaitForSingleObject(h, INFINITE);
+    CloseHandle(h);
+    g_parentGone = true;
+    std::this_thread::sleep_for(std::chrono::seconds(6));   // arret propre normalement deja fait ; sinon on force
+    ExitProcess(0);
+  }).detach();
+}
+
 int main(int argc, char** argv) {
   bool noWindowsFlag = false, noBle = false;
   std::ofstream logFile(ExeDir() + "\\ar6dof_probe.log", std::ios::trunc);
@@ -574,6 +589,7 @@ int main(int argc, char** argv) {
     if (a == "--auto") g_auto = true;                 // rejoue les réponses de la dernière fois, sans question
     else if (a == "--no-ble") noBle = true;            // ne pas ecouter la telecommande Bluetooth
     else if (a == "--no-windows") noWindowsFlag = true;  // aucune fenêtre OpenCV : bien moins de CPU
+    else if (a == "--parent" && i + 1 < argc) { long long pid = atoll(argv[++i]); if (pid > 0) StartParentWatch((DWORD)pid); }
   }
   LoadConfig();   // les réponses précédentes servent de valeurs par défaut, même sans --auto
   if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
@@ -788,7 +804,7 @@ int main(int argc, char** argv) {
         l.unlock();
         int kk = windowsOn ? cv::waitKey(1) : -1;
         int cc = ctl.Poll();
-        if (kk == 'q' || kk == 27 || cc == 'Q') break;
+        if (kk == 'q' || kk == 27 || cc == 'Q' || g_parentGone) break;
         continue;
       }
       frame = mb.frame;   // partage du tampon, aucune copie de pixels
@@ -1105,7 +1121,7 @@ int main(int argc, char** argv) {
     int cmd = ctl.Poll();   // commandes envoyées par Unity (1 caractère)
     if (k < 0 && cmd >= 0) k = cmd;
     if (k < 0 && injectKey >= 0) { k = injectKey; injectKey = -1; }
-    if (k == 'q' || k == 27 || k == 'Q') break;
+    if (k == 'q' || k == 27 || k == 'Q' || g_parentGone) break;
     if (k == 'V') k = 'v';   // commandes d'Unity : V sol, Z yaw
     if (k == 'Z') k = 'z';
     if (k == 'T') { tracking = false; haveLast = false; poseValid = false; k = 't'; }   // T = recentrer : arrêt puis redémarrage

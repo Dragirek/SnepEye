@@ -1,7 +1,7 @@
 // ar6dof_remote.ino : télécommande pointeur gyroscopique BLUETOOTH (ESP32-C3 Supermini + BNO085 + 2 boutons).
 //
 // Envoie en Bluetooth Low Energy l'orientation du BNO085 (vecteur de rotation "jeu" : référence la gravité, le cap est
-// relatif) et l'état des 2 boutons, ~100 fois par seconde.
+// relatif) et l'état des 2 boutons, ~60 fois par seconde (réglable : MIN_SEND_US).
 // AUCUN réglage : ni WiFi, ni mot de passe, ni appairage dans les paramètres Windows. Le programme ar6dof_probe.exe
 // (sur le PC) cherche tout seul l'appareil "AR6DoF-Remote" et s'y reconnecte dès qu'il est allumé. Il faut seulement que
 // le Bluetooth du PC soit activé.
@@ -22,6 +22,7 @@
 #include <BLE2902.h>
 #include <Wire.h>
 #include <Adafruit_BNO08x.h>
+#include <esp_system.h>
 
 #define SERVICE_UUID "a6d0f001-5a1e-4c7b-9d3e-6f2a8c1b0001"   // identique à src/ble_remote.cpp
 #define CHAR_UUID    "a6d0f001-5a1e-4c7b-9d3e-6f2a8c1b0002"
@@ -32,7 +33,9 @@
 #define PIN_BTN_RIGHT 0
 #define BNO_RESET_PIN -1                 // GPIO relié à la broche RST du BNO085, ou -1
 #define REPORT_INTERVAL_US 8000          // 125 Hz
-#define MIN_SEND_US 8000                 // au plus ~125 notifications par seconde
+#define MIN_SEND_US 16000                // au plus ~60 notifications par seconde. Windows ouvre souvent la liaison avec un intervalle de 30 a 50 ms :
+                                         // envoyer plus vite remplit la file d'envoi de l'ESP32 et la liaison finit par se bloquer.
+                                         // Une fois que ca tient longtemps (voir la console serie), tu peux essayer 10000 (100 Hz).
 
 Adafruit_BNO08x bno08x(BNO_RESET_PIN);
 sh2_SensorValue_t sv;
@@ -44,14 +47,20 @@ float q[4] = {1, 0, 0, 0};
 bool haveQuat = false, quatDirty = false;
 uint8_t lastButtons = 0;
 uint32_t lastSendUs = 0;
+volatile uint32_t connectedAtMs = 0, sentSinceConnect = 0;
 
 class ServerCb : public BLEServerCallbacks {
   // Version à un seul paramètre : elle existe dans toutes les versions du support ESP32 (les versions à 2 paramètres changent d'une version à l'autre)
   void onConnect(BLEServer* s) override {
     connected = true;
+    connectedAtMs = millis();
+    sentSinceConnect = 0;
+    Serial.println("-> PC connecte");
   }
   void onDisconnect(BLEServer* s) override {
     connected = false;
+    Serial.printf("-> PC deconnecte apres %.1f s, %u paquets envoyes, memoire libre %u octets\n",
+                  (millis() - connectedAtMs) / 1000.0, (unsigned)sentSinceConnect, (unsigned)ESP.getFreeHeap());
     BLEDevice::startAdvertising();       // redevient visible tout de suite
   }
 };
@@ -77,6 +86,7 @@ void sendPacket(uint8_t buttons) {
   txChar->setValue(b, sizeof(b));
   txChar->notify();
   lastSendUs = us;
+  sentSinceConnect++;
 }
 
 bool bnoOk = false;
@@ -91,8 +101,24 @@ bool startBno() {
   return false;
 }
 
+const char* resetName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "mise sous tension normale";
+    case ESP_RST_SW:        return "redemarrage logiciel";
+    case ESP_RST_PANIC:     return "PLANTAGE du programme (panic)";
+    case ESP_RST_INT_WDT:   return "PLANTAGE : watchdog (programme bloque)";
+    case ESP_RST_TASK_WDT:  return "PLANTAGE : watchdog (programme bloque)";
+    case ESP_RST_WDT:       return "PLANTAGE : watchdog";
+    case ESP_RST_BROWNOUT:  return "TENSION TROP BASSE (brownout) : alimentation insuffisante";
+    case ESP_RST_DEEPSLEEP: return "reveil de veille";
+    default:                return "autre";
+  }
+}
+
 void setup() {
   Serial.begin(115200);                  // diagnostic (Arduino IDE : Outils > USB CDC On Boot > Enabled)
+  delay(200);
+  Serial.printf("Dernier demarrage : %s\n", resetName(esp_reset_reason()));
   pinMode(PIN_BTN_LEFT, INPUT_PULLUP);
   pinMode(PIN_BTN_RIGHT, INPUT_PULLUP);
   Wire.begin(PIN_SDA, PIN_SCL);
@@ -135,7 +161,8 @@ void loop() {
   }
   if (nowMs - lastInfoMs >= 3000) {
     lastInfoMs = nowMs;
-    Serial.println(connected ? "PC connecte" : "en attente du PC (visible en Bluetooth)");
+    if (connected) Serial.printf("PC connecte depuis %.0f s : %u paquets, memoire libre %u octets\n", (millis() - connectedAtMs) / 1000.0, (unsigned)sentSinceConnect, (unsigned)ESP.getFreeHeap());
+    else Serial.println("en attente du PC (visible en Bluetooth)");
   }
   if (bno08x.wasReset()) enableReports();
 

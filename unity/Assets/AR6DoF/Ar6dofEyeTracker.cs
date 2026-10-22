@@ -123,7 +123,7 @@ namespace AR6DoF
         {
             try
             {
-                if (sender == null) sender = new UdpClient();
+                if (sender == null) sender = Ar6dofSocket.NoInherit(new UdpClient());
                 byte[] d = Encoding.ASCII.GetBytes(line + "\n");
                 sender.Send(d, d.Length, "127.0.0.1", commandPort);
             }
@@ -142,8 +142,8 @@ namespace AR6DoF
             if (running) return;
             try
             {
-                gazeUdp = new UdpClient(gazePort);
-                eventUdp = new UdpClient(eventPort);
+                gazeUdp = Ar6dofSocket.NoInherit(new UdpClient(gazePort));
+                eventUdp = Ar6dofSocket.NoInherit(new UdpClient(eventPort));
             }
             catch (Exception e)
             {

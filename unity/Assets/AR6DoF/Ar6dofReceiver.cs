@@ -82,7 +82,7 @@ namespace AR6DoF
         {
             try
             {
-                client = new UdpClient(port);
+                client = Ar6dofSocket.NoInherit(new UdpClient(port));
                 running = true;
                 thread = new Thread(Loop) { IsBackground = true, Name = "Ar6dofUdp" };
                 thread.Start();

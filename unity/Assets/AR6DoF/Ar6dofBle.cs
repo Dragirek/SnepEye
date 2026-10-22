@@ -42,8 +42,8 @@ namespace AR6DoF
         {
             try
             {
-                tx = new UdpClient();
-                rx = new UdpClient(new IPEndPoint(IPAddress.Loopback, EvtPort));
+                tx = Ar6dofSocket.NoInherit(new UdpClient());
+                rx = Ar6dofSocket.NoInherit(new UdpClient(new IPEndPoint(IPAddress.Loopback, EvtPort)));
                 running = true;
                 thread = new Thread(Loop) { IsBackground = true, Name = "Ar6dofBle" };
                 thread.Start();

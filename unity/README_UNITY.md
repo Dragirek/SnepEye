@@ -77,7 +77,7 @@ Ajoute chaque composant avec *Add Component* (tape son nom). Puis remplis les ch
 | Pointer | Ar6dofPointer | Remote | l'Ar6dofRemote du même objet |
 | | | Passthrough | le composant Ar6dofPassthrough (objet Rig) |
 | | | Canvases | **laisse vide** (les menus s'ajoutent tout seuls) |
-| Launcher | Ar6dofLauncher | Exe Path | chemin complet d'`ar6dof_probe.exe`, ou laisse vide si le dossier `ar6dof_probe-win64` est à côté de `Assets` |
+| Launcher | Ar6dofLauncher | Exe Path | chemin complet d'`ar6dof_probe.exe`, ou laisse vide si le dossier `ar6dof_probe-win64` est à côté de `Assets` ; *Restart Running Probe* (coché) : remplace un ar6dof_probe déjà ouvert au lieu de le réutiliser |
 | Screens | Ar6dofScreens | Passthrough / Rig / Pointer | Passthrough (Rig), Ar6dofHeadRig (Rig), Ar6dofPointer (Pointer) |
 | | | Screen Shader | `Ar6dofScreen.shader` |
 | Keyboard | Ar6dofKeyboard | Passthrough, Key Shader | Passthrough (Rig), `Ar6dofFlat.shader` |
@@ -177,7 +177,7 @@ Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit
 | Symptôme | Cause / remède |
 |---|---|
 | Unity **plante au Play** (quelques instants après l'apparition des menus) | API graphique ≠ Direct3D11 : voir étape 2. Si ça persiste, ouvre `%LOCALAPPDATA%\Unity\Editor\Editor-prev.log` et cherche la ligne `Crash!!!` : le nom du module juste dessous (ex. `ar6dof_screen.dll`) indique le coupable. |
-| *port UDP 9876 / 9878 ... Une seule utilisation de chaque adresse* | un Unity planté tourne encore (Gestionnaire des tâches : termine `Unity.exe`, `Unity Bug Reporter`), ou deux Ar6dofReceiver / Ar6dofRemote dans la scène. |
+| *port UDP 9876 / 9878 ... Une seule utilisation de chaque adresse* | Un ancien `ar6dof_probe.exe` ou un Unity planté tourne encore. Version actuelle : le Launcher arrête tout seul l'ancien exe au Play (case *Restart Running Probe*) et l'exe s'arrête de lui-même quand Unity se ferme. Si ça persiste : Gestionnaire des tâches, termine `ar6dof_probe.exe`, `Unity.exe`, `Unity Bug Reporter` ; vérifie aussi qu'il n'y a pas deux Ar6dofReceiver / Ar6dofRemote dans la scène. Diagnostic : `netstat -ano \| findstr "9876 9878"` donne le numéro du processus qui tient le port. |
 | *Can't add script component ... because the script class cannot be found* | une **erreur de compilation** ailleurs bloque tous les scripts : regarde la Console (rouge). Cause fréquente : un fichier en double (`Ar6dofXxx1.cs`) : supprime-le. |
 | *Aucun paquet reçu* (StatusHud) | ar6dof_probe ne tourne pas ou `t` pas pressé / tracking pas démarré. Regarde `[probe]` dans la Console. |
 | `ar6dof_probe.exe introuvable` | renseigne *Exe Path* du Launcher, ou place `ar6dof_probe-win64` à côté de `Assets`. |

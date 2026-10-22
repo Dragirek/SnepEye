@@ -49,7 +49,7 @@ namespace AR6DoF
         {
             try
             {
-                udp = new UdpClient(port);
+                udp = Ar6dofSocket.NoInherit(new UdpClient(port));
                 running = true;
                 thread = new Thread(Loop) { IsBackground = true, Name = "Ar6dofRemote" };
                 thread.Start();

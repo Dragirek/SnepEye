@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -47,6 +48,7 @@ struct Ctx {
   UdpSender* udp = nullptr;
   std::atomic<int64_t> lastMs{0};
   std::atomic<uint32_t> count{0};
+  std::atomic<bool> linkLost{false};   // Windows a signale la perte de la liaison Bluetooth
   uint16_t seq = 0;
 };
 
@@ -210,25 +212,44 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
     reader.ReadBytes(winrt::array_view<uint8_t>(buf, buf + n));
     Forward(*ctx, buf, n);
   });
+  // Dit à Windows de GARDER la liaison ouverte tant que ce programme tourne (sinon certains pilotes la ferment au bout de quelques secondes).
+  wg::GattSession session{nullptr};
+  try {
+    session = wg::GattSession::FromDeviceIdAsync(dev.BluetoothDeviceId()).get();
+    session.MaintainConnection(true);
+  } catch (...) { session = nullptr; }
+  auto tokConn = dev.ConnectionStatusChanged([ctx](wb::BluetoothLEDevice const& d, winrt::Windows::Foundation::IInspectable const&) {
+    if (d.ConnectionStatus() != wb::BluetoothConnectionStatus::Connected) ctx->linkLost = true;
+  });
   g_step = "activation des notifications";
   auto st = ch.WriteClientCharacteristicConfigurationDescriptorAsync(wg::GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
   if (st != wg::GattCommunicationStatus::Success) {
     log("[ble] activation des notifications refusee, nouvel essai");
+    try { dev.ConnectionStatusChanged(tokConn); } catch (...) {}
+    try { if (session) session.Close(); } catch (...) {}
     ch.ValueChanged(tok);
     svc.Close();
     dev.Close();
     SleepMs(1500);
     return;
   }
-  log("[ble] telecommande connectee");
+  log(std::string("[ble] telecommande connectee") + (session ? " (liaison maintenue)" : ""));
 
   // Reste connecté tant que des paquets arrivent
+  const int64_t tConn = NowMs();
+  const char* why = "arret du programme";
   while (!g_stop) {
     SleepMs(200);
-    if (dev.ConnectionStatus() != wb::BluetoothConnectionStatus::Connected) break;
-    if (NowMs() - ctx->lastMs > 3000) break;
+    if (ctx->linkLost || dev.ConnectionStatus() != wb::BluetoothConnectionStatus::Connected) { why = "liaison Bluetooth perdue (portee, alimentation ou reset de la telecommande ?)"; break; }
+    if (NowMs() - ctx->lastMs > 3000) { why = "plus aucun paquet depuis 3 s alors que la liaison semble ouverte (la telecommande ne notifie plus)"; break; }
   }
-  log("[ble] telecommande deconnectee");
+  {
+    char info[96];
+    std::snprintf(info, sizeof(info), " apres %.1f s, %u paquets recus", (NowMs() - tConn) / 1000.0, (unsigned)ctx->count.load());
+    log(std::string("[ble] telecommande deconnectee : ") + why + info);
+  }
+  try { dev.ConnectionStatusChanged(tokConn); } catch (...) {}
+  try { if (session) session.Close(); } catch (...) {}
   try { ch.ValueChanged(tok); } catch (...) {}
   try { svc.Close(); } catch (...) {}
   try { dev.Close(); } catch (...) {}
