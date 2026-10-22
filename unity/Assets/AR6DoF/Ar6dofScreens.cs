@@ -87,6 +87,14 @@ namespace AR6DoF
             if (pointer == null) pointer = FindFirstObjectByType<Ar6dofPointer>();
             if (screenShader == null) screenShader = Shader.Find("AR6DoF/Screen");
             if (screenShader == null) { Debug.LogError("AR6DoF : renseigne 'Screen Shader' (Ar6dofScreen.shader) sur Ar6dofScreens."); return; }
+            if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Direct3D11)
+            {
+                // ar6dof_screen.dll copie l'image dans une texture Direct3D 11 : avec Direct3D 12 ou Vulkan, Unity PLANTE.
+                Debug.LogError("AR6DoF : ecrans virtuels desactives : Unity utilise " + SystemInfo.graphicsDeviceType + " au lieu de Direct3D11. " +
+                               "Project Settings > Player > Other Settings > decoche 'Auto Graphics API for Windows', ne garde que Direct3D11 (en premier), redemarre Unity. " +
+                               "(ou menu AR6DoF > Forcer Direct3D11)");
+                return;
+            }
             if (!Ar6dofScreenNative.Available) return;
             if (Ar6dofScreenNative.MonitorCount() == 0) { Debug.LogWarning("AR6DoF : aucun moniteur capturable."); return; }
 

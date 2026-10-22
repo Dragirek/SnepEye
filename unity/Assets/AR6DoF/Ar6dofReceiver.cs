@@ -89,7 +89,7 @@ namespace AR6DoF
             }
             catch (Exception e)
             {
-                UnityEngine.Debug.LogError("AR6DoF : impossible d'ouvrir le port UDP " + port + " : " + e.Message);
+                UnityEngine.Debug.LogError("AR6DoF : impossible d'ouvrir le port UDP " + port + " : " + e.Message + "\nPort deja pris par : (1) un autre Unity encore ouvert ou plante mais reste dans le Gestionnaire des taches (termine Unity.exe / Unity Bug Reporter), (2) un 2e composant identique dans la scene (cherche-le dans la Hierarchy : un seul par scene), (3) un autre programme.");
             }
         }
 

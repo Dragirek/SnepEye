@@ -54,7 +54,7 @@ namespace AR6DoF
                 thread = new Thread(Loop) { IsBackground = true, Name = "Ar6dofRemote" };
                 thread.Start();
             }
-            catch (Exception e) { UnityEngine.Debug.LogError("AR6DoF : télécommande, port UDP " + port + " inutilisable : " + e.Message); }
+            catch (Exception e) { UnityEngine.Debug.LogError("AR6DoF : télécommande, port UDP " + port + " inutilisable : " + e.Message + "\nPort deja pris par : (1) un autre Unity encore ouvert ou plante mais reste dans le Gestionnaire des taches (termine Unity.exe / Unity Bug Reporter), (2) un 2e composant identique dans la scene (cherche-le dans la Hierarchy : un seul par scene), (3) un autre programme."); }
         }
 
         void OnDisable()

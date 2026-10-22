@@ -49,6 +49,25 @@ namespace AR6DoF
             so.ApplyModifiedProperties();
         }
 
+        /// <summary>ar6dof_screen.dll ne sait parler qu'à Direct3D 11 : avec Direct3D 12 (défaut des nouveaux projets Unity 6) ou Vulkan, Unity plante.</summary>
+        [MenuItem("AR6DoF/Forcer Direct3D11 (obligatoire pour les ecrans virtuels)")]
+        static void ForceD3D11Menu()
+        {
+            ForceD3D11();
+            EditorUtility.DisplayDialog("AR6DoF", "Direct3D 11 est maintenant la seule API graphique Windows du projet.\nREDEMARRE UNITY pour que ce soit pris en compte.", "OK");
+        }
+
+        static bool ForceD3D11()
+        {
+            var t = BuildTarget.StandaloneWindows64;
+            var cur = PlayerSettings.GetGraphicsAPIs(t);
+            bool ok = !PlayerSettings.GetUseDefaultGraphicsAPIs(t) && cur.Length == 1 && cur[0] == UnityEngine.Rendering.GraphicsDeviceType.Direct3D11;
+            if (ok) return false;
+            PlayerSettings.SetUseDefaultGraphicsAPIs(t, false);
+            PlayerSettings.SetGraphicsAPIs(t, new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 });
+            return true;
+        }
+
         [MenuItem("AR6DoF/Creer la scene complete")]
         static void Build()
         {
@@ -128,6 +147,7 @@ namespace AR6DoF
             AlwaysInclude(shScreen);
             AlwaysInclude(shFlat);
             PlayerSettings.runInBackground = true;
+            if (ForceD3D11()) todo.Insert(0, "REDEMARRE UNITY : l'API graphique a ete reglee sur Direct3D11 (obligatoire, sinon les ecrans virtuels font planter Unity).");
 
             bool dll = false;
             foreach (string g in AssetDatabase.FindAssets("ar6dof_screen"))

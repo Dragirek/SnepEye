@@ -27,7 +27,7 @@ Unity lance `ar6dof_probe.exe` tout seul (composant **Launcher**) et l'arrête �
 | `ar6dof_screen.dll` | idem | **aussi** copiée dans `Assets/AR6DoF/Plugins/x86_64/` (crée le dossier ; clique la DLL, coche *Windows x86_64*) |
 | `camera_model.json` | écrit par ar6dof_probe à côté de son exe au premier lancement | copié dans `Assets` |
 
-Projet Unity 6, URP ou pipeline intégré. *Project Settings > Player > Active Input Handling* : « Both » ou « Input System Package » ou « Input Manager », au choix.
+Projet Unity 6, URP ou pipeline intégré. **API graphique : Direct3D 11 uniquement** (*Project Settings > Player > Other Settings* : décoche *Auto Graphics API for Windows* et ne garde que Direct3D11 ; ou menu **AR6DoF > Forcer Direct3D11**, puis redémarre Unity). Avec Direct3D 12 (défaut des nouveaux projets Unity 6) ou Vulkan, la capture d'écran fait **planter Unity** au Play. *Project Settings > Player > Active Input Handling* : « Both » ou « Input System Package » ou « Input Manager », au choix.
 
 ---
 
@@ -176,6 +176,8 @@ Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit
 ## 12. Dépannage
 | Symptôme | Cause / remède |
 |---|---|
+| Unity **plante au Play** (quelques instants après l'apparition des menus) | API graphique ≠ Direct3D11 : voir étape 2. Si ça persiste, ouvre `%LOCALAPPDATA%\Unity\Editor\Editor-prev.log` et cherche la ligne `Crash!!!` : le nom du module juste dessous (ex. `ar6dof_screen.dll`) indique le coupable. |
+| *port UDP 9876 / 9878 ... Une seule utilisation de chaque adresse* | un Unity planté tourne encore (Gestionnaire des tâches : termine `Unity.exe`, `Unity Bug Reporter`), ou deux Ar6dofReceiver / Ar6dofRemote dans la scène. |
 | *Can't add script component ... because the script class cannot be found* | une **erreur de compilation** ailleurs bloque tous les scripts : regarde la Console (rouge). Cause fréquente : un fichier en double (`Ar6dofXxx1.cs`) : supprime-le. |
 | *Aucun paquet reçu* (StatusHud) | ar6dof_probe ne tourne pas ou `t` pas pressé / tracking pas démarré. Regarde `[probe]` dans la Console. |
 | `ar6dof_probe.exe introuvable` | renseigne *Exe Path* du Launcher, ou place `ar6dof_probe-win64` à côté de `Assets`. |
