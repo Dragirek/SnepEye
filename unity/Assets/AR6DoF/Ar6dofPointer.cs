@@ -19,7 +19,9 @@ namespace AR6DoF
         public float maxDistance = 6f;
         [Tooltip("Canvas en World Space que la télécommande doit pouvoir cliquer")]
         public Canvas[] canvases;
-        [Header("Lissage (anti-tremblement)")]
+        [Header("Lissage supplémentaire")]
+        [Tooltip("Désactivé par défaut : le filtre (stabilité + anticipation) est déjà dans Ar6dofRemote et ajouter un lissage ici ajoute du retard.")]
+        public bool extraSmoothing = false;
         public float minCutoffHz = 1.5f;     // plus bas = plus stable à l'arrêt
         public float beta = 0.04f;           // plus haut = plus réactif en mouvement
         public float recenterHoldSeconds = 0.6f;
@@ -94,12 +96,15 @@ namespace AR6DoF
 
             Vector3 d = Quaternion.Euler(0f, yawOffset, 0f) * dRaw;
             // Lissage adaptatif (type "One Euro") : stable à l'arrêt, sans retard en mouvement rapide
-            if (!haveDir) { dirSmooth = d; haveDir = true; }
-            float dt = Mathf.Max(1e-4f, Time.unscaledDeltaTime);
-            float speed = Vector3.Angle(dirSmooth, d) / dt;   // deg/s
-            float cutoff = minCutoffHz + beta * speed;
-            float tau = 1f / (2f * Mathf.PI * cutoff);
-            dirSmooth = Vector3.Slerp(dirSmooth, d, dt / (dt + tau)).normalized;
+            if (!haveDir || !extraSmoothing) { dirSmooth = d; haveDir = true; }
+            else
+            {
+                float dt = Mathf.Max(1e-4f, Time.unscaledDeltaTime);
+                float speed = Vector3.Angle(dirSmooth, d) / dt;   // deg/s
+                float cutoff = minCutoffHz + beta * speed;
+                float tau = 1f / (2f * Mathf.PI * cutoff);
+                dirSmooth = Vector3.Slerp(dirSmooth, d, dt / (dt + tau)).normalized;
+            }
 
             Vector3 origin = head.position + Quaternion.Euler(0f, Yaw(headFwd), 0f) * originOffset;
             var ray = new Ray(origin, dirSmooth);

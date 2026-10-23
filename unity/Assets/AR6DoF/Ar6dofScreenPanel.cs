@@ -41,6 +41,7 @@ namespace AR6DoF
         int lastCursorX = int.MinValue, lastCursorY = int.MinValue;
         float hoverAmount, hoverTarget;
         int hoverCount;
+        Transform cursorT;   // curseur dessiné par Unity : la capture d'écran ne contient pas le curseur Windows
 
         // glisser
         Ar6dofScreenHandle.Kind dragKind;
@@ -76,6 +77,7 @@ namespace AR6DoF
             quadRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             quadRenderer.receiveShadows = false;
 
+            cursorT = MakeCursor();
             barRoot = new GameObject("Chrome").transform;
             barRoot.SetParent(transform, false);
             moveT = MakeHandle("Deplacer", Ar6dofScreenHandle.Kind.Move, "");
@@ -84,6 +86,31 @@ namespace AR6DoF
             Layout();
             RefreshRect();
             Ar6dofScreenNative.Start(slot, monitor, fps);
+        }
+
+        Transform MakeCursor()
+        {
+            var root = new GameObject("Curseur").transform;
+            root.SetParent(transform, false);
+            for (int i = 0; i < 2; i++)
+            {
+                var g = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                g.name = i == 0 ? "Contour" : "Centre";
+                Destroy(g.GetComponent<Collider>());
+                g.transform.SetParent(root, false);
+                g.transform.localRotation = Quaternion.Euler(0f, 0f, 45f);   // losange
+                g.transform.localPosition = new Vector3(0f, 0f, i == 0 ? -0.005f : -0.007f);
+                g.transform.localScale = i == 0 ? new Vector3(1f, 1f, 1f) : new Vector3(0.55f, 0.55f, 1f);
+                var m = new Material(owner.ScreenShader);
+                m.SetFloat("_UseTex", 0f);
+                m.SetColor("_Color", i == 0 ? Color.black : Color.white);
+                var r = g.GetComponent<Renderer>();
+                r.sharedMaterial = m;
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                r.receiveShadows = false;
+            }
+            root.gameObject.SetActive(false);
+            return root;
         }
 
         Transform MakeHandle(string n, Ar6dofScreenHandle.Kind kind, string label)
@@ -246,10 +273,24 @@ namespace AR6DoF
         }
 
         public void OnPointerEnter() { SetHover(true); }
-        public void OnPointerExit() { SetHover(false); }
+        public void OnPointerExit() { SetHover(false); if (cursorT != null) cursorT.gameObject.SetActive(false); }
+
+        void PlaceCursor(Vector3 world)
+        {
+            if (cursorT == null) return;
+            Vector3 lp = transform.InverseTransformPoint(world);
+            float cx = Mathf.Clamp(lp.x, -width * 0.5f, width * 0.5f), cy = Mathf.Clamp(lp.y, -Height * 0.5f, Height * 0.5f);
+            cursorT.localPosition = new Vector3(cx, cy, 0f);
+            Transform head = owner != null ? owner.Head : null;
+            float dist = head != null ? Vector3.Distance(head.position, world) : 1.5f;
+            float size = Mathf.Max(0.012f, 0.011f * dist) / Mathf.Max(0.01f, transform.lossyScale.x);   // taille constante à l'oeil (~0,6 deg)
+            cursorT.localScale = new Vector3(size, size, 1f);
+            if (!cursorT.gameObject.activeSelf) cursorT.gameObject.SetActive(true);
+        }
 
         public void OnPointerHover(Vector3 world)
         {
+            PlaceCursor(world);   // à chaque image : aucun retard, indépendant de la capture
             int x, y;
             if (!Map(world, out x, out y)) return;
             if (x == lastCursorX && y == lastCursorY) return;

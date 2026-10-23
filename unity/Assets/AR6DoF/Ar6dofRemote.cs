@@ -18,6 +18,21 @@ namespace AR6DoF
         [Tooltip("Axe du capteur qui pointe vers l'avant de la télécommande. Réglé par la calibration en 2 étapes (panneau F1).")]
         public Vector3 pointAxisSensor = new Vector3(1f, 0f, 0f);
 
+        [Header("Filtre de visée (latence / stabilité)")]
+        [Tooltip("Stabilité à l'arrêt : plus bas = plus stable (supprime le tremblement de la main), plus haut = plus nerveux")]
+        public float filterMinCutoffHz = 2f;
+        [Tooltip("Réactivité en mouvement : plus haut = moins de retard quand tu bouges vite")]
+        public float filterBeta = 0.15f;
+        [Tooltip("Anticipation en millisecondes : le laser est avancé de ce temps pour compenser le retard Bluetooth + affichage. 0 = aucune ; monte si le laser traîne, baisse s'il dépasse la cible.")]
+        public float predictMs = 10f;
+
+        // Filtre (thread de réception, au rythme des paquets, avec l'horloge du capteur : insensible aux paquets qui arrivent en rafale)
+        Vector3 aimDir, aimVel;
+        float aimSpeed;
+        bool aimInit;
+        uint aimLastUs;
+        double aimRecv;
+
         const string PrefKey = "ar6dof_remote_axis";
         readonly object lockObj = new object();
         UdpClient udp;
@@ -82,6 +97,7 @@ namespace AR6DoF
                     right = (d[5] & 2) != 0;
                     q = new double[] { BitConverter.ToSingle(d, 8), BitConverter.ToSingle(d, 12), BitConverter.ToSingle(d, 16), BitConverter.ToSingle(d, 20) };
                     q = Ar6dofMath.Normalize(q);
+                    UpdateAim(q, BitConverter.ToUInt32(d, 24), now);
                     haveData = true;
                     recvTime = now;
                     packets++;
@@ -96,6 +112,29 @@ namespace AR6DoF
             }
         }
 
+        static float Alpha(float cutoffHz, float dt) { float tau = 1f / (2f * Mathf.PI * cutoffHz); return dt / (dt + tau); }
+
+        // Filtre "One Euro" sur la direction visée, appliqué à chaque paquet (125 Hz) et non à chaque image d'Unity.
+        void UpdateAim(double[] qn, uint us, double now)
+        {
+            double w = qn[0], x = qn[1], y = qn[2], z = qn[3];
+            double px = pointAxisSensor.x, py = pointAxisSensor.y, pz = pointAxisSensor.z;
+            double gx = (1 - 2 * (y * y + z * z)) * px + 2 * (x * y - w * z) * py + 2 * (x * z + w * y) * pz;
+            double gy = 2 * (x * y + w * z) * px + (1 - 2 * (x * x + z * z)) * py + 2 * (y * z - w * x) * pz;
+            double gz = 2 * (x * z - w * y) * px + 2 * (y * z + w * x) * py + (1 - 2 * (x * x + y * y)) * pz;
+            Vector3 dir = Ar6dofConvert.Position(new Vector3((float)gx, (float)gy, (float)gz)).normalized;
+            float dt = aimInit ? (uint)(us - aimLastUs) * 1e-6f : 0f;
+            aimLastUs = us;
+            if (!aimInit || dt > 0.25f) { aimDir = dir; aimVel = Vector3.zero; aimSpeed = 0f; aimInit = true; aimRecv = now; return; }
+            if (dt < 1e-4f) return;   // paquet en double
+            aimSpeed += (Vector3.Angle(aimDir, dir) / dt - aimSpeed) * Alpha(8f, dt);   // vitesse en deg/s
+            float cut = filterMinCutoffHz + filterBeta * aimSpeed;
+            Vector3 old = aimDir;
+            aimDir = (aimDir + (dir - aimDir) * Alpha(cut, dt)).normalized;
+            aimVel += ((aimDir - old) / dt - aimVel) * Alpha(12f, dt);
+            aimRecv = now;
+        }
+
         /// <summary>Rotation capteur -> monde (matrice 3x3 en ligne, Z vers le haut).</summary>
         public bool TryGetRotation(out double[] R9)
         {
@@ -106,15 +145,21 @@ namespace AR6DoF
             }
         }
 
-        /// <summary>Direction visée (repère Unity), sans correction de cap : le cap du capteur est arbitraire, voir Ar6dofPointer.</summary>
+        /// <summary>Direction visée (repère Unity), filtrée et anticipée, sans correction de cap : le cap du capteur est arbitraire, voir Ar6dofPointer.</summary>
         public bool TryGetPointDirection(out Vector3 dirUnity)
         {
             dirUnity = Vector3.forward;
-            if (!TryGetRotation(out double[] R) || !Connected) return false;
-            double px = pointAxisSensor.x, py = pointAxisSensor.y, pz = pointAxisSensor.z;
-            var g = new Vector3((float)(R[0] * px + R[1] * py + R[2] * pz), (float)(R[3] * px + R[4] * py + R[5] * pz), (float)(R[6] * px + R[7] * py + R[8] * pz));
-            dirUnity = Ar6dofConvert.Position(g).normalized;
-            return true;
+            if (!Connected) return false;
+            lock (lockObj)
+            {
+                if (!aimInit) return false;
+                float degPerSec = aimVel.magnitude * Mathf.Rad2Deg;
+                float gate = Mathf.Clamp01((degPerSec - 3f) / 10f);   // pas d'anticipation à l'arrêt : elle amplifierait le bruit
+                float stale = Mathf.Clamp((float)(Ar6dofClock.Now() - aimRecv), 0f, 0.03f);   // temps écoulé depuis le dernier paquet
+                float h = Mathf.Min(0.08f, predictMs * 0.001f + stale) * gate;
+                dirUnity = (aimDir + aimVel * h).normalized;
+                return true;
+            }
         }
 
         // ---- Calibration en 2 gestes (comme pour la sonde du casque) ----

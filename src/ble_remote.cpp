@@ -156,11 +156,6 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
   wb::BluetoothLEDevice dev = wb::BluetoothLEDevice::FromBluetoothAddressAsync(addr).get();
   if (!dev) { log("[ble] connexion impossible"); SleepMs(1500); return; }
 
-#ifdef AR6DOF_BLE_PREFERRED_PARAMS   // desactive par defaut : certains pilotes (Realtek) refusent cette commande HCI
-  // Demande à Windows un intervalle de connexion court (faible latence). Facultatif : ignoré si non supporté.
-  wb::BluetoothLEPreferredConnectionParametersRequest prefReq{nullptr};
-  try { prefReq = dev.RequestPreferredConnectionParameters(wb::BluetoothLEPreferredConnectionParameters::ThroughputOptimized()); } catch (...) {}
-#endif
 
   g_step = "lecture du service GATT";
   // Certains pilotes Bluetooth (Realtek...) refusent « GetGattServicesForUuid » avec l'erreur 0x80070016 : on essaie plusieurs méthodes,
@@ -235,6 +230,21 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
   }
   log(std::string("[ble] telecommande connectee") + (session ? " (liaison maintenue)" : ""));
 
+  // Latence et robustesse : demande à Windows un intervalle de connexion court (7,5 à 15 ms au lieu de 30-50 ms). Plus l'intervalle est court,
+  // moins les notifications attendent, et plus il y a d'occasions de réémettre un paquet perdu (obstacle). Fait APRES la connexion : si le pilote
+  // refuse (certains pilotes Realtek), il n'y a aucune conséquence. -DAR6DOF_BLE_NO_PREFERRED_PARAMS pour désactiver.
+  wb::BluetoothLEPreferredConnectionParametersRequest prefReq{nullptr};
+#ifndef AR6DOF_BLE_NO_PREFERRED_PARAMS
+  try {
+    prefReq = dev.RequestPreferredConnectionParameters(wb::BluetoothLEPreferredConnectionParameters::ThroughputOptimized());
+    int pst = static_cast<int>(prefReq.Status());
+    log(pst == 1 ? "[ble] intervalle de connexion court : accepte par Windows"
+                 : "[ble] intervalle de connexion court : refuse (code " + std::to_string(pst) + "), la liaison reste utilisable avec l'intervalle par defaut");
+  } catch (...) {
+    log("[ble] intervalle de connexion court : non supporte par ce pilote (sans gravite)");
+  }
+#endif
+
   // Reste connecté tant que des paquets arrivent
   const int64_t tConn = NowMs();
   const char* why = "arret du programme";
@@ -249,6 +259,7 @@ void RunOnce(UdpSender& udp, const LogFn& log) {
     log(std::string("[ble] telecommande deconnectee : ") + why + info);
   }
   try { dev.ConnectionStatusChanged(tokConn); } catch (...) {}
+  try { if (prefReq) prefReq.Close(); } catch (...) {}
   try { if (session) session.Close(); } catch (...) {}
   try { ch.ValueChanged(tok); } catch (...) {}
   try { svc.Close(); } catch (...) {}

@@ -140,13 +140,15 @@ Bouton *Sauver ces réglages* pour les garder.
 3. Le Bluetooth passe par ar6dof_probe : il cherche « AR6DoF-Remote », se connecte, se reconnecte. Console : `[probe] [ble] telecommande connectee`.
 4. Réglages > *Télécommande* (panneau F1) : *Calibration 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
 5. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
+6. **Latence et stabilité** (composant `Ar6dofRemote`) : le filtre tourne à chaque paquet (125 Hz) avec l'horloge du capteur. *Filter Min Cutoff Hz* (2) : plus bas = plus stable à l'arrêt. *Filter Beta* (0,15) : plus haut = moins de retard en mouvement. *Predict Ms* (10) : avance le laser de ce temps pour compenser le Bluetooth et l'affichage ; monte-le si le laser traîne, baisse-le s'il dépasse la cible. Dans `Ar6dofPointer`, *Extra Smoothing* reste décoché (il ajouterait du retard).
+7. **Portée** : antenne de l'ESP32-C3 dégagée (pas de main, batterie ni fils dessus), dongle Bluetooth sur un port USB 2 ou une rallonge (l'USB 3 brouille le 2,4 GHz). Au démarrage, ar6dof_probe demande à Windows un intervalle de connexion court : `[ble] intervalle de connexion court : accepte`.
 
 ## 8. Écrans virtuels
 La capture est faite par `ar6dof_screen.dll` (DXGI, GPU vers GPU, aucun travail quand le bureau ne change pas). Icône « écrans » de la barre.
 - Barre sous un écran = déplacer (bouton gauche : tout le groupe ; bouton droit : cet écran seul). **Coins** = taille. Bouton **Param.** = moniteur capturé, images/s, collage, courbure, ajouter (3 max) / retirer.
 - **Écran dans l'écran** : installe un pilote d'écran virtuel Windows (ex. *Virtual Display Driver*) en 1920x1080 / 60 Hz, glisse tes fenêtres dessus, c'est lui qu'on capture.
 - Image à l'envers : décocher *Flip Y* sur `Ar6dofScreens`. Clics à côté : mettre le moniteur capturé à 100 % de mise à l'échelle.
-- Limites : bureau en SDR, même carte graphique pour Unity et le moniteur capturé, le curseur Windows n'est pas dessiné (le laser fait office de curseur).
+- Limites : bureau en SDR, même carte graphique pour Unity et le moniteur capturé, le curseur Windows n'est pas dans la capture : Unity dessine un petit losange noir et blanc à l'endroit visé, sans aucun retard.
 
 ## 9. Clavier virtuel
 Icône « KB ». AZERTY / QWERTY sans dépendre du clavier Windows (envoi Unicode). Maj / Ctrl / Alt restent actives pour la touche suivante. Un champ de texte d'un menu VR reçoit les lettres à la place de Windows.

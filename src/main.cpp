@@ -311,6 +311,7 @@ struct Mailbox {
 static std::atomic<double> g_camFps{0.0}, g_shareMs{0.0};
 
 static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share, bool shareOn) {
+  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);   // la lecture de la caméra ne doit jamais attendre le reste
   bool shareFailed = false;
   int fails = 0;
   uint64_t n = 0, frameNo = 0;
@@ -561,6 +562,22 @@ static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const V
   cv::line(Bm, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
 }
 
+// Latence : Windows 11 peut ralentir un programme sans fenêtre visible (économie d'énergie, minuteries à 15 ms).
+// On demande une priorité un peu plus haute, des minuteries à 1 ms et la fin de la limitation d'énergie.
+static void BoostProcess() {
+  SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+#if defined(PROCESS_POWER_THROTTLING_CURRENT_VERSION) && defined(PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION)
+  PROCESS_POWER_THROTTLING_STATE st = {};
+  st.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+  st.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+  st.StateMask = 0;   // contrôle pris, limitation désactivée
+  SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &st, sizeof(st));
+#endif
+  typedef UINT(WINAPI * TimeBeginPeriodFn)(UINT);
+  if (HMODULE m = LoadLibraryA("winmm.dll"))
+    if (auto fn = reinterpret_cast<TimeBeginPeriodFn>(GetProcAddress(m, "timeBeginPeriod"))) fn(1);
+}
+
 // --parent <pid> : Unity lance ce programme et donne son propre numero de processus. Quand Unity se ferme (ou plante),
 // le programme s'arrete tout seul : plus d'exe orphelin qui garde la camera et les ports.
 static std::atomic<bool> g_parentGone{false};
@@ -584,6 +601,7 @@ int main(int argc, char** argv) {
   std::cout << std::unitbuf;   // chaque ligne est écrite tout de suite (console ET fichier)
   struct CoutRestore { std::streambuf* o; ~CoutRestore() { std::cout.rdbuf(o); } } coutRestore{origCout};
   g_qpcOffset = QpcSeconds() - NowS();
+  BoostProcess();
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--auto") g_auto = true;                 // rejoue les réponses de la dernière fois, sans question

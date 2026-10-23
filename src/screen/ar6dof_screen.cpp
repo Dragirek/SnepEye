@@ -119,27 +119,29 @@ void CaptureSession(Slot& s) {
   s.gen++;
   s.status = 2;
 
-  auto next = std::chrono::steady_clock::now();
+  // Latence minimale : on ne dort JAMAIS avant de demander l'image. AcquireNextFrame réveille ce thread à l'instant même où Windows
+  // présente une nouvelle image (aucune attente d'une grille de cadence). La limite d'images/s ne sert qu'à plafonner les copies :
+  // si une image arrive trop tôt, on la GARDE jusqu'à l'échéance au lieu de la jeter (sinon la dernière image d'une rafale,
+  // par exemple la dernière lettre tapée, resterait invisible jusqu'au prochain changement).
+  auto lastCopy = std::chrono::steady_clock::now() - std::chrono::seconds(1);
   while (s.run && s.monitor == mi) {
-    // Cadence : on attend AVANT de demander l'image, pour toujours capturer l'état le plus récent
-    int fps = std::max(5, std::min(240, s.maxFps.load()));
-    next += std::chrono::microseconds(1000000 / fps);
-    auto now = std::chrono::steady_clock::now();
-    if (next > now) std::this_thread::sleep_until(next); else next = now;
     if (!s.active) { SleepMs(30); continue; }
-
     DXGI_OUTDUPL_FRAME_INFO fi;
     ComPtr<IDXGIResource> frame;
     HRESULT hr = dup->AcquireNextFrame(100, &fi, &frame);
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) continue;   // bureau immobile : rien à faire
     if (FAILED(hr)) break;                         // accès perdu (changement de résolution, verrouillage...) : on recrée tout
     if (fi.LastPresentTime.QuadPart != 0) {        // 0 = seul le curseur a bougé
+      int fps = std::max(5, std::min(240, s.maxFps.load()));
+      auto due = lastCopy + std::chrono::microseconds(900000 / fps);   // 90 % de la période : évite de rater une image par arrondi
+      if (std::chrono::steady_clock::now() < due) std::this_thread::sleep_until(due);
       ComPtr<ID3D11Texture2D> tex;
       if (SUCCEEDED(frame.As(&tex)) && km->AcquireSync(0, 8) == S_OK) {
         ctx->CopyResource(shared.Get(), tex.Get());
         km->ReleaseSync(0);
         ctx->Flush();
         s.frames++;
+        lastCopy = std::chrono::steady_clock::now();
       }
     }
     dup->ReleaseFrame();
@@ -149,6 +151,7 @@ void CaptureSession(Slot& s) {
 
 void CaptureThread(int si) {
   Slot& s = g_slots[si];
+  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);   // réveil rapide dès qu'une image est présentée
   while (s.run) {
     s.status = 1;
     CaptureSession(s);

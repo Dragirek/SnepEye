@@ -1,12 +1,16 @@
 // ar6dof_remote.ino : télécommande pointeur gyroscopique BLUETOOTH (ESP32-C3 Supermini + BNO085 + 2 boutons).
 //
 // Envoie en Bluetooth Low Energy l'orientation du BNO085 (vecteur de rotation "jeu" : référence la gravité, le cap est
-// relatif) et l'état des 2 boutons, ~60 fois par seconde (réglable : MIN_SEND_US).
+// relatif) et l'état des 2 boutons, ~125 fois par seconde (réglable : SEND_HZ).
 // AUCUN réglage : ni WiFi, ni mot de passe, ni appairage dans les paramètres Windows. Le programme ar6dof_probe.exe
 // (sur le PC) cherche tout seul l'appareil "AR6DoF-Remote" et s'y reconnecte dès qu'il est allumé. Il faut seulement que
 // le Bluetooth du PC soit activé.
 //
-// Câblage (à adapter ci-dessous) : BNO085 SDA -> GPIO9, SCL -> GPIO8, 3V3, GND.
+// PORTÉE / OBSTACLES : l'ESP32-C3 Supermini a une petite antenne imprimée, très sensible à la main, à la batterie et aux fils.
+// Garde la zone de l'antenne (le bout de la carte, côté connecteur USB opposé aux broches) dégagée : pas de métal, pas de main,
+// pas de fils dessus ; loin de la batterie. Un dongle Bluetooth en USB 3 perturbe le 2,4 GHz : branche-le sur un port USB 2 ou une rallonge.
+//
+// Câblage (à adapter ci-dessous) : BNO085 SDA -> GPIO8, SCL -> GPIO9, 3V3, GND.
 //   Bouton GAUCHE -> GPIO21 et GND ; bouton DROIT -> GPIO0 et GND (résistances internes activées).
 // Arduino IDE : carte "ESP32C3 Dev Module" ; bibliothèque "Adafruit BNO08x". Le BLE est déjà fourni avec le support ESP32
 // (rien d'autre à installer).
@@ -32,10 +36,9 @@
 #define PIN_BTN_LEFT 21
 #define PIN_BTN_RIGHT 0
 #define BNO_RESET_PIN -1                 // GPIO relié à la broche RST du BNO085, ou -1
-#define REPORT_INTERVAL_US 8000          // 125 Hz
-#define MIN_SEND_US 16000                // au plus ~60 notifications par seconde. Windows ouvre souvent la liaison avec un intervalle de 30 a 50 ms :
-                                         // envoyer plus vite remplit la file d'envoi de l'ESP32 et la liaison finit par se bloquer.
-                                         // Une fois que ca tient longtemps (voir la console serie), tu peux essayer 10000 (100 Hz).
+#define REPORT_INTERVAL_US (1000000 / SEND_HZ)   // le capteur produit une orientation par envoi
+#define SEND_HZ 125                      // notifications par seconde (120 ou 125 = rythme du capteur ; 60 si la liaison est mauvaise)
+#define MIN_SEND_US (900000 / SEND_HZ)    // 90 % de la période : chaque rapport du capteur part tout de suite, sans en perdre par arrondi
 
 Adafruit_BNO08x bno08x(BNO_RESET_PIN);
 sh2_SensorValue_t sv;
