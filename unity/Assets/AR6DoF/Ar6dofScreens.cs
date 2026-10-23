@@ -388,12 +388,12 @@ namespace AR6DoF
         void Refresh()
         {
             if (settingsFor == null) return;
-            titleText.text = "Ecran " + (panels.IndexOf(settingsFor) + 1) + " / " + panels.Count;
-            sourceText.text = "Source : " + settingsFor.SourceText();
-            fpsText.text = "Images / s : " + settingsFor.fps;
-            snapText.text = "Coller aux bords : " + (snapEnabled ? "OUI" : "NON");
-            hingeText.text = "Courbure : " + Mathf.RoundToInt(hingeDegrees) + " deg";
-            addText.text = panels.Count >= maxScreens ? "(3 ecrans maximum)" : "+ Ajouter un ecran";
+            titleText.text = Ar6dofLoc.F("Ecran {0} / {1}", panels.IndexOf(settingsFor) + 1, panels.Count);
+            sourceText.text = Ar6dofLoc.T("Source : ") + settingsFor.SourceText();
+            fpsText.text = Ar6dofLoc.F("Images / s : {0}", settingsFor.fps);
+            snapText.text = Ar6dofLoc.T("Coller aux bords : ") + Ar6dofLoc.T(snapEnabled ? "OUI" : "NON");
+            hingeText.text = Ar6dofLoc.F("Courbure : {0} deg", Mathf.RoundToInt(hingeDegrees));
+            addText.text = Ar6dofLoc.T(panels.Count >= maxScreens ? "(3 ecrans maximum)" : "+ Ajouter un ecran");
         }
 
         void CycleMonitor()

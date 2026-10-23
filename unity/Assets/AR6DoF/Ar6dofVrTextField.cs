@@ -21,14 +21,15 @@ namespace AR6DoF
         public Image bg;
         bool focused;
 
-        static readonly Color NormalColor = new Color(0.14f, 0.16f, 0.2f, 1f);
-        static readonly Color FocusColor = new Color(0.12f, 0.3f, 0.4f, 1f);
+        static Color NormalColor { get { return Ar6dofTheme.FieldColor(false); } }
+        static Color FocusColor { get { return Ar6dofTheme.FieldColor(true); } }
 
         public static Ar6dofVrTextField Make(Transform parent, Vector2 pos, Vector2 size, string value, string placeholder, Action<string> onChanged, Action<string> onSubmit, int fontSize = 22)
         {
             var t = Ar6dofVrUi.Rect(parent, "Champ", pos, size);
             var img = t.gameObject.AddComponent<Image>();
             img.color = NormalColor;
+            Ar6dofTheme.SetRounded(img, Mathf.Min(Ar6dofSettings.StyleFor(Ar6dofElem.Menus).corner, 16));
             var f = t.gameObject.AddComponent<Ar6dofVrTextField>();
             f.bg = img;
             f.text = value ?? "";

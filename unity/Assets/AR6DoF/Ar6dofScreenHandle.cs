@@ -23,7 +23,10 @@ namespace AR6DoF
             rend.SetPropertyBlock(mpb);
         }
 
-        void Start() { SetColor(baseColor); }
+        void Start() { Refresh(); }
+
+        /// <summary>Réapplique la couleur courante (après un changement de style).</summary>
+        public void Refresh() { SetColor((hover || dragging) ? hoverColor : baseColor); }
         public void OnPointerEnter() { hover = true; SetColor(hoverColor); panel.SetHover(true); }
         public void OnPointerExit() { hover = false; if (!dragging) SetColor(baseColor); panel.SetHover(false); }
         public void OnPointerHover(Vector3 worldPoint) { }

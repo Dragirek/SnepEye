@@ -148,18 +148,18 @@ namespace AR6DoF
             tracker.SetEnabled(true);
 
             // 1) le programme doit répondre et les caméras tourner
-            title.text = "Etalonnage des yeux";
-            sub.text = "Attente des cameras d'oeil...";
+            title.text = Ar6dofLoc.T("Etalonnage des yeux");
+            sub.text = Ar6dofLoc.T("Attente des cameras d'oeil...");
             float t0 = Time.unscaledTime;
             while (!stopRequested && !tracker.Receiving && Time.unscaledTime - t0 < 10f) yield return null;
             if (!stopRequested && !tracker.Receiving)
             {
                 LastResult = tracker.EngineOnline
-                    ? "Aucune image des cameras d'oeil : verifie leurs numeros (ar6dof_probe, questions eyecamL / eyecamR)."
-                    : "ar6dof_probe ne repond pas : lance-le avec 'Eye tracking = 1'.";
-                title.text = "Impossible de demarrer";
+                    ? Ar6dofLoc.T("Aucune image des cameras d'oeil : verifie leurs numeros (ar6dof_probe, questions eyecamL / eyecamR).")
+                    : Ar6dofLoc.T("ar6dof_probe ne repond pas : lance-le avec 'Eye tracking = 1'.");
+                title.text = Ar6dofLoc.T("Impossible de demarrer");
                 sub.text = LastResult;
-                cancelLabel.text = "Fermer";
+                cancelLabel.text = Ar6dofLoc.T("Fermer");
                 stopRequested = false;
                 t0 = Time.unscaledTime;
                 while (!stopRequested && Time.unscaledTime - t0 < 8f) yield return null;
@@ -169,8 +169,8 @@ namespace AR6DoF
 
             // 2) consignes puis les points
             tracker.BeginCalibration();
-            title.text = "Regarde chaque cible sans bouger la tete";
-            sub.text = "Garde la tete droite et immobile. Suis le point des yeux.";
+            title.text = Ar6dofLoc.T("Regarde chaque cible sans bouger la tete");
+            sub.text = Ar6dofLoc.T("Garde la tete droite et immobile. Suis le point des yeux.");
             t0 = Time.unscaledTime;
             while (!stopRequested && Time.unscaledTime - t0 < 3.5f) yield return null;
 
@@ -181,8 +181,8 @@ namespace AR6DoF
                 while (!stopRequested)
                 {
                     int settle = (i == 0 && tries == 0) ? FirstSettleMs : SettleMs;
-                    title.text = "Point " + (i + 1) + " / " + Points.Length + (tries > 0 ? "  (on recommence)" : "");
-                    sub.text = "Regarde le point noir au centre de la cible";
+                    title.text = Ar6dofLoc.F("Point {0} / {1}", i + 1, Points.Length) + (tries > 0 ? Ar6dofLoc.T("  (on recommence)") : "");
+                    sub.text = Ar6dofLoc.T("Regarde le point noir au centre de la cible");
                     SetPoint(Points[i]);
                     dot.gameObject.SetActive(true);
                     pointDone = false;
@@ -198,10 +198,10 @@ namespace AR6DoF
                         yield return null;
                     }
                     if (stopRequested) break;
-                    if (!pointDone) { failed = true; LastResult = "ar6dof_probe ne repond plus pendant l'etalonnage."; break; }
+                    if (!pointDone) { failed = true; LastResult = Ar6dofLoc.T("ar6dof_probe ne repond plus pendant l'etalonnage."); break; }
                     if (cntL >= 8 || cntR >= 8) break;   // assez de mesures sur ce point
                     if (++tries >= 2) break;             // pupille introuvable deux fois : on passe (le calcul ignore ce point)
-                    sub.text = "Pupille non detectee : cligne puis regarde la cible";
+                    sub.text = Ar6dofLoc.T("Pupille non detectee : cligne puis regarde la cible");
                 }
             }
             dot.gameObject.SetActive(false);
@@ -209,13 +209,13 @@ namespace AR6DoF
             if (stopRequested || failed)
             {
                 tracker.CancelCalibration();
-                if (!failed) LastResult = "Etalonnage annule.";
+                if (!failed) LastResult = Ar6dofLoc.T("Etalonnage annule.");
                 Finish();
                 yield break;
             }
 
             // 3) calcul
-            title.text = "Calcul...";
+            title.text = Ar6dofLoc.T("Calcul...");
             sub.text = "";
             resultIn = false;
             tracker.Send("CAL_SOLVE");
@@ -224,10 +224,10 @@ namespace AR6DoF
             var w = (resultLine ?? "").Split(' ');
             if (!resultIn || w.Length < 3 || w[1] != "ok")
             {
-                LastResult = resultIn ? "Echec : pas assez de mesures (pupille perdue ?). Verifie l'eclairage infrarouge et la fenetre 'yeux' d'ar6dof_probe." : "Pas de reponse d'ar6dof_probe.";
-                title.text = "Etalonnage echoue";
+                LastResult = Ar6dofLoc.T(resultIn ? "Echec : pas assez de mesures (pupille perdue ?). Verifie l'eclairage infrarouge et la fenetre 'yeux' d'ar6dof_probe." : "Pas de reponse d'ar6dof_probe.");
+                title.text = Ar6dofLoc.T("Etalonnage echoue");
                 sub.text = LastResult;
-                cancelLabel.text = "Fermer";
+                cancelLabel.text = Ar6dofLoc.T("Fermer");
                 stopRequested = false;
                 t0 = Time.unscaledTime;
                 while (!stopRequested && Time.unscaledTime - t0 < 10f) yield return null;
@@ -236,14 +236,14 @@ namespace AR6DoF
             }
             float rmsL = -1f, rmsR = -1f;
             if (w.Length >= 4) { float.TryParse(w[2], NumberStyles.Float, CultureInfo.InvariantCulture, out rmsL); float.TryParse(w[3], NumberStyles.Float, CultureInfo.InvariantCulture, out rmsR); }
-            string q = (rmsL >= 0f ? "gauche " + Fmt(rmsL) + " deg" : "") + (rmsL >= 0f && rmsR >= 0f ? "  |  " : "") + (rmsR >= 0f ? "droit " + Fmt(rmsR) + " deg" : "");
-            LastResult = "Etalonnage termine. Erreur moyenne : " + q;
+            string q = (rmsL >= 0f ? Ar6dofLoc.T("gauche ") + Fmt(rmsL) + " deg" : "") + (rmsL >= 0f && rmsR >= 0f ? "  |  " : "") + (rmsR >= 0f ? Ar6dofLoc.T("droit ") + Fmt(rmsR) + " deg" : "");
+            LastResult = Ar6dofLoc.T("Etalonnage termine. Erreur moyenne : ") + q;
 
             // 4) vérification : le point vert suit le regard
             verifying = true;
-            title.text = "Etalonnage termine";
-            sub.text = "Erreur moyenne : " + q + "   -   regarde autour : le point vert doit te suivre";
-            cancelLabel.text = "Terminer";
+            title.text = Ar6dofLoc.T("Etalonnage termine");
+            sub.text = Ar6dofLoc.T("Erreur moyenne : ") + q + Ar6dofLoc.T("   -   regarde autour : le point vert doit te suivre");
+            cancelLabel.text = Ar6dofLoc.T("Terminer");
             gazeDot.gameObject.SetActive(true);
             stopRequested = false;
             t0 = Time.unscaledTime;

@@ -84,8 +84,48 @@ namespace AR6DoF
             gearT = MakeHandle("Parametres", Ar6dofScreenHandle.Kind.Settings, "Param.");
             for (int i = 0; i < 4; i++) cornerT.Add(MakeHandle("Coin" + i, Ar6dofScreenHandle.Kind.Resize, ""));
             Layout();
+            ApplyStyle();
+            Ar6dofSettings.Changed += ApplyStyle;
+            Ar6dofLoc.Changed += ApplyStyle;
             RefreshRect();
             Ar6dofScreenNative.Start(slot, monitor, fps);
+        }
+
+        void OnDestroy()
+        {
+            Ar6dofSettings.Changed -= ApplyStyle;
+            Ar6dofLoc.Changed -= ApplyStyle;
+        }
+
+        Material cursorCenterMat;
+        TextMesh gearText;
+        Shader handleShader;
+
+        /// <summary>Poignées et curseur : couleurs, arrondi et transparence du style "Ecrans" ; curseur = couleur du rayon.</summary>
+        void ApplyStyle()
+        {
+            if (moveT == null) return;
+            var st = Ar6dofSettings.StyleFor(Ar6dofElem.Screens);
+            Color baseC = st.button; baseC.a = Mathf.Lerp(1f, st.alpha, 0.5f);
+            Color hoverC = st.accent; hoverC.a = 1f;
+            var all = new List<Transform>(cornerT);
+            all.Add(moveT); all.Add(gearT);
+            foreach (var t in all)
+            {
+                var h = t.GetComponent<Ar6dofScreenHandle>();
+                if (h == null) continue;
+                h.baseColor = baseC;
+                h.hoverColor = hoverC;
+                h.Refresh();
+                var rend = t.GetComponent<Renderer>();
+                if (handleShader != null && rend != null) Ar6dofTheme.SetRoundedSize(rend.sharedMaterial, t.localScale.x, t.localScale.y, st.corner);
+            }
+            if (gearText != null) { gearText.text = Ar6dofLoc.T("Param."); gearText.color = st.text; }
+            if (cursorCenterMat != null)
+            {
+                Color lc = Ar6dofSettings.StyleFor(Ar6dofElem.Laser).accent; lc.a = 1f;
+                cursorCenterMat.SetColor("_Color", lc);
+            }
         }
 
         Transform MakeCursor()
@@ -104,6 +144,7 @@ namespace AR6DoF
                 var m = new Material(owner.ScreenShader);
                 m.SetFloat("_UseTex", 0f);
                 m.SetColor("_Color", i == 0 ? Color.black : Color.white);
+                if (i == 1) cursorCenterMat = m;
                 var r = g.GetComponent<Renderer>();
                 r.sharedMaterial = m;
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -122,8 +163,14 @@ namespace AR6DoF
             var bc = g.AddComponent<BoxCollider>();
             bc.size = new Vector3(1f, 1f, 0.05f);
             var r = g.GetComponent<Renderer>();
-            var m = new Material(owner.ScreenShader);
-            m.SetFloat("_UseTex", 0f);
+            if (handleShader == null) handleShader = Ar6dofTheme.RoundedShader;   // coins arrondis ; sinon l'ancien aplat
+            Material m;
+            if (handleShader != null) m = new Material(handleShader);
+            else
+            {
+                m = new Material(owner.ScreenShader);
+                m.SetFloat("_UseTex", 0f);
+            }
             m.SetColor("_Color", new Color(0.22f, 0.24f, 0.28f, 1f));
             r.sharedMaterial = m;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -137,7 +184,8 @@ namespace AR6DoF
                 t.transform.SetParent(g.transform, false);
                 t.transform.localPosition = new Vector3(0f, 0f, -0.02f);
                 var tm = t.AddComponent<TextMesh>();
-                tm.text = label;
+                tm.text = Ar6dofLoc.T(label);
+                if (kind == Ar6dofScreenHandle.Kind.Settings) gearText = tm;
                 tm.font = font;
                 tm.anchor = TextAnchor.MiddleCenter;
                 tm.alignment = TextAlignment.Center;
@@ -166,6 +214,18 @@ namespace AR6DoF
                 cornerT[i].localPosition = new Vector3(sx * (w * 0.5f + 0.035f), sy * (h * 0.5f + 0.035f), 0f);
                 cornerT[i].localScale = new Vector3(0.07f, 0.07f, 1f);
             }
+            if (handleShader != null)
+            {
+                int corner = Ar6dofSettings.StyleFor(Ar6dofElem.Screens).corner;
+                SetRounded(moveT, corner); SetRounded(gearT, corner);
+                for (int i = 0; i < 4; i++) SetRounded(cornerT[i], corner);
+            }
+        }
+
+        static void SetRounded(Transform t, int corner)
+        {
+            var r = t.GetComponent<Renderer>();
+            if (r != null) Ar6dofTheme.SetRoundedSize(r.sharedMaterial, t.localScale.x, t.localScale.y, corner);
         }
 
         // ------------------------------------------------------------------ mise à jour
@@ -235,11 +295,11 @@ namespace AR6DoF
             string st = "";
             switch (Ar6dofScreenNative.Status(slot))
             {
-                case 1: st = " (demarrage)"; break;
-                case 3: st = " (inaccessible)"; break;
-                case 4: st = " (HDR non gere)"; break;
+                case 1: st = Ar6dofLoc.T(" (demarrage)"); break;
+                case 3: st = Ar6dofLoc.T(" (inaccessible)"); break;
+                case 4: st = Ar6dofLoc.T(" (HDR non gere)"); break;
             }
-            return "Moniteur " + (monitor + 1) + " - " + Ar6dofScreenNative.Width(slot) + "x" + Ar6dofScreenNative.Height(slot) + st;
+            return Ar6dofLoc.F("Moniteur {0}", monitor + 1) + " - " + Ar6dofScreenNative.Width(slot) + "x" + Ar6dofScreenNative.Height(slot) + st;
         }
 
         void OnDestroy()

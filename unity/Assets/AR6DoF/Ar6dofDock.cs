@@ -46,6 +46,8 @@ namespace AR6DoF
         public override Transform AnimRoot { get { return canvas != null ? canvas.transform : null; } }
         public override void Activate(bool on) { if (canvas != null) canvas.gameObject.SetActive(on); }
         public override void BeforeFirstShow() { if (!placed && place != null && canvas != null) { place(canvas.transform); placed = true; } }
+        /// <summary>Ramène le menu à sa place d'origine (devant toi).</summary>
+        public void Replace() { if (place != null && canvas != null) place(canvas.transform); }
     }
 
     /// <summary>
@@ -82,6 +84,14 @@ namespace AR6DoF
         bool built;
         float waitStart = -1f;
         int lastSig = -1;
+        // dock accroché aux pieds
+        CanvasGroup group;
+        float reveal;                 // 0 = invisible, 1 = entièrement visible
+        Vector3 feetPos;
+        bool feetInit, lastFeetMode;
+        Vector3 lastFlat = Vector3.forward;
+        Text followLbl;
+        Ar6dofFloatingMenu kbMenu;
 
         Transform Head
         {
@@ -93,7 +103,12 @@ namespace AR6DoF
         }
 
         void Awake() { Instance = this; }
-        void OnDestroy() { if (Instance == this) Instance = null; }
+        void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+            Ar6dofSettings.Changed -= OnStyleChanged;
+            Ar6dofLoc.Changed -= OnLangChanged;
+        }
 
         void Update()
         {
@@ -115,6 +130,73 @@ namespace AR6DoF
             if (vrSettings != null) vrSettings.Tick();
         }
 
+        const float BarHeight = 200f;
+
+        void LateUpdate()
+        {
+            if (!built || canvas == null) return;
+            Transform h = Head;
+            if (h == null) return;
+            var d = Ar6dofSettings.Current;
+            if (!d.dockAtFeet) { reveal = 1f; ApplyReveal(); return; }
+
+            // inclinaison de la tête vers le bas (degrés) : le dock apparaît entre dockRevealStart et dockRevealFull
+            float pitch = Mathf.Asin(Mathf.Clamp(-h.forward.y, -1f, 1f)) * Mathf.Rad2Deg;
+            float a = Mathf.Clamp01(Mathf.InverseLerp(d.dockRevealStart, Mathf.Max(d.dockRevealStart + 1f, d.dockRevealFull), pitch));
+            a = a * a * (3f - 2f * a);
+            float dt = Time.unscaledDeltaTime;
+            reveal = Mathf.Lerp(reveal, a, 1f - Mathf.Exp(-12f * dt));
+            if (reveal < 0.003f && a == 0f) reveal = 0f;
+
+            // invisible : il suit tes pieds ; visible : il reste immobile pour être touché sans bouger (sauf si tu t'es éloigné)
+            Vector3 flat = h.position - feetPos; flat.y = 0f;
+            bool far = flat.magnitude > 1.2f;
+            if (!feetInit || far) FollowFeet(true);
+            else if (reveal <= 0.02f) FollowFeet(false);
+            ApplyReveal();
+        }
+
+        void ApplyReveal()
+        {
+            if (group == null) return;
+            group.alpha = reveal;
+            bool on = reveal > 0.05f;
+            group.blocksRaycasts = on;
+            group.interactable = on;
+            canvas.enabled = reveal > 0.003f;
+            if (followLbl != null && kbMenu != null) followLbl.text = Ar6dofLoc.T(kbMenu.follow ? "Suivi : OUI" : "Suivi : NON");
+        }
+
+        /// <summary>Place le dock sur le sol devant tes pieds, orienté pile vers tes yeux (angle fort).</summary>
+        void FollowFeet(bool snap)
+        {
+            Transform h = Head;
+            if (h == null || canvas == null) return;
+            var d = Ar6dofSettings.Current;
+            Vector3 f = h.forward; f.y = 0f;
+            if (f.sqrMagnitude > 1e-3f) lastFlat = f.normalized;
+            Vector3 target = new Vector3(h.position.x, 0.12f, h.position.z) + lastFlat * Mathf.Clamp(d.dockDistance, 0.3f, 1.5f);
+            if (snap || !feetInit) { feetPos = target; feetInit = true; }
+            else feetPos = Vector3.Lerp(feetPos, target, 1f - Mathf.Exp(-4f * Time.unscaledDeltaTime));
+            Vector3 dir = feetPos - h.position;
+            if (dir.sqrMagnitude < 1e-4f) dir = Vector3.down + lastFlat;
+            canvas.transform.SetPositionAndRotation(feetPos, Quaternion.LookRotation(dir.normalized) * Quaternion.Euler(d.dockTilt, 0f, 0f));
+            canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
+        }
+
+        void OnStyleChanged()
+        {
+            if (!built || canvas == null) return;
+            var d = Ar6dofSettings.Current;
+            if (d.dockAtFeet != lastFeetMode) { lastFeetMode = d.dockAtFeet; feetInit = false; Place(); }
+            else if (d.dockAtFeet) { feetInit = false; FollowFeet(true); }
+            else canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
+            foreach (var a in apps) SetIndicator(a);
+            SetIndicator(settingsApp);
+        }
+
+        void OnLangChanged() { if (built) RebuildIcons(); }
+
         int ScreenSignature()
         {
             var sc = Ar6dofScreens.Instance;
@@ -133,8 +215,12 @@ namespace AR6DoF
             if (keyboard == null) keyboard = FindFirstObjectByType<Ar6dofKeyboard>();
             if (launcher == null) launcher = FindFirstObjectByType<Ar6dofLauncher>();
 
-            canvas = Ar6dofVrUi.NewCanvas("Barre de taches", new Vector2(600f, 130f));
+            canvas = Ar6dofVrUi.NewCanvas("Barre de taches", new Vector2(680f, BarHeight), Ar6dofElem.Dock);
+            group = canvas.gameObject.AddComponent<CanvasGroup>();
             barRt = (RectTransform)canvas.transform;
+            Ar6dofSettings.Changed += OnStyleChanged;
+            Ar6dofLoc.Changed += OnLangChanged;
+            lastFeetMode = Ar6dofSettings.Current.dockAtFeet;
             var ir = new GameObject("Icones", typeof(RectTransform));
             ir.transform.SetParent(canvas.transform, false);
             iconsRoot = (RectTransform)ir.transform;
@@ -144,6 +230,7 @@ namespace AR6DoF
             if (keyboard != null)
             {
                 kbApp = new KeyboardApp { kb = keyboard, title = "Clavier", icon = "KB", open = keyboard.IsVisible };
+                kbMenu = keyboard.GetComponent<Ar6dofFloatingMenu>();
             }
             if (eyes == null) eyes = GetComponent<Ar6dofEyeTracker>();
             if (eyes == null) eyes = gameObject.AddComponent<Ar6dofEyeTracker>();
@@ -163,6 +250,7 @@ namespace AR6DoF
             devMenus.Load();
 
             Place();
+            ApplyReveal();
             // états mémorisés (clavier, menus) : affichés tout de suite, sans animation
             foreach (var a in ExtraApps())
             {
@@ -226,7 +314,7 @@ namespace AR6DoF
                 foreach (var p in sc.panels)
                 {
                     var a = screenApps[p];
-                    a.title = "Ecran " + (n + 1);
+                    a.title = Ar6dofLoc.F("Ecran {0}", n + 1);
                     a.icon = "E" + (n + 1);
                     a.open = p.open;
                     apps.Add(a);
@@ -237,8 +325,10 @@ namespace AR6DoF
 
             const float cell = 108f, size = 96f;
             float total = (apps.Count + 1) * cell + 30f + size + 40f;   // + le bouton "ajouter un menu"
-            barRt.sizeDelta = new Vector2(Mathf.Max(260f, total), 130f);
+            float barW = Mathf.Max(680f, total);
+            barRt.sizeDelta = new Vector2(barW, BarHeight);
             float x = -total * 0.5f + 20f + size * 0.5f;
+            MakeQuickRow(barW);
             foreach (var a in apps) { MakeIcon(a, x, size, false); x += cell; }
             MakeAddButton(x, size);
             x += cell;
@@ -247,7 +337,7 @@ namespace AR6DoF
             var sep = new GameObject("Separateur", typeof(RectTransform));
             sep.transform.SetParent(iconsRoot, false);
             var srt = (RectTransform)sep.transform;
-            srt.anchoredPosition = new Vector2(x - size * 0.5f - 15f, 0f);
+            srt.anchoredPosition = new Vector2(x - size * 0.5f - 15f, -26f);
             srt.sizeDelta = new Vector2(3f, 90f);
             var simg = sep.AddComponent<Image>();
             simg.color = new Color(1f, 1f, 1f, 0.25f);
@@ -255,16 +345,59 @@ namespace AR6DoF
             MakeIcon(settingsApp, x, size, true);
         }
 
+        // ------------------------------------------------------------------ actions rapides (remplacent les touches R, M et F)
+        void MakeQuickRow(float barW)
+        {
+            const float bw = 150f, bh = 58f, gap = 10f, y = 62f;
+            float x = -(4 * bw + 3 * gap) * 0.5f + bw * 0.5f;
+            Text lbl;
+            followLbl = null;
+            var b1 = Ar6dofVrUi.MakeButton(iconsRoot, "Recentrer", new Vector2(x, y), new Vector2(bw, bh), () => { if (rig != null) rig.Recenter(); FollowFeet(true); }, out lbl, 22);
+            Tip(b1, "Recentrer la tete : ici devant moi = cap de depart");
+            x += bw + gap;
+            var b2 = Ar6dofVrUi.MakeButton(iconsRoot, "Menus ici", new Vector2(x, y), new Vector2(bw, bh), BringMenus, out lbl, 22);
+            Tip(b2, "Ramener les menus ouverts devant moi");
+            x += bw + gap;
+            var b3 = Ar6dofVrUi.MakeButton(iconsRoot, "Clavier ici", new Vector2(x, y), new Vector2(bw, bh), () => { RecenterKeyboard(); ShowKeyboard(); }, out lbl, 22);
+            Tip(b3, "Poser le clavier devant moi");
+            x += bw + gap;
+            var b4 = Ar6dofVrUi.MakeButton(iconsRoot, "Suivi : NON", new Vector2(x, y), new Vector2(bw, bh), () =>
+            {
+                if (kbMenu != null) kbMenu.follow = !kbMenu.follow;
+                ApplyReveal();
+            }, out lbl, 22);
+            followLbl = lbl;
+            Tip(b4, "Le clavier te suit quand tu t'eloignes (oui / non)");
+        }
+
+        static void Tip(Button b, string text)
+        {
+            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
+            tip.text = () => text;
+        }
+
+        void BringMenus()
+        {
+            foreach (var a in ExtraApps())
+            {
+                if (!a.open || a == kbApp) continue;
+                var ca = a as CanvasApp;
+                if (ca != null) ca.Replace();
+                var dm = a as DeviceMenu;
+                if (dm != null) dm.Replace();
+            }
+        }
+
         void MakeAddButton(float x, float size)
         {
             Text lbl;
-            var b = Ar6dofVrUi.MakeButton(iconsRoot, "+", new Vector2(x, 4f), new Vector2(size, size), () =>
+            var b = Ar6dofVrUi.MakeButton(iconsRoot, "+", new Vector2(x, -26f), new Vector2(size, size), () =>
             {
                 var m = devMenus.Create();
                 RebuildIcons();
                 Toggle(m);   // s'ouvre tout de suite : on est dans ses parametres a choisir l'appareil
             }, out lbl, 54);
-            lbl.color = Ar6dofVrUi.Accent;
+            lbl.MakeAccent();
             var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
             tip.text = () => "Nouveau menu d'appareil Bluetooth";
         }
@@ -273,7 +406,7 @@ namespace AR6DoF
         {
             Text lbl;
             Ar6dofDockApp app = a;
-            var b = Ar6dofVrUi.MakeButton(iconsRoot, isGear ? "" : a.icon, new Vector2(x, 4f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
+            var b = Ar6dofVrUi.MakeButton(iconsRoot, isGear ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
             var rt = (RectTransform)b.transform;
             iconOf[a] = rt;
             if (isGear)
@@ -289,7 +422,8 @@ namespace AR6DoF
             else
             {
                 lbl.rectTransform.anchoredPosition = new Vector2(0f, 12f);
-                string shown = a.title.Length > 10 ? a.title.Substring(0, 9) + ".." : a.title;
+                string shown = Ar6dofLoc.T(a.title);
+                if (shown.Length > 10) shown = shown.Substring(0, 9) + "..";
                 Ar6dofVrUi.Label(rt, shown, new Vector2(0f, -32f), new Vector2(size, 24f), 15);
             }
             var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
@@ -318,7 +452,7 @@ namespace AR6DoF
 
         void SetIndicator(Ar6dofDockApp a)
         {
-            if (a.indicator != null) a.indicator.color = a.open ? Ar6dofVrUi.Accent : new Color(1f, 1f, 1f, 0f);
+            if (a.indicator != null) a.indicator.color = a.open ? Ar6dofSettings.StyleFor(Ar6dofElem.Dock).accent : new Color(1f, 1f, 1f, 0f);
         }
 
         // ------------------------------------------------------------------ afficher / ranger
@@ -366,6 +500,8 @@ namespace AR6DoF
         {
             Transform h = Head;
             if (h == null || canvas == null) return;
+            if (Ar6dofSettings.Current.dockAtFeet) { feetInit = false; FollowFeet(true); return; }
+            canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(Ar6dofSettings.Current.dockScale, 0.4f, 2.5f);
             Vector3 dir = Vector3.zero;
             float lowest = h.position.y - 0.45f;
             var sc = Ar6dofScreens.Instance;

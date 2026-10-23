@@ -60,6 +60,18 @@ namespace AR6DoF
                 pointAxisSensor = new Vector3(x, y, z);
         }
 
+        /// <summary>Le filtre vient des paramètres globaux (onglet Systeme du panneau VR) : changement en direct.</summary>
+        void ApplySettings()
+        {
+            var d = Ar6dofSettings.Current;
+            filterMinCutoffHz = d.remoteMinCutoff;
+            filterBeta = d.remoteBeta;
+            predictMs = d.remotePredictMs;
+        }
+
+        void Start() { ApplySettings(); Ar6dofSettings.Changed += ApplySettings; }
+        void OnDestroy() { Ar6dofSettings.Changed -= ApplySettings; }
+
         void OnEnable()
         {
             try

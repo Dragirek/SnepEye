@@ -8,9 +8,17 @@ namespace AR6DoF
     /// <summary>Petits outils pour construire par code des menus Unity UI en World Space, cliquables avec la télécommande.</summary>
     public static class Ar6dofVrUi
     {
-        public static readonly Color Bg = new Color(0.08f, 0.09f, 0.11f, 0.96f);
-        public static readonly Color Btn = new Color(0.22f, 0.26f, 0.32f, 1f);
-        public static readonly Color Accent = new Color(0.25f, 0.85f, 1f, 1f);
+        // Couleurs courantes du style des menus (Ar6dofSettings)
+        public static Color Bg { get { var st = Ar6dofSettings.StyleFor(Ar6dofElem.Menus); var c = st.bg; c.a = st.alpha; return c; } }
+        public static Color Btn { get { return Ar6dofSettings.StyleFor(Ar6dofElem.Menus).button; } }
+        public static Color Accent { get { return Ar6dofSettings.StyleFor(Ar6dofElem.Menus).accent; } }
+
+        /// <summary>Texte en couleur d'accent, qui suit le style choisi.</summary>
+        public static Text MakeAccent(this Text t)
+        {
+            if (t != null) Ar6dofTheme.Attach(t.gameObject, Ar6dofRole.AccentText);
+            return t;
+        }
 
         static Font font;
         public static Font GetFont()
@@ -22,9 +30,10 @@ namespace AR6DoF
         }
 
         /// <summary>Canvas World Space de 'size' pixels ; 1000 pixels = 1 mètre. Pas encore actif dans la scène : à placer par l'appelant.</summary>
-        public static Canvas NewCanvas(string name, Vector2 size)
+        public static Canvas NewCanvas(string name, Vector2 size, Ar6dofElem elem = Ar6dofElem.Menus)
         {
             var go = new GameObject(name);
+            go.AddComponent<Ar6dofThemeScope>().elem = elem;
             var c = go.AddComponent<Canvas>();
             c.renderMode = RenderMode.WorldSpace;
             go.AddComponent<GraphicRaycaster>();
@@ -36,8 +45,8 @@ namespace AR6DoF
             var brt = (RectTransform)bg.transform;
             brt.anchorMin = Vector2.zero; brt.anchorMax = Vector2.one; brt.offsetMin = brt.offsetMax = Vector2.zero;
             var img = bg.AddComponent<Image>();
-            img.color = Bg;
             img.raycastTarget = false;
+            Ar6dofTheme.Attach(bg, Ar6dofRole.Surface);
             return c;
         }
 
@@ -65,6 +74,8 @@ namespace AR6DoF
             t.horizontalOverflow = HorizontalWrapMode.Overflow;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             t.raycastTarget = false;
+            Ar6dofTheme.Attach(rt.gameObject, Ar6dofRole.Text);
+            Ar6dofLocText.Attach(t, text);
             return t;
         }
 
@@ -72,13 +83,9 @@ namespace AR6DoF
         {
             var rt = Child(parent, "Bouton", pos, size);
             var img = rt.gameObject.AddComponent<Image>();
-            img.color = Btn;
             var b = rt.gameObject.AddComponent<Button>();
             b.targetGraphic = img;
-            var cb = b.colors;
-            cb.highlightedColor = new Color(0.5f, 1.2f, 1.4f, 1f);
-            cb.pressedColor = new Color(0.3f, 0.7f, 0.9f, 1f);
-            b.colors = cb;
+            Ar6dofTheme.Attach(rt.gameObject, Ar6dofRole.Button, 24);
             if (onClick != null) b.onClick.AddListener(onClick);
             label = Label(rt, text, Vector2.zero, size, fontSize, TextAnchor.MiddleCenter);
             return b;
@@ -89,21 +96,21 @@ namespace AR6DoF
         {
             var root = Child(parent, "Curseur", pos, size);
             var bgImg = root.gameObject.AddComponent<Image>();
-            bgImg.color = new Color(0.16f, 0.18f, 0.22f, 1f);
+            Ar6dofTheme.Attach(root.gameObject, Ar6dofRole.Track, 14);
 
             var fillArea = Child(root, "Zone remplie", Vector2.zero, Vector2.zero);
             fillArea.anchorMin = new Vector2(0f, 0.3f); fillArea.anchorMax = new Vector2(1f, 0.7f);
             fillArea.offsetMin = new Vector2(14f, 0f); fillArea.offsetMax = new Vector2(-14f, 0f);
             var fill = Child(fillArea, "Remplissage", Vector2.zero, new Vector2(10f, 0f));
             var fillImg = fill.gameObject.AddComponent<Image>();
-            fillImg.color = Accent;
+            Ar6dofTheme.Attach(fill.gameObject, Ar6dofRole.Accent, 8);
 
             var handleArea = Child(root, "Zone poignee", Vector2.zero, Vector2.zero);
             handleArea.anchorMin = Vector2.zero; handleArea.anchorMax = Vector2.one;
             handleArea.offsetMin = new Vector2(14f, 0f); handleArea.offsetMax = new Vector2(-14f, 0f);
             var handle = Child(handleArea, "Poignee", Vector2.zero, new Vector2(30f, 0f));
             var hImg = handle.gameObject.AddComponent<Image>();
-            hImg.color = Color.white;
+            Ar6dofTheme.Attach(handle.gameObject, Ar6dofRole.Handle, 15);
 
             var s = root.gameObject.AddComponent<Slider>();
             s.fillRect = fill;

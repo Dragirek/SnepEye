@@ -171,7 +171,7 @@ namespace AR6DoF
             {
                 if (!string.IsNullOrEmpty(def.customName)) return def.customName;
                 if (!string.IsNullOrEmpty(def.deviceName)) return def.deviceName;
-                return string.IsNullOrEmpty(def.address) ? "Nouvel appareil" : "Appareil " + def.address.Substring(Math.Max(0, def.address.Length - 4));
+                return string.IsNullOrEmpty(def.address) ? Ar6dofLoc.T("Nouvel appareil") : Ar6dofLoc.T("Appareil ") + def.address.Substring(Math.Max(0, def.address.Length - 4));
             }
         }
 
@@ -198,6 +198,8 @@ namespace AR6DoF
         }
 
         public override void BeforeFirstShow() { if (!placed && place != null && canvas != null) { place(canvas.transform); placed = true; } }
+        /// <summary>Ramène le menu devant toi (bouton "Menus ici" du dock).</summary>
+        public void Replace() { if (place != null && canvas != null) place(canvas.transform); }
 
         public void StartInSettings() { mode = Mode.Settings; Rebuild(); }
 
@@ -206,15 +208,15 @@ namespace AR6DoF
         // ------------------------------------------------------------------ état
         string StatusString()
         {
-            if (string.IsNullOrEmpty(def.address)) return "Aucun appareil choisi";
+            if (string.IsNullOrEmpty(def.address)) return Ar6dofLoc.T("Aucun appareil choisi");
             var ble = Ar6dofBle.Instance;
-            if (ble == null) return "Bluetooth indisponible";
+            if (ble == null) return Ar6dofLoc.T("Bluetooth indisponible");
             switch (ble.State(def.address))
             {
-                case "connected": return "Connecte";
-                case "connecting": return "Connexion en cours...";
-                case "noprobe": return "ar6dof_probe absent";
-                default: return "Deconnecte";
+                case "connected": return Ar6dofLoc.T("Connecte");
+                case "connecting": return Ar6dofLoc.T("Connexion en cours...");
+                case "noprobe": return Ar6dofLoc.T("ar6dof_probe absent");
+                default: return Ar6dofLoc.T("Deconnecte");
             }
         }
 
@@ -355,7 +357,7 @@ namespace AR6DoF
             tip.text = () => mode == Mode.Use ? "Parametres du menu" : "Retour au menu";
             tip.offsetY = 50f;
             titleText = Lbl(DisplayName, 46f, 34, TextAnchor.MiddleCenter);
-            if (mode != Mode.Use) Lbl(mode == Mode.Settings ? "Parametres" : mode == Mode.Controls ? "Controles" : mode == Mode.Pick ? "Choisir l'appareil" : "Modifier le controle", 26f, 20, TextAnchor.MiddleCenter).color = Ar6dofVrUi.Accent;
+            if (mode != Mode.Use) Lbl(mode == Mode.Settings ? "Parametres" : mode == Mode.Controls ? "Controles" : mode == Mode.Pick ? "Choisir l'appareil" : "Modifier le controle", 26f, 20, TextAnchor.MiddleCenter).MakeAccent();
             y += 4f;
         }
 
@@ -455,8 +457,8 @@ namespace AR6DoF
         void SettingsView()
         {
             // Appareil
-            Lbl("Appareil", 30f, 22).color = Ar6dofVrUi.Accent;
-            Lbl(string.IsNullOrEmpty(def.address) ? "aucun" : (string.IsNullOrEmpty(def.deviceName) ? "(sans nom)" : def.deviceName) + "  -  " + def.address, 30f, 20);
+            Lbl("Appareil", 30f, 22).MakeAccent();
+            Lbl(string.IsNullOrEmpty(def.address) ? Ar6dofLoc.T("aucun") : (string.IsNullOrEmpty(def.deviceName) ? Ar6dofLoc.T("(sans nom)") : def.deviceName) + "  -  " + def.address, 30f, 20);
             BtnRow(50f, 22, "Changer d'appareil", (Action)(() => { mode = Mode.Pick; Rebuild(); }), "Oublier", (Action)(() => ForgetDevice()));
             Lbl("Nom affiche (vide = nom de l'appareil)", 28f, 18);
             Field(def.customName, def.deviceName.Length > 0 ? def.deviceName : "nom du menu", s => { def.customName = s.Trim(); NameChanged(); });
@@ -465,7 +467,7 @@ namespace AR6DoF
 
             // Envoi par défaut
             y += 6f;
-            Lbl("Envoi par defaut", 30f, 22).color = Ar6dofVrUi.Accent;
+            Lbl("Envoi par defaut", 30f, 22).MakeAccent();
             Lbl("Service Bluetooth (UUID, ex. FFE0)", 28f, 18);
             Field(def.service, "UUID du service", s => { def.service = s.Trim(); owner.MarkDirty(); });
             Lbl("Caracteristique (UUID, ex. FFE1)", 28f, 18);
@@ -477,7 +479,7 @@ namespace AR6DoF
 
             // Contrôles : page à part
             y += 6f;
-            Btn("Controles (" + def.controls.Count + ")  >", () => { mode = Mode.Controls; Rebuild(); }, 50f, 24);
+            Btn(Ar6dofLoc.F("Controles ({0})  >", def.controls.Count), () => { mode = Mode.Controls; Rebuild(); }, 50f, 24);
             y += 4f;
             BtnRow(50f, 22, confirmDelete ? "Confirmer la suppression" : "Supprimer ce menu", (Action)(() => { if (confirmDelete) owner.Remove(this); else { confirmDelete = true; Rebuild(); } }), "Terminer", (Action)(() => { confirmDelete = false; mode = Mode.Use; Rebuild(); }));
         }
@@ -507,7 +509,7 @@ namespace AR6DoF
                 }
             }
             y += 4f;
-            Lbl("Ajouter un controle", 28f, 18).color = Ar6dofVrUi.Accent;
+            Lbl("Ajouter un controle", 28f, 18).MakeAccent();
             string[] types = { "toggle", "slider", "button", "color", "rgbcode", "text", "choice", "label" };
             for (int i = 0; i < types.Length; i += 2)
             {
@@ -596,7 +598,7 @@ namespace AR6DoF
                 var d = d0;
                 if (!showUnnamed && string.IsNullOrEmpty(d.name)) continue;
                 if (shown++ >= 9) break;
-                string nm = string.IsNullOrEmpty(d.name) ? "(sans nom) " + d.addr : d.name;
+                string nm = string.IsNullOrEmpty(d.name) ? Ar6dofLoc.T("(sans nom) ") + d.addr : d.name;
                 Btn(nm + "   " + d.rssi + " dBm", () => ChooseDevice(d), 46f, 20);
             }
             if (shown == 0) Lbl("recherche en cours...", 40f, 22, TextAnchor.MiddleCenter);
@@ -630,7 +632,7 @@ namespace AR6DoF
         {
             var c = editing;
             if (c == null) { mode = Mode.Controls; Rebuild(); return; }
-            Lbl(TypeName(c.type), 30f, 22).color = Ar6dofVrUi.Accent;
+            Lbl(TypeName(c.type), 30f, 22).MakeAccent();
             Lbl("Texte affiche", 26f, 18);
             Field(c.label, "nom du controle", s => { c.label = s; owner.MarkDirty(); });
             if (c.type == "slider")
@@ -649,9 +651,9 @@ namespace AR6DoF
             if (c.type != "label")
             {
                 y += 4f;
-                Lbl("Comment l'information est envoyee", 30f, 22).color = Ar6dofVrUi.Accent;
+                Lbl("Comment l'information est envoyee", 30f, 22).MakeAccent();
                 string tpl = string.IsNullOrEmpty(c.template) ? Ar6dofPayload.DefaultTemplate(c.type) : c.template;
-                Btn("Modele pret : " + PresetOf(tpl) + "  (cliquer pour changer)", () =>
+                Btn(Ar6dofLoc.T("Modele pret : ") + PresetOf(tpl) + Ar6dofLoc.T("  (cliquer pour changer)"), () =>
                 {
                     int i = Array.IndexOf(Ar6dofPayload.PresetTemplates, tpl);
                     c.template = Ar6dofPayload.PresetTemplates[(i + 1) % Ar6dofPayload.PresetTemplates.Length];
@@ -679,14 +681,14 @@ namespace AR6DoF
         static string PresetOf(string tpl)
         {
             int i = Array.IndexOf(Ar6dofPayload.PresetTemplates, tpl);
-            return i >= 0 ? Ar6dofPayload.PresetNames[i] : "personnalise";
+            return i >= 0 ? Ar6dofLoc.T(Ar6dofPayload.PresetNames[i]) : Ar6dofLoc.T("personnalise");
         }
 
         void UpdatePreview(ControlDef c)
         {
             if (previewText == null) return;
             byte[] d;
-            previewText.text = BuildPayload(c, out d) ? "Octets pour la valeur actuelle : " + Ar6dofPayload.ToHex(d) : "Modele invalide";
+            previewText.text = BuildPayload(c, out d) ? Ar6dofLoc.T("Octets pour la valeur actuelle : ") + Ar6dofPayload.ToHex(d) : Ar6dofLoc.T("Modele invalide");
         }
     }
 }

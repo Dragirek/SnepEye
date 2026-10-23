@@ -71,6 +71,24 @@ namespace AR6DoF
             var m = new Material(sh);
             m.color = new Color(0.2f, 0.9f, 1f, 1f);
             laser.material = m;
+            ApplyLaser();
+            Ar6dofSettings.Changed += ApplyLaser;
+        }
+
+        void OnDestroy() { Ar6dofSettings.Changed -= ApplyLaser; }
+
+        /// <summary>Couleur et épaisseur du rayon : style "Rayon" des paramètres (couleur d'accent, transparence, épaisseur).</summary>
+        void ApplyLaser()
+        {
+            if (laser == null) return;
+            var st = Ar6dofSettings.StyleFor(Ar6dofElem.Laser);
+            Color c = st.accent;
+            c.a = Mathf.Clamp01(Mathf.Max(0.25f, st.alpha));
+            laser.startWidth = Mathf.Clamp(st.lineWidth, 0.001f, 0.02f);
+            laser.endWidth = laser.startWidth * 0.5f;
+            laser.startColor = c;
+            laser.endColor = c;
+            if (laser.material != null) laser.material.color = c;
         }
 
         float Yaw(Vector3 v) { return Mathf.Atan2(v.x, v.z) * Mathf.Rad2Deg; }

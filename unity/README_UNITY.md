@@ -104,18 +104,30 @@ Puis : **supprime la Main Camera**, et ajoute `Ar6dofComposite.shader`, `Ar6dofS
 2. Fenêtre *Game* en **2880 x 1440** (*Free Aspect > +* ). Sur le casque (build) : crée un build Windows et lance-le avec  
    `-monitor 2 -screen-fullscreen 1 -screen-width 2880 -screen-height 1440` (2 = numéro de l'écran du casque). `Ar6dofDisplayStarter` place la fenêtre tout seul et l'exclut des captures d'écran.
    *Player > Fullscreen Mode = Windowed*, *Run In Background* coché.
-3. Touches : **F1** réglages détaillés du passthrough · **R** recentrer · **B** replacer le clavier · **K** clavier on/off.
+3. Les touches R (recentrer), M (menu devant moi) et F (suivi) existent encore au clavier, mais tout est maintenant en boutons dans le dock (rangée du haut). **F1** : réglages détaillés du passthrough.
 
 ---
 
 ## 6. La barre de tâches VR (Dock)
-Fixe dans la pièce, sous les écrans. Une icône par application : **écrans virtuels**, **clavier**, **tes menus d'appareils**, et la **roue** à droite (réglages).
+**Accrochée à tes pieds** : elle te suit où que tu ailles, reste **invisible** tant que tu regardes devant, puis **apparaît doucement** quand tu penches la tête vers le bas (par défaut dès 35° vers le bas, entièrement visible à 55°). Une fois visible elle ne bouge plus : tu peux la viser tranquillement. Rien ne passe devant tes menus.
+Les angles, la distance, la taille et l'inclinaison se règlent dans l'onglet *Dock* des réglages ; le mode « fixe sous les écrans » existe encore (décoche *Dock aux pieds*).
+- Rangée du haut = **actions rapides** (elles remplacent les touches R, M et F) : **Recentrer** (la tête), **Menus ici** (ramène les menus ouverts devant toi), **Clavier ici**, **Suivi** (le clavier te suit ou non).
+- Rangée du bas : une icône par application : **écrans virtuels**, **clavier**, **tes menus d'appareils**, et la **roue** à droite (réglages).
 - **Un clic** sur l'icône affiche l'application, **un second clic** la range. Rangée, elle ne consomme rien. Un trait sous l'icône = affichée.
 - Pointer une icône affiche son nom ; une pastille verte / orange / rouge = connecté / en cours / déconnecté.
-- **La roue** ouvre les réglages en VR : onglets *Passthrough* (FOV, IPD, délai, calibration, reprojection...), *Ecrans* (images/s, collage, courbure, ajouter un écran),
-  *Systeme* (recentrer barre / clavier / tracking, verrouiller le sol, cap à zéro) et *Yeux* (eye tracking, voir plus bas).
+- **La roue** ouvre les réglages en VR : onglets *Image* (FOV, IPD, délai, calibration, reprojection...), *Ecrans* (images/s, collage, courbure, ajouter un écran),
+  *Systeme* (tracking, sol, cap, filtre de la télécommande), *Yeux* (eye tracking), *Style*, *Dock* et *Langue*.
 
-### Réglages du passthrough (onglet Passthrough ou F1)
+### Style, langue et paramètres globaux (onglets Style / Dock / Langue)
+Tout ça est **global** (pas lié à un projet Unity) : fichier `%APPDATA%\AR6DoF\settings.json`.
+- **Aperçu puis Enregistrer** : un changement s'applique tout de suite mais n'est gardé que si tu cliques **Enregistrer** (en bas du panneau). **Annuler** revient au dernier enregistrement, **Par defaut** (2 clics) remet les valeurs d'usine, en aperçu aussi.
+- **Style** : choisis *Tout* (style commun à toute l'interface) ou un élément : *Dock*, *Menus*, *Clavier*, *Ecrans*, *Rayon*. Coche **Style à part pour cet élément** pour qu'il ait ses propres réglages (ex. clavier rouge, rayon vert) ; sinon il suit le style commun.
+  *Couleurs* : fond, boutons, accent (survol, sélection, rayon), texte ; curseurs teinte / saturation / luminosité et quelques palettes. *Forme* : opacité des fonds, coins arrondis, texture de fond (grille, points, carbone, rayures, dégradé, bruit, ou ton image), épaisseur du rayon.
+- **Textures perso** : mets un `.png` ou `.jpg` dans `%APPDATA%\AR6DoF\textures`, elle apparaît dans la liste (petite image de préférence : elle est répétée).
+- **Clavier** : barre sous le clavier = le **déplacer** (bouton gauche ou droit, il reste face à toi), petit carré à droite = **taille**. La taille se règle aussi dans l'onglet *Dock*.
+- **Langue** : français, English, Español, Deutsch, Italiano, Português, ou *Automatique* (langue de Windows). Pour ajouter ou corriger une langue sans toucher au code : fichier texte `%APPDATA%\AR6DoF\lang\xx.txt` (xx = code de la langue), première ligne `# Nom de la langue` (facultative), puis une ligne par texte : `texte français => traduction` (modèle : les textes français sont ceux du code).
+
+### Réglages du passthrough (onglet Image ou F1)
 | Réglage | Effet |
 |---|---|
 | FOV affiché | champ de vision de chaque oeil. À accorder à ton optique |
@@ -152,6 +164,7 @@ La capture est faite par `ar6dof_screen.dll` (DXGI, GPU vers GPU, aucun travail 
 
 ## 9. Clavier virtuel
 Icône « KB ». AZERTY / QWERTY sans dépendre du clavier Windows (envoi Unicode). Maj / Ctrl / Alt restent actives pour la touche suivante. Un champ de texte d'un menu VR reçoit les lettres à la place de Windows.
+Touches arrondies, colorables (onglet *Style* > *Clavier*). **Déplaçable** : attrape la barre sous le clavier ; **redimensionnable** : petit carré à droite de la barre. Le bouton **Clavier ici** du dock le ramène devant toi.
 
 ## 10. Menus d'appareils Bluetooth (fursuit, LED...)
 Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit tourner, sans `--no-ble`).
