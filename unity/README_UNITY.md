@@ -104,30 +104,34 @@ Puis : **supprime la Main Camera**, et ajoute `Ar6dofComposite.shader`, `Ar6dofS
 2. Fenêtre *Game* en **2880 x 1440** (*Free Aspect > +* ). Sur le casque (build) : crée un build Windows et lance-le avec  
    `-monitor 2 -screen-fullscreen 1 -screen-width 2880 -screen-height 1440` (2 = numéro de l'écran du casque). `Ar6dofDisplayStarter` place la fenêtre tout seul et l'exclut des captures d'écran.
    *Player > Fullscreen Mode = Windowed*, *Run In Background* coché.
-3. Les touches R (recentrer), M (menu devant moi) et F (suivi) existent encore au clavier, mais tout est maintenant en boutons dans le dock (rangée du haut). **F1** : réglages détaillés du passthrough.
+3. **Plus aucune touche clavier** (R, M, F, F1... désactivées) : un vrai clavier branché sert à taper dans les écrans virtuels. Tout est en VR : boutons du dock et onglets des réglages. Pour réactiver les raccourcis ou les anciens panneaux d'information en haut à gauche de la vue, sélectionne l'objet qui porte **Ar6dofDock** dans Unity : cases **Debug** (panneaux d'info, sans la touche F1) et **Hotkeys** (raccourcis clavier).
 
 ---
 
 ## 6. La barre de tâches VR (Dock)
 **Accrochée à tes pieds** : elle te suit où que tu ailles, reste **invisible** tant que tu regardes devant, puis **apparaît doucement** quand tu penches la tête vers le bas (par défaut dès 35° vers le bas, entièrement visible à 55°). Une fois visible elle ne bouge plus : tu peux la viser tranquillement. Rien ne passe devant tes menus.
 Les angles, la distance, la taille et l'inclinaison se règlent dans l'onglet *Dock* des réglages ; le mode « fixe sous les écrans » existe encore (décoche *Dock aux pieds*).
-- Rangée du haut = **actions rapides** (elles remplacent les touches R, M et F) : **Recentrer** (la tête), **Menus ici** (ramène les menus ouverts devant toi), **Clavier ici**, **Suivi** (le clavier te suit ou non).
+- Rangée du haut = **actions rapides** : **Recentrer** (la tête), **Menus ici** (ramène les menus ouverts devant toi), **Clavier ici**, **Suivi** (le clavier te suit ou non).
 - Rangée du bas : une icône par application : **écrans virtuels**, **clavier**, **tes menus d'appareils**, et la **roue** à droite (réglages).
 - **Un clic** sur l'icône affiche l'application, **un second clic** la range. Rangée, elle ne consomme rien. Un trait sous l'icône = affichée.
 - Pointer une icône affiche son nom ; une pastille verte / orange / rouge = connecté / en cours / déconnecté.
-- **La roue** ouvre les réglages en VR : onglets *Image* (FOV, IPD, délai, calibration, reprojection...), *Ecrans* (images/s, collage, courbure, ajouter un écran),
-  *Systeme* (tracking, sol, cap, filtre de la télécommande), *Yeux* (eye tracking), *Style*, *Dock* et *Langue*.
+- **La roue** ouvre les réglages en VR : onglets *Image* (infos de l'image en direct, FOV, IPD, délai, calibration, reprojection...), *Optique* (décalage, lentilles, miroir, rotation, yeux liés), *Ecrans* (images/s, collage, courbure, ajouter un écran),
+  *Systeme* (état de la tête et de la télécommande, calibration, filtre du rayon), *Yeux* (eye tracking), *Style*, *Dock* et *Langue*.
+
+### Fenêtres : réduire, fermer, redimensionner
+Chaque écran et chaque menu a, dans un coin, deux boutons : **Réduire** (range la fenêtre dans la barre, comme un clic sur son icône) et **Fermer** (pour un écran : le retire, avec un second clic de confirmation ; il en reste toujours au moins un, qui est alors rangé). Une **seule poignée de redimensionnement**, en bas à droite, sur tous.
+Style **Windows** (par défaut) ou **Mac**, et coin au choix (haut/bas, gauche/droite ; par défaut en haut à droite) : onglet *Style* > *Fenetres*. Sous un écran, la **roue** ouvre ses réglages et change de couleur tant qu'ils sont ouverts ; un second clic dessus les referme.
 
 ### Style, langue et paramètres globaux (onglets Style / Dock / Langue)
 Tout ça est **global** (pas lié à un projet Unity) : fichier `%APPDATA%\AR6DoF\settings.json`.
 - **Aperçu puis Enregistrer** : un changement s'applique tout de suite mais n'est gardé que si tu cliques **Enregistrer** (en bas du panneau). **Annuler** revient au dernier enregistrement, **Par defaut** (2 clics) remet les valeurs d'usine, en aperçu aussi.
 - **Style** : choisis *Tout* (style commun à toute l'interface) ou un élément : *Dock*, *Menus*, *Clavier*, *Ecrans*, *Rayon*. Coche **Style à part pour cet élément** pour qu'il ait ses propres réglages (ex. clavier rouge, rayon vert) ; sinon il suit le style commun.
   *Couleurs* : fond, boutons, accent (survol, sélection, rayon), texte ; curseurs teinte / saturation / luminosité et quelques palettes. *Forme* : opacité des fonds, coins arrondis, texture de fond (grille, points, carbone, rayures, dégradé, bruit, ou ton image), épaisseur du rayon.
-- **Textures perso** : mets un `.png` ou `.jpg` dans `%APPDATA%\AR6DoF\textures`, elle apparaît dans la liste (petite image de préférence : elle est répétée).
+- **Tes images** : dossier **`%APPDATA%\AR6DoF\pictures`** (créé tout seul ; bouton *Ouvrir le dossier pictures* dans *Style* > *Forme*). Mets-y un `.png` ou `.jpg`, elle apparaît dans la liste des textures (petite image = motif répété, grande = étirée). L'ancien dossier `textures` est encore lu.
 - **Clavier** : barre sous le clavier = le **déplacer** (bouton gauche ou droit, il reste face à toi), petit carré à droite = **taille**. La taille se règle aussi dans l'onglet *Dock*.
 - **Langue** : français, English, Español, Deutsch, Italiano, Português, ou *Automatique* (langue de Windows). Pour ajouter ou corriger une langue sans toucher au code : fichier texte `%APPDATA%\AR6DoF\lang\xx.txt` (xx = code de la langue), première ligne `# Nom de la langue` (facultative), puis une ligne par texte : `texte français => traduction` (modèle : les textes français sont ceux du code).
 
-### Réglages du passthrough (onglet Image ou F1)
+### Réglages du passthrough (onglets Image et Optique)
 | Réglage | Effet |
 |---|---|
 | FOV affiché | champ de vision de chaque oeil. À accorder à ton optique |
@@ -150,14 +154,14 @@ Bouton *Sauver ces réglages* pour les garder.
 1. Flashe `firmware/ar6dof_remote/ar6dof_remote.ino` sur l'ESP32-C3 (câblage et broches : en-tête du fichier). Pas de WiFi, pas de mot de passe.
 2. Active le Bluetooth du PC. **Ne l'appaire pas** dans les paramètres Windows. Si « AR6DoF-Remote » y apparaît déjà (essais précédents), **supprime-le** de la liste.
 3. Le Bluetooth passe par ar6dof_probe : il cherche « AR6DoF-Remote », se connecte, se reconnecte. Console : `[probe] [ble] telecommande connectee`.
-4. Réglages > *Télécommande* (panneau F1) : *Calibration 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
+4. Réglages > *Systeme* > *Telecommande* : *Calibrer 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
 5. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
 6. **Latence et stabilité** (composant `Ar6dofRemote`) : le filtre tourne à chaque paquet (125 Hz) avec l'horloge du capteur. *Filter Min Cutoff Hz* (2) : plus bas = plus stable à l'arrêt. *Filter Beta* (0,15) : plus haut = moins de retard en mouvement. *Predict Ms* (10) : avance le laser de ce temps pour compenser le Bluetooth et l'affichage ; monte-le si le laser traîne, baisse-le s'il dépasse la cible. Dans `Ar6dofPointer`, *Extra Smoothing* reste décoché (il ajouterait du retard).
 7. **Portée** : antenne de l'ESP32-C3 dégagée (pas de main, batterie ni fils dessus), dongle Bluetooth sur un port USB 2 ou une rallonge (l'USB 3 brouille le 2,4 GHz). Au démarrage, ar6dof_probe demande à Windows un intervalle de connexion court : `[ble] intervalle de connexion court : accepte`.
 
 ## 8. Écrans virtuels
 La capture est faite par `ar6dof_screen.dll` (DXGI, GPU vers GPU, aucun travail quand le bureau ne change pas). Icône « écrans » de la barre.
-- Barre sous un écran = déplacer (bouton gauche : tout le groupe ; bouton droit : cet écran seul). **Coins** = taille. Bouton **Param.** = moniteur capturé, images/s, collage, courbure, ajouter (3 max) / retirer.
+- Barre sous un écran = déplacer (bouton gauche : tout le groupe ; bouton droit : cet écran seul). **Coin bas droit** = taille. **Roue** à côté de la barre = moniteur capturé, images/s, collage, courbure, ajouter (3 max) / retirer. Réduire / Fermer : voir « Fenêtres » plus haut.
 - **Écran dans l'écran** : installe un pilote d'écran virtuel Windows (ex. *Virtual Display Driver*) en 1920x1080 / 60 Hz, glisse tes fenêtres dessus, c'est lui qu'on capture.
 - Image à l'envers : décocher *Flip Y* sur `Ar6dofScreens`. Clics à côté : mettre le moniteur capturé à 100 % de mise à l'échelle.
 - Limites : bureau en SDR, même carte graphique pour Unity et le moniteur capturé, le curseur Windows n'est pas dans la capture : Unity dessine un petit losange noir et blanc à l'endroit visé, sans aucun retard.

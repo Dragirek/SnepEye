@@ -11,7 +11,7 @@ namespace AR6DoF
 
         void OnGUI()
         {
-            if (!show || receiver == null || rig == null) return;
+            if (!show || !Ar6dofDebug.On || receiver == null || rig == null) return;
             string s;
             if (receiver.PacketCount == 0) s = "AR6DoF : aucun paquet recu (ar6dof_probe lance ? 't' appuye ? port " + receiver.port + ")";
             else if (rig.ConnectionLost) s = "AR6DoF : connexion perdue";
@@ -19,8 +19,7 @@ namespace AR6DoF
             {
                 s = "AR6DoF : " + (rig.TrackingOk ? "tracking OK" : "TRACKING PERDU") +
                     " | sol " + (rig.FloorDetected ? "detecte" : "suppose") +
-                    " | hauteur des yeux " + (rig.HeadHeight * 100f).ToString("0") + " cm" +
-                    " | R recentrer, M rappeler le menu, F suivi";
+                    " | hauteur des yeux " + (rig.HeadHeight * 100f).ToString("0") + " cm";
             }
             GUI.Label(new Rect(10, 10, 1400, 24), s);
         }

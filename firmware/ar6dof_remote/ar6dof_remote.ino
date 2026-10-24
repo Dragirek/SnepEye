@@ -11,7 +11,7 @@
 // pas de fils dessus ; loin de la batterie. Un dongle Bluetooth en USB 3 perturbe le 2,4 GHz : branche-le sur un port USB 2 ou une rallonge.
 //
 // Câblage (à adapter ci-dessous) : BNO085 SDA -> GPIO8, SCL -> GPIO9, 3V3, GND.
-//   Bouton GAUCHE -> GPIO21 et GND ; bouton DROIT -> GPIO0 et GND (résistances internes activées).
+//   Bouton GAUCHE -> GPIO0 et GND ; bouton DROIT -> GPIO1 et GND (résistances internes activées).
 // Arduino IDE : carte "ESP32C3 Dev Module" ; bibliothèque "Adafruit BNO08x". Le BLE est déjà fourni avec le support ESP32
 // (rien d'autre à installer).
 //
@@ -33,8 +33,8 @@
 #define DEVICE_NAME  "AR6DoF-Remote"
 #define PIN_SDA 8
 #define PIN_SCL 9
-#define PIN_BTN_LEFT 21
-#define PIN_BTN_RIGHT 0
+#define PIN_BTN_LEFT 0
+#define PIN_BTN_RIGHT 1
 #define BNO_RESET_PIN -1                 // GPIO relié à la broche RST du BNO085, ou -1
 #define REPORT_INTERVAL_US (1000000 / SEND_HZ)   // le capteur produit une orientation par envoi
 #define SEND_HZ 125                      // notifications par seconde (120 ou 125 = rythme du capteur ; 60 si la liaison est mauvaise)

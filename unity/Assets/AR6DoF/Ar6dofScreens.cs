@@ -365,6 +365,19 @@ namespace AR6DoF
             MakeButton("Fermer", new Vector2(0, y), W, () => CloseSettings());
             go.SetActive(false);
             if (pointer != null) pointer.AddCanvas(settings);
+            // réduire / fermer : ferment tous les deux le panneau ; coin bas droit : agrandit / réduit le panneau
+            Ar6dofWindowChrome.Create("Parametres ecrans", settings.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(settings), CloseSettings, CloseSettings);
+        }
+
+        /// <summary>Roue d'un écran : ouvre son panneau, ou le referme s'il est déjà ouvert pour cet écran.</summary>
+        public void ToggleSettings(Ar6dofScreenPanel p)
+        {
+            if (SettingsOpenFor(p)) CloseSettings(); else OpenSettings(p);
+        }
+
+        public bool SettingsOpenFor(Ar6dofScreenPanel p)
+        {
+            return settings != null && settings.gameObject.activeSelf && settingsFor == p;
         }
 
         public void OpenSettings(Ar6dofScreenPanel p)

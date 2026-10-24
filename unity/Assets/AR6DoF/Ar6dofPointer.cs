@@ -6,8 +6,10 @@ namespace AR6DoF
 {
     /// <summary>
     /// Pointeur laser piloté par la télécommande gyroscopique. Vise les objets qui ont un Collider et un composant
-    /// IAr6dofPointerTarget (fenêtres Windows, touches du clavier virtuel) ainsi que les Canvas en World Space listés
+    /// IAr6dofPointerTarget (fenêtres Windows, touches du clavier virtuel, boutons de fenêtre) ainsi que les Canvas en World Space listés
     /// ci-dessous (boutons Unity UI). Bouton gauche = clic gauche, bouton droit = clic droit.
+    /// Fiabilité des clics : (1) les appuis plus courts qu'une image ne sont jamais perdus (compteurs dans Ar6dofRemote), (2) le rayon est
+    /// "figé" sur ce que tu visais juste AVANT l'appui (appuyer sur un bouton fait bouger la main), avec une petite zone morte pendant l'appui.
     /// </summary>
     public class Ar6dofPointer : MonoBehaviour
     {
@@ -19,6 +21,11 @@ namespace AR6DoF
         public float maxDistance = 6f;
         [Tooltip("Canvas en World Space que la télécommande doit pouvoir cliquer")]
         public Canvas[] canvases;
+        [Header("Fiabilité des clics")]
+        [Tooltip("Pendant un appui, le rayon ne bouge pas tant que la main reste dans ce cône (degrés). 0 = désactivé.")]
+        public float clickDeadzoneDeg = 1.3f;
+        [Tooltip("Au moment de l'appui, on vise ce que tu visais il y a ce temps (secondes) : l'appui lui-même fait bouger la main.")]
+        public float clickLookbackSec = 0.09f;
         [Header("Lissage supplémentaire")]
         [Tooltip("Désactivé par défaut : le filtre (stabilité + anticipation) est déjà dans Ar6dofRemote et ajouter un lissage ici ajoute du retard.")]
         public bool extraSmoothing = false;
@@ -39,13 +46,28 @@ namespace AR6DoF
             if (EventSystem.current == null) new GameObject("EventSystem", typeof(EventSystem));
         }
 
+        struct Hit
+        {
+            public IAr6dofPointerTarget target;
+            public Vector3 point;
+            public GameObject ui;
+            public Vector3 uiPoint;
+            public RaycastResult uiRes;
+        }
+
         LineRenderer laser;
         Vector3 dirSmooth = Vector3.forward;
         bool haveDir;
         float yawOffset;
         float bothHeld;
-        bool prevLeft, prevRight, firstRecenterDone;
+        bool firstRecenterDone;
         IAr6dofPointerTarget hovered, pressedL, pressedR;
+        bool heldL, heldR, pendingUpL, pendingUpR;
+        // visée figée pendant un appui
+        bool pressActive;
+        Vector3 pressDir;
+        readonly List<float> histT = new List<float>();
+        readonly List<Vector3> histD = new List<Vector3>();
         // Unity UI
         readonly List<RaycastResult> results = new List<RaycastResult>();
         GameObject uiHover, uiPressL, uiPressR;
@@ -93,6 +115,14 @@ namespace AR6DoF
 
         float Yaw(Vector3 v) { return Mathf.Atan2(v.x, v.z) * Mathf.Rad2Deg; }
 
+        /// <summary>Direction visée il y a 'age' secondes (la plus ancienne connue si l'historique est plus court).</summary>
+        Vector3 DirAgo(float age, float now)
+        {
+            for (int i = histT.Count - 1; i >= 0; i--)
+                if (histT[i] <= now - age) return histD[i];
+            return histD.Count > 0 ? histD[0] : dirSmooth;
+        }
+
         void Update()
         {
             if (head == null && passthrough != null) head = passthrough.HeadView;
@@ -124,28 +154,116 @@ namespace AR6DoF
                 dirSmooth = Vector3.Slerp(dirSmooth, d, dt / (dt + tau)).normalized;
             }
 
+            // historique de la visée (0,4 s)
+            float now = Time.unscaledTime;
+            histT.Add(now); histD.Add(dirSmooth);
+            while (histT.Count > 1 && histT[0] < now - 0.4f) { histT.RemoveAt(0); histD.RemoveAt(0); }
+
+            // boutons : appuis / relâchements depuis la dernière image (aucun appui court n'est perdu)
+            int dl, ul, dr, ur;
+            remote.ConsumeEdges(0, out dl, out ul);
+            remote.ConsumeEdges(1, out dr, out ur);
+            bool wantDownL = dl > 0 || (left && !heldL);
+            bool wantDownR = dr > 0 || (right && !heldR);
+
+            // Au premier appui : on fige la visée sur ce qui était visé juste avant (sauf si la main bougeait vite : on vise alors là où elle est)
+            if ((wantDownL || wantDownR) && !pressActive)
+            {
+                Vector3 back = DirAgo(Mathf.Max(0f, clickLookbackSec), now);
+                pressDir = Vector3.Angle(back, dirSmooth) <= 3.5f ? back : dirSmooth;
+                pressActive = clickDeadzoneDeg > 0f;
+            }
+            Vector3 aim = dirSmooth;
+            if (pressActive)
+            {
+                float ang = Vector3.Angle(pressDir, dirSmooth);
+                aim = ang <= clickDeadzoneDeg ? pressDir : Vector3.Slerp(pressDir, dirSmooth, 1f - clickDeadzoneDeg / ang).normalized;
+            }
+
             Vector3 origin = head.position + Quaternion.Euler(0f, Yaw(headFwd), 0f) * originOffset;
-            var ray = new Ray(origin, dirSmooth);
+            var ray = new Ray(origin, aim);
             LastRay = ray;
 
-            // 1) objets 3D (fenêtres, touches)
-            IAr6dofPointerTarget target = null;
-            Vector3 point = origin + dirSmooth * maxDistance;
-            float best = maxDistance;
-            if (Physics.Raycast(ray, out RaycastHit hit, maxDistance))
-            {
-                var t = hit.collider.GetComponentInParent<IAr6dofPointerTarget>();
-                if (t != null) { target = t; point = hit.point; best = hit.distance; }
-            }
-            // 2) Canvas Unity UI (plan du Canvas) : seulement s'il est plus proche
-            GameObject uiGo = null;
-            Vector3 uiPoint = point;
             Camera ec = passthrough != null && passthrough.HeadView != null ? passthrough.HeadView.GetComponent<Camera>() : null;
             eventCam = ec;
-            if (canvases != null && ec != null)
+            Hit hit = Resolve(ray, ec);
+
+            laser.enabled = true;
+            Vector3 end = hit.ui != null ? hit.uiPoint : (hit.target != null ? hit.point : origin + aim * 2f);
+            laser.SetPosition(0, origin);
+            laser.SetPosition(1, end);
+
+            // ---- survol ----
+            if (hit.target != hovered)
+            {
+                if (hovered != null) hovered.OnPointerExit();
+                hovered = hit.target;
+                if (hovered != null) hovered.OnPointerEnter();
+            }
+            if (hovered != null) hovered.OnPointerHover(hit.point);
+            UiHover(hit.ui);
+
+            // ---- boutons ----
+            HandleButton(0, left, wantDownL, ul > 0 || (!left && heldL), ref hit, ec);
+            HandleButton(1, right, wantDownR, ur > 0 || (!right && heldR), ref hit, ec);
+            if (heldL && uiPressL != null) UiDrag(ray, uiPressL);   // curseurs (Slider) : suit le laser tant que le bouton est maintenu
+            if (heldL && pressedL is IAr6dofPointerDrag dragL) dragL.OnDrag(ray);
+            if (heldR && pressedR is IAr6dofPointerDrag dragR) dragR.OnDrag(ray);
+            if (!heldL && !heldR) pressActive = false;
+        }
+
+        /// <summary>Traite un bouton : appui, relâchement, ou appui très court (appui maintenant, relâchement à l'image suivante).</summary>
+        void HandleButton(int b, bool state, bool wantDown, bool wantUp, ref Hit hit, Camera ec)
+        {
+            bool held = b == 0 ? heldL : heldR;
+            bool pending = b == 0 ? pendingUpL : pendingUpR;
+            if (pending)
+            {
+                pending = false;
+                if (held) { DoUp(b, ref hit); held = false; }
+            }
+            if (held && wantUp && !wantDown) { DoUp(b, ref hit); held = false; }
+            else if (held && wantUp && wantDown) { DoUp(b, ref hit); DoDown(b, ref hit, ec); held = true; pending = !state; }
+            else if (!held && wantDown) { DoDown(b, ref hit, ec); held = true; pending = !state; }
+            if (b == 0) { heldL = held; pendingUpL = pending; } else { heldR = held; pendingUpR = pending; }
+        }
+
+        void DoDown(int b, ref Hit hit, Camera ec)
+        {
+            var tgt = hovered;
+            if (b == 0) pressedL = tgt; else pressedR = tgt;
+            if (tgt != null) tgt.OnPointerDown(hit.point, b);
+            if (hit.ui != null && uiData != null && ec != null)
+            {
+                uiData.position = ec.WorldToScreenPoint(hit.uiPoint);
+                uiRes = hit.uiRes;
+            }
+            if (b == 0) UiDown(ref uiPressL, hit.ui, 0); else UiDown(ref uiPressR, hit.ui, 1);
+        }
+
+        void DoUp(int b, ref Hit hit)
+        {
+            var tgt = b == 0 ? pressedL : pressedR;
+            if (tgt != null) tgt.OnPointerUp(hit.point, b);
+            if (b == 0) { pressedL = null; UiUp(ref uiPressL, hit.ui, 0); }
+            else { pressedR = null; UiUp(ref uiPressR, hit.ui, 1); }
+        }
+
+        /// <summary>Ce que le rayon touche : objet 3D le plus proche, ou Canvas Unity UI s'il est plus proche.</summary>
+        Hit Resolve(Ray ray, Camera ec)
+        {
+            var h = new Hit();
+            h.point = ray.origin + ray.direction * maxDistance;
+            float best = maxDistance;
+            if (Physics.Raycast(ray, out RaycastHit rh, maxDistance))
+            {
+                var t = rh.collider.GetComponentInParent<IAr6dofPointerTarget>();
+                if (t != null) { h.target = t; h.point = rh.point; best = rh.distance; }
+            }
+            if (canvases != null && ec != null && EventSystem.current != null)
                 foreach (var c in canvases)
                 {
-                    if (c == null || !c.gameObject.activeInHierarchy) continue;
+                    if (c == null || !c.gameObject.activeInHierarchy || !c.enabled) continue;
                     if (c.worldCamera != ec) c.worldCamera = ec;
                     var rt = (RectTransform)c.transform;
                     var plane = new Plane(rt.forward, rt.position);
@@ -157,40 +275,17 @@ namespace AR6DoF
                     uiData.position = ec.WorldToScreenPoint(wp);
                     results.Clear();
                     EventSystem.current.RaycastAll(uiData, results);
-                    if (results.Count > 0) { uiGo = results[0].gameObject; uiRes = results[0]; uiPoint = wp; best = dist; target = null; }
+                    if (results.Count > 0) { h.ui = results[0].gameObject; h.uiRes = results[0]; h.uiPoint = wp; best = dist; h.target = null; }
                 }
-
-            laser.enabled = true;
-            Vector3 end = uiGo != null ? uiPoint : (target != null ? point : origin + dirSmooth * 2f);
-            laser.SetPosition(0, origin);
-            laser.SetPosition(1, end);
-
-            // ---- survol ----
-            if (target != hovered)
-            {
-                if (hovered != null) hovered.OnPointerExit();
-                hovered = target;
-                if (hovered != null) hovered.OnPointerEnter();
-            }
-            if (hovered != null) hovered.OnPointerHover(point);
-            UiHover(uiGo);
-
-            // ---- boutons ----
-            if (left && !prevLeft) { pressedL = hovered; pressedL?.OnPointerDown(point, 0); UiDown(ref uiPressL, uiGo, 0); }
-            if (!left && prevLeft) { pressedL?.OnPointerUp(point, 0); pressedL = null; UiUp(ref uiPressL, uiGo, 0); }
-            if (right && !prevRight) { pressedR = hovered; pressedR?.OnPointerDown(point, 1); UiDown(ref uiPressR, uiGo, 1); }
-            if (!right && prevRight) { pressedR?.OnPointerUp(point, 1); pressedR = null; UiUp(ref uiPressR, uiGo, 1); }
-            if (left && uiPressL != null) UiDrag(ray, uiPressL);   // curseurs (Slider) : suit le laser tant que le bouton est maintenu
-            if (left && pressedL is IAr6dofPointerDrag dragL) dragL.OnDrag(ray);
-            if (right && pressedR is IAr6dofPointerDrag dragR) dragR.OnDrag(ray);
-            prevLeft = left;
-            prevRight = right;
+            return h;
         }
 
         void ReleaseAll()
         {
             if (hovered != null) { hovered.OnPointerExit(); hovered = null; }
             pressedL = pressedR = null;
+            heldL = heldR = pendingUpL = pendingUpR = false;
+            pressActive = false;
         }
 
         // ---- Unity UI (boutons...) ----

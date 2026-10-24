@@ -16,7 +16,7 @@ la télécommande Bluetooth, les menus d'appareils Bluetooth et l'eye tracking (
 Deux caméras d'oeil infrarouges (ex. GC0308 320x240 @ 120 fps, avec LED IR) -> position de la pupille et du reflet IR -> angle du regard de chaque oeil
 (yaw / pitch par rapport à la tête), clignements, ouverture des paupières -> Unity, pour des animations de fursuit liées aux yeux.
 - **Désactivé par défaut** : `ar6dof_probe` pose la question *Eye tracking* ; répondre 0 = rien n'est créé (ni caméra, ni thread, ni socket).
-  Côté Unity, tant que l'onglet *Yeux* (panneau F1) n'est pas activé, aucun port n'est ouvert non plus.
+  Côté Unity, tant que l'onglet *Yeux* (réglages en VR) n'est pas activé, aucun port n'est ouvert non plus.
 - Réponses 1 : numéros des caméras gauche / droite (ceux de la liste affichée au démarrage), cadence de traitement (60 = très léger, 120 = maximum).
   Un fichier `ar6dof_eye.txt` (créé à côté de l'exe) règle la détection et le lissage ; `ar6dof_eye_cal.txt` garde l'étalonnage.
 - Algorithme maison : pupille sombre sous éclairage IR (seuil adaptatif, morphologie, ellipse), reflet IR (glint) pour compenser le glissement du casque,

@@ -130,7 +130,7 @@ namespace AR6DoF
         // Réglages du menu : dans le panneau F1 (à droite des réglages du passthrough)
         void OnGUI()
         {
-            if (!showPanel || !Ar6dofUi.Visible || head == null) return;
+            if (!showPanel || !Ar6dofDebug.On || !Ar6dofUi.Visible || head == null) return;
             GUILayout.BeginArea(new Rect(450, 60, 380, 330), GUI.skin.box);
             GUILayout.Label("-- Menu flottant");
             follow = GUILayout.Toggle(follow, "Suivi automatique (OFF = fixe dans la piece)");

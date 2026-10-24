@@ -55,6 +55,10 @@ namespace AR6DoF
 
         public float keyboardScale = 1f;
 
+        // Boutons de fenêtre (fermer / réduire) de tous les écrans et menus
+        public int chromeStyle = 0;        // 0 = style Windows, 1 = style Mac
+        public int chromeCorner = 1;       // 0 haut gauche, 1 haut droite, 2 bas gauche, 3 bas droite
+
         // Télécommande
         public float remoteMinCutoff = 2f;
         public float remoteBeta = 0.15f;

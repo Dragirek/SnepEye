@@ -70,6 +70,12 @@ namespace AR6DoF
         public float animSeconds = 0.25f;
         public float distance = 1.0f;
 
+        [Header("Developpement")]
+        [Tooltip("Coche pour afficher les anciens panneaux d'information en haut a gauche de la vue (statut, reglages bruts du passthrough, menu flottant). Hors Unity, tout est dans les menus en VR.")]
+        public bool debug = false;
+        [Tooltip("Coche pour reactiver les raccourcis clavier (R recentrer, M rappeler le menu, F suivi, B, K). Decoche par defaut : un vrai clavier branche sert a taper dans les ecrans virtuels.")]
+        public bool hotkeys = false;
+
         Canvas canvas;
         RectTransform iconsRoot;
         RectTransform barRt;
@@ -112,6 +118,8 @@ namespace AR6DoF
 
         void Update()
         {
+            Ar6dofDebug.On = debug;
+            Ar6dofInput.HotkeysEnabled = hotkeys;
             if (!built)
             {
                 if (Head == null) return;
@@ -241,6 +249,7 @@ namespace AR6DoF
             settingsApp.place = t => PlaceBeside(t, 35f);
             vrSettings.canvas.gameObject.SetActive(false);
             if (pointer != null) pointer.AddCanvas(vrSettings.canvas);
+            AddChrome(vrSettings.canvas, "Reglages");
 
             // menus d'appareils Bluetooth (client Bluetooth + menus enregistrés dans ar6dof_devices.json)
             ble = GetComponent<Ar6dofBle>();
@@ -278,8 +287,37 @@ namespace AR6DoF
         public void Adopt(DeviceMenu m)
         {
             if (pointer != null) pointer.AddCanvas(m.canvas);
+            AddChrome(m.canvas, m.title);
             float yaw = -35f - 30f * (devMenus.menus.Count - 1);
             m.place = t => PlaceBeside(t, yaw, 0.28f);   // le haut du menu à peine au-dessus des yeux : il descend vers les mains
+        }
+
+        /// <summary>Réduire / fermer / redimensionner d'un menu (Canvas) : ici, les deux premiers le rangent dans la barre.</summary>
+        void AddChrome(Canvas c, string name)
+        {
+            if (c == null) return;
+            Action stow = () => StowCanvas(c);
+            Ar6dofWindowChrome.Create(name, c.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(c), stow, stow);
+        }
+
+        /// <summary>Range un menu dans la barre (comme un second clic sur son icône).</summary>
+        public void StowCanvas(Canvas c)
+        {
+            if (!built || c == null) return;
+            foreach (var a in ExtraApps())
+            {
+                var ca = a as CanvasApp;
+                var dm = a as DeviceMenu;
+                bool match = (ca != null && ca.canvas == c) || (dm != null && dm.canvas == c);
+                if (match) { if (a.open) Toggle(a); return; }
+            }
+        }
+
+        /// <summary>Range un écran virtuel dans la barre (il y reste, éteint, jusqu'au prochain clic sur son icône).</summary>
+        public void StowScreen(Ar6dofScreenPanel p)
+        {
+            ScreenApp sa;
+            if (built && p != null && screenApps.TryGetValue(p, out sa) && sa.open) Toggle(sa);
         }
 
         public void RefreshIcons() { if (built) RebuildIcons(); }

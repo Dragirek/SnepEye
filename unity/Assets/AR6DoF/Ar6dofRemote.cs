@@ -25,6 +25,8 @@ namespace AR6DoF
         public float filterBeta = 0.15f;
         [Tooltip("Anticipation en millisecondes : le laser est avancé de ce temps pour compenser le retard Bluetooth + affichage. 0 = aucune ; monte si le laser traîne, baisse s'il dépasse la cible.")]
         public float predictMs = 10f;
+        [Tooltip("Anti-rebond des boutons : un changement d'état n'est pris en compte qu'après ce nombre de paquets identiques (125 par seconde)")]
+        public int debouncePackets = 2;
 
         // Filtre (thread de réception, au rythme des paquets, avec l'horloge du capteur : insensible aux paquets qui arrivent en rafale)
         Vector3 aimDir, aimVel;
@@ -45,6 +47,36 @@ namespace AR6DoF
         double windowStart;
         int calUpIdx = -1;
         string calMsg = "";
+
+        // Boutons : état filtré + compteurs d'appuis / relâchements (un appui plus court qu'une image d'Unity n'est jamais perdu)
+        readonly bool[] btnCand = new bool[2];
+        readonly int[] btnCandN = new int[2];
+        readonly int[] btnDowns = new int[2];
+        readonly int[] btnUps = new int[2];
+
+        void Debounce(int b, bool raw)
+        {
+            if (raw == btnCand[b]) { if (btnCandN[b] < 1000) btnCandN[b]++; }
+            else { btnCand[b] = raw; btnCandN[b] = 1; }
+            bool cur = b == 0 ? left : right;
+            if (btnCand[b] != cur && btnCandN[b] >= Mathf.Max(1, debouncePackets))
+            {
+                if (b == 0) left = btnCand[b]; else right = btnCand[b];
+                if (btnCand[b]) btnDowns[b]++; else btnUps[b]++;
+            }
+        }
+
+        /// <summary>Appuis et relâchements du bouton b (0 gauche, 1 droit) depuis le dernier appel.</summary>
+        public void ConsumeEdges(int b, out int downs, out int ups)
+        {
+            lock (lockObj)
+            {
+                downs = btnDowns[b]; ups = btnUps[b];
+                btnDowns[b] = 0; btnUps[b] = 0;
+            }
+        }
+
+        public int PacketsPerSec { get { lock (lockObj) return packetsPerSec; } }
 
         public bool Left { get { lock (lockObj) return left; } }
         public bool Right { get { lock (lockObj) return right; } }
@@ -105,8 +137,8 @@ namespace AR6DoF
                 double now = Ar6dofClock.Now();
                 lock (lockObj)
                 {
-                    left = (d[5] & 1) != 0;
-                    right = (d[5] & 2) != 0;
+                    Debounce(0, (d[5] & 1) != 0);
+                    Debounce(1, (d[5] & 2) != 0);
                     q = new double[] { BitConverter.ToSingle(d, 8), BitConverter.ToSingle(d, 12), BitConverter.ToSingle(d, 16), BitConverter.ToSingle(d, 20) };
                     q = Ar6dofMath.Normalize(q);
                     UpdateAim(q, BitConverter.ToUInt32(d, 24), now);
@@ -205,7 +237,7 @@ namespace AR6DoF
             PlayerPrefs.SetString(PrefKey, axis.x.ToString(CultureInfo.InvariantCulture) + "," + axis.y.ToString(CultureInfo.InvariantCulture) + "," + axis.z.ToString(CultureInfo.InvariantCulture));
             PlayerPrefs.Save();
             calUpIdx = -1;
-            return "calibration OK : axe de visee " + axis;
+            return "calibration OK : axe de visee enregistre";
         }
 
         void OnGUI()
@@ -219,7 +251,6 @@ namespace AR6DoF
             if (GUILayout.Button("Calibration 2/2 : pointe relevee 30 deg")) calMsg = CalibrateStep2();
             GUILayout.Label(calMsg);
             GUILayout.Label("axe de visee (capteur) : " + pointAxisSensor);
-            GUILayout.Label("Recentrer : maintenir les 2 boutons 0,6 s");
             GUILayout.EndArea();
         }
     }

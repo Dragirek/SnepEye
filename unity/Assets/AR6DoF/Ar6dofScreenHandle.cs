@@ -13,6 +13,7 @@ namespace AR6DoF
         public Color hoverColor = new Color(0.25f, 0.85f, 1f, 1f);
         MaterialPropertyBlock mpb;
         bool hover, dragging;
+        public bool toggled;   // roue : le panneau de l'écran est ouvert
 
         void SetColor(Color c)
         {
@@ -26,16 +27,22 @@ namespace AR6DoF
         void Start() { Refresh(); }
 
         /// <summary>Réapplique la couleur courante (après un changement de style).</summary>
-        public void Refresh() { SetColor((hover || dragging) ? hoverColor : baseColor); }
-        public void OnPointerEnter() { hover = true; SetColor(hoverColor); panel.SetHover(true); }
-        public void OnPointerExit() { hover = false; if (!dragging) SetColor(baseColor); panel.SetHover(false); }
+        public void Refresh()
+        {
+            Color c = baseColor;
+            if (hover || dragging) c = Color.Lerp(baseColor, hoverColor, 0.6f);
+            if (toggled) c = hoverColor;
+            SetColor(c);
+        }
+        public void OnPointerEnter() { hover = true; Refresh(); panel.SetHover(true); }
+        public void OnPointerExit() { hover = false; Refresh(); panel.SetHover(false); }
         public void OnPointerHover(Vector3 worldPoint) { }
 
         public void OnPointerDown(Vector3 worldPoint, int button)
         {
-            if (kind == Kind.Settings) { panel.OpenSettings(); return; }
+            if (kind == Kind.Settings) { panel.ToggleSettings(); return; }
             dragging = true;
-            SetColor(hoverColor);
+            Refresh();
             panel.BeginDrag(kind, worldPoint, button);
         }
 
@@ -43,7 +50,7 @@ namespace AR6DoF
         {
             if (!dragging) return;
             dragging = false;
-            SetColor(hover ? hoverColor : baseColor);
+            Refresh();
             panel.EndDrag();
         }
 

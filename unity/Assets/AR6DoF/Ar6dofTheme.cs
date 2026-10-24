@@ -164,7 +164,48 @@ namespace AR6DoF
         static readonly string[] BuiltinTex = { "", "grid", "dots", "carbon", "stripes", "gradient", "noise" };
         static readonly string[] BuiltinTexNames = { "Aucune", "Grille", "Points", "Carbone", "Rayures", "Degrade", "Bruit" };
 
-        public static string TexturesFolder { get { return Path.Combine(Ar6dofSettings.FolderPath, "textures"); } }
+        /// <summary>Dossier où poser tes images (png / jpg) pour les utiliser comme fonds de menus. Créé automatiquement.</summary>
+        public static string PicturesFolder
+        {
+            get
+            {
+                string p = Path.Combine(Ar6dofSettings.FolderPath, "pictures");
+                try
+                {
+                    if (!Directory.Exists(p))
+                    {
+                        Directory.CreateDirectory(p);
+                        File.WriteAllText(Path.Combine(p, "LISEZMOI.txt"),
+                            "Dossier d'images AR6DoF\r\n\r\n" +
+                            "Depose ici tes images .png ou .jpg : elles apparaissent dans le menu Style > Forme > Fond (en VR).\r\n" +
+                            "Petite image (256 px ou moins) = motif repete. Grande image = etiree sur tout le menu.\r\n" +
+                            "Pas besoin de redemarrer : rouvre simplement la liste des fonds.\r\n");
+                    }
+                }
+                catch (Exception) { }
+                return p;
+            }
+        }
+
+        static string LegacyFolder { get { return Path.Combine(Ar6dofSettings.FolderPath, "textures"); } }
+
+        /// <summary>Ouvre le dossier d'images dans l'explorateur de Windows.</summary>
+        public static void OpenPicturesFolder()
+        {
+            try { System.Diagnostics.Process.Start("explorer.exe", "\"" + PicturesFolder + "\""); }
+            catch (Exception)
+            {
+                try { Application.OpenURL("file:///" + PicturesFolder.Replace('\\', '/')); } catch (Exception) { }
+            }
+        }
+
+        static string FindPicture(string name)
+        {
+            string a = Path.Combine(PicturesFolder, name);
+            if (File.Exists(a)) return a;
+            string b = Path.Combine(LegacyFolder, name);   // ancien dossier "textures" toujours lu
+            return File.Exists(b) ? b : null;
+        }
 
         public static Ar6dofElem ElemOf(Transform t)
         {
@@ -241,12 +282,16 @@ namespace AR6DoF
             var l = new List<string>(BuiltinTex);
             try
             {
-                if (Directory.Exists(TexturesFolder))
-                    foreach (string f in Directory.GetFiles(TexturesFolder))
+                foreach (string dir in new[] { PicturesFolder, LegacyFolder })
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    foreach (string f in Directory.GetFiles(dir))
                     {
                         string ext = Path.GetExtension(f).ToLowerInvariant();
-                        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") l.Add("file:" + Path.GetFileName(f));
+                        string id = "file:" + Path.GetFileName(f);
+                        if ((ext == ".png" || ext == ".jpg" || ext == ".jpeg") && !l.Contains(id)) l.Add(id);
                     }
+                }
             }
             catch (Exception) { }
             return l;
@@ -278,8 +323,8 @@ namespace AR6DoF
         {
             try
             {
-                string path = Path.Combine(TexturesFolder, name);
-                if (!File.Exists(path)) return null;
+                string path = FindPicture(name);
+                if (path == null) return null;
                 var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 if (!ImageConversion.LoadImage(tex, File.ReadAllBytes(path))) return null;
                 tex.wrapMode = TextureWrapMode.Repeat;

@@ -31,7 +31,6 @@ namespace AR6DoF
         Transform quad;
         Renderer quadRenderer;
         Transform barRoot;
-        readonly List<Transform> cornerT = new List<Transform>();
         Transform moveT, gearT;
         Font font;
         int rectL, rectT, rectR, rectB;
@@ -81,24 +80,30 @@ namespace AR6DoF
             barRoot = new GameObject("Chrome").transform;
             barRoot.SetParent(transform, false);
             moveT = MakeHandle("Deplacer", Ar6dofScreenHandle.Kind.Move, "");
-            gearT = MakeHandle("Parametres", Ar6dofScreenHandle.Kind.Settings, "Param.");
-            for (int i = 0; i < 4; i++) cornerT.Add(MakeHandle("Coin" + i, Ar6dofScreenHandle.Kind.Resize, ""));
+            gearT = MakeHandle("Parametres", Ar6dofScreenHandle.Kind.Settings, "");
+            gearH = gearT.GetComponent<Ar6dofScreenHandle>();
             Layout();
             ApplyStyle();
             Ar6dofSettings.Changed += ApplyStyle;
             Ar6dofLoc.Changed += ApplyStyle;
             RefreshRect();
+            // boutons de fenêtre : réduire (range dans la barre), fermer (retire l'écran, 2 clics), redimensionner (coin bas droit)
+            chrome = Ar6dofWindowChrome.Create("Ecran " + (slotIndex + 1), transform, Ar6dofElem.Screens,
+                () => new Vector2(width * 0.5f, Height * 0.5f),
+                () => { if (Ar6dofDock.Instance != null) Ar6dofDock.Instance.StowScreen(this); },
+                () => { if (owner.panels.Count > 1) owner.RemoveScreen(this); else if (Ar6dofDock.Instance != null) Ar6dofDock.Instance.StowScreen(this); });
+            chrome.confirmClose = () => owner.panels.Count > 1;
+            chrome.resizeBegin = hit => BeginDrag(Ar6dofScreenHandle.Kind.Resize, hit, 0);
+            chrome.resizeDrag = ray => Drag(ray);
+            chrome.resizeEnd = EndDrag;
             Ar6dofScreenNative.Start(slot, monitor, fps);
         }
 
-        void OnDestroy()
-        {
-            Ar6dofSettings.Changed -= ApplyStyle;
-            Ar6dofLoc.Changed -= ApplyStyle;
-        }
-
         Material cursorCenterMat;
-        TextMesh gearText;
+        Ar6dofScreenHandle gearH;
+        Renderer gearIcon;
+        bool gearOn;
+        Ar6dofWindowChrome chrome;
         Shader handleShader;
 
         /// <summary>Poignées et curseur : couleurs, arrondi et transparence du style "Ecrans" ; curseur = couleur du rayon.</summary>
@@ -108,8 +113,7 @@ namespace AR6DoF
             var st = Ar6dofSettings.StyleFor(Ar6dofElem.Screens);
             Color baseC = st.button; baseC.a = Mathf.Lerp(1f, st.alpha, 0.5f);
             Color hoverC = st.accent; hoverC.a = 1f;
-            var all = new List<Transform>(cornerT);
-            all.Add(moveT); all.Add(gearT);
+            var all = new List<Transform> { moveT, gearT };
             foreach (var t in all)
             {
                 var h = t.GetComponent<Ar6dofScreenHandle>();
@@ -120,7 +124,7 @@ namespace AR6DoF
                 var rend = t.GetComponent<Renderer>();
                 if (handleShader != null && rend != null) Ar6dofTheme.SetRoundedSize(rend.sharedMaterial, t.localScale.x, t.localScale.y, st.corner);
             }
-            if (gearText != null) { gearText.text = Ar6dofLoc.T("Param."); gearText.color = st.text; }
+            if (gearIcon != null) gearIcon.sharedMaterial.color = st.text;
             if (cursorCenterMat != null)
             {
                 Color lc = Ar6dofSettings.StyleFor(Ar6dofElem.Laser).accent; lc.a = 1f;
@@ -185,7 +189,6 @@ namespace AR6DoF
                 t.transform.localPosition = new Vector3(0f, 0f, -0.02f);
                 var tm = t.AddComponent<TextMesh>();
                 tm.text = Ar6dofLoc.T(label);
-                if (kind == Ar6dofScreenHandle.Kind.Settings) gearText = tm;
                 tm.font = font;
                 tm.anchor = TextAnchor.MiddleCenter;
                 tm.alignment = TextAlignment.Center;
@@ -193,6 +196,24 @@ namespace AR6DoF
                 tm.fontSize = 24;
                 tm.color = Color.white;
                 t.GetComponent<MeshRenderer>().sharedMaterial = font.material;
+            }
+            if (kind == Ar6dofScreenHandle.Kind.Settings)
+            {
+                // icône "roue" (au lieu d'un texte) : elle s'allume quand le panneau de cet écran est ouvert
+                var ig = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                ig.name = "Icone";
+                var imc = ig.GetComponent<MeshCollider>();
+                if (imc != null) Destroy(imc);
+                ig.transform.SetParent(g.transform, false);
+                ig.transform.localPosition = new Vector3(0f, 0f, -0.02f);
+                ig.transform.localScale = new Vector3(0.7f, 0.7f, 1f);
+                var ish = Shader.Find("Sprites/Default");
+                var im = new Material(ish != null ? ish : m.shader);
+                im.mainTexture = Ar6dofIcons.Get("gear");
+                gearIcon = ig.GetComponent<Renderer>();
+                gearIcon.sharedMaterial = im;
+                gearIcon.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                gearIcon.receiveShadows = false;
             }
             return g.transform;
         }
@@ -206,19 +227,12 @@ namespace AR6DoF
             float y = -h * 0.5f - 0.05f;
             moveT.localPosition = new Vector3(0f, y, 0f);
             moveT.localScale = new Vector3(barW, barH, 1f);
-            gearT.localPosition = new Vector3(barW * 0.5f + 0.09f, y, 0f);
-            gearT.localScale = new Vector3(0.14f, barH, 1f);
-            for (int i = 0; i < 4; i++)
-            {
-                float sx = (i & 1) == 0 ? -1f : 1f, sy = (i & 2) == 0 ? -1f : 1f;
-                cornerT[i].localPosition = new Vector3(sx * (w * 0.5f + 0.035f), sy * (h * 0.5f + 0.035f), 0f);
-                cornerT[i].localScale = new Vector3(0.07f, 0.07f, 1f);
-            }
+            gearT.localPosition = new Vector3(barW * 0.5f + barH * 0.5f + 0.02f, y, 0f);
+            gearT.localScale = new Vector3(barH, barH, 1f);
             if (handleShader != null)
             {
                 int corner = Ar6dofSettings.StyleFor(Ar6dofElem.Screens).corner;
                 SetRounded(moveT, corner); SetRounded(gearT, corner);
-                for (int i = 0; i < 4; i++) SetRounded(cornerT[i], corner);
             }
         }
 
@@ -267,6 +281,8 @@ namespace AR6DoF
                 long fr = Ar6dofScreenNative.Frames(slot);
                 if (fr != lastFrames) { lastFrames = fr; rt.GenerateMips(); }
             }
+            bool so = owner != null && owner.SettingsOpenFor(this);
+            if (so != gearOn && gearH != null) { gearOn = so; gearH.toggled = so; gearH.Refresh(); }
             hoverAmount = Mathf.MoveTowards(hoverAmount, hoverTarget, Time.unscaledDeltaTime * 8f);
             screenMat.SetFloat("_Hover", hoverAmount);
         }
@@ -304,6 +320,8 @@ namespace AR6DoF
 
         void OnDestroy()
         {
+            Ar6dofSettings.Changed -= ApplyStyle;
+            Ar6dofLoc.Changed -= ApplyStyle;
             Ar6dofScreenNative.SetTarget(slot, IntPtr.Zero);
             Ar6dofScreenNative.Stop(slot);
             if (rt != null) { rt.Release(); Destroy(rt); }
@@ -317,7 +335,8 @@ namespace AR6DoF
             hoverTarget = hoverCount > 0 ? 1f : 0f;
         }
 
-        public void OpenSettings() { owner.OpenSettings(this); }
+        /// <summary>Bouton roue : ouvre le panneau de cet écran, ou le referme s'il est déjà ouvert.</summary>
+        public void ToggleSettings() { owner.ToggleSettings(this); }
 
         // ------------------------------------------------------------------ contenu : clics vers Windows
         bool Map(Vector3 world, out int sx, out int sy)
@@ -363,6 +382,7 @@ namespace AR6DoF
             int x, y;
             if (!Map(world, out x, out y)) return;
             Ar6dofWinInput.SetCursor(x, y);
+            Ar6dofWinInput.Nudge();
             Ar6dofWinInput.MouseButton(button, true);
         }
 

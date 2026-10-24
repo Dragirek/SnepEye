@@ -33,7 +33,7 @@ namespace AR6DoF
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out RECT r, int size);
 
         const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
-        const uint MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004, MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010, MOUSEEVENTF_WHEEL = 0x0800;
+        const uint MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004, MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010, MOUSEEVENTF_WHEEL = 0x0800;
         const uint KEYEVENTF_EXTENDEDKEY = 0x0001, KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
 
         /// <summary>Handle d'une fenêtre visible dont le titre contient `contains` (la plus grande). Zéro si aucune.</summary>
@@ -86,6 +86,14 @@ namespace AR6DoF
 
         static void Send(INPUT i) { SendInput(1, new[] { i }, Marshal.SizeOf(typeof(INPUT))); }
 
+        /// <summary>Événement souris "déplacement de 0" à la position courante : réveille le survol des applications (Chrome, Electron...) juste avant un clic.</summary>
+        public static void Nudge()
+        {
+            var i = new INPUT { type = INPUT_MOUSE };
+            i.u.mi.dwFlags = MOUSEEVENTF_MOVE;
+            Send(i);
+        }
+
         /// <summary>button 0 = gauche, 1 = droit.</summary>
         public static void MouseButton(int button, bool down)
         {
@@ -133,6 +141,7 @@ namespace AR6DoF
         public static bool IsValid(IntPtr h) { return false; }
         public static bool GetRect(IntPtr h, bool extended, out RECT r) { r = default(RECT); return false; }
         public static void SetCursor(int x, int y) { }
+        public static void Nudge() { }
         public static void BringToFront(IntPtr h) { }
         public static void MouseButton(int button, bool down) { }
         public static void Wheel(int delta) { }

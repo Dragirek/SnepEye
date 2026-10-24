@@ -8,14 +8,24 @@ namespace AR6DoF
         public static bool Visible;
     }
 
+    /// <summary>Mode debug (case "Debug" du composant Ar6dofDock) : affiche les anciens panneaux d'infos en haut à gauche de l'écran Unity.</summary>
+    public static class Ar6dofDebug
+    {
+        public static bool On;
+    }
+
     /// <summary>
     /// Lecture clavier compatible avec les deux systèmes d'entrée de Unity 6
     /// (Input System "nouveau" ou ancien Input Manager). Lettres et touches F1..F12 (KeyCode.R, KeyCode.F1...).
     /// </summary>
     public static class Ar6dofInput
     {
+        /// <summary>Faux par défaut : plus aucun raccourci clavier (tu tapes sur de vrais claviers dans tes écrans virtuels). Voir Ar6dofDock > Hotkeys.</summary>
+        public static bool HotkeysEnabled;
+
         public static bool Down(KeyCode k)
         {
+            if (!HotkeysEnabled) return false;
 #if ENABLE_INPUT_SYSTEM
             var kb = UnityEngine.InputSystem.Keyboard.current;
             if (kb == null) return false;

@@ -238,7 +238,8 @@ namespace AR6DoF
         // ------------------------------------------------------------------ boucle
         void Update()
         {
-            if (Ar6dofInput.Down(toggleUiKey)) { showUi = !showUi; Ar6dofUi.Visible = showUi; }
+            showUi = Ar6dofDebug.On;          // plus de touche F1 : le panneau complet n'existe qu'en mode debug (Ar6dofDock > Debug)
+            Ar6dofUi.Visible = showUi;
             if (!reader.IsOpen && Time.unscaledTime >= nextOpenTry)
             {
                 nextOpenTry = Time.unscaledTime + 0.5f;
@@ -459,13 +460,23 @@ namespace AR6DoF
             return v;
         }
 
+        // ---- infos et réglages exposés au panneau VR (onglets Image et Optique)
+        public bool SourceOpen { get { return reader.IsOpen; } }
+        public int SourceWidth { get { return reader.Width; } }
+        public int SourceHeight { get { return reader.Height; } }
+        public int UploadsPerSec { get { return uploadsPerSec; } }
+        public float MaxFovNoBlackDeg { get { return MaxFovNoBlack(); } }
+        public void ReloadSettings() { LoadSettings(); }
+        public void ResetSettings() { var f = settings.fallbackHorizontalFovDeg; settings = new Ar6dofPassthroughSettings { fallbackHorizontalFovDeg = f }; }
+
         void OnGUI()
         {
+            if (!Ar6dofDebug.On) return;
             string info = reader.IsOpen
                 ? "Passthrough : " + reader.Width + "x" + reader.Height + " | " + uploadsPerSec + " img/s | age de l'image " + FrameAgeMs.ToString("0.0") + " ms | envoi GPU " + UploadMs.ToString("0.0") + " ms | reprojection " + ReprojDeg.ToString("0.0") + " deg | delai " + DelayUsedMs.ToString("0") + " ms"
                 : "Passthrough : en attente d'ar6dof_probe (partage d'image active ?)";
             info += HasCalibration ? " | calibration OK" : " | SANS calibration";
-            GUI.Label(new Rect(10, 30, 1400, 24), info + "   (" + toggleUiKey + " : reglages)");
+            GUI.Label(new Rect(10, 30, 1400, 24), info);
             if (!showUi) return;
 
             GUILayout.BeginArea(new Rect(10, 60, 430, Screen.height - 80), GUI.skin.box);
