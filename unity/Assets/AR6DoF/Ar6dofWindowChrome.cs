@@ -259,13 +259,15 @@ namespace AR6DoF
             bool top = corner == 0 || corner == 1;
             float yy = top ? hs.y + Gap + S * 0.5f : -hs.y - Gap - S * 0.5f;
             float sign = right ? 1f : -1f;
-            float x0 = sign * (hs.x - S * 0.5f);
             float step = (S + Gap) * (mac ? 0.9f : 1f);
+            float x0 = sign * (hs.x - S * 0.5f);
+            if (corner == 3) x0 -= step;                 // en bas à droite : la poignée de taille occupe le coin, les boutons se décalent d'un cran
             bClose.gameObject.SetActive(onClose != null);
             bMin.gameObject.SetActive(onMinimize != null);
             bClose.transform.localPosition = new Vector3(x0, yy, 0f);                     // fermer = le plus près du coin
             bMin.transform.localPosition = new Vector3(x0 - sign * step, yy, 0f);
-            bResize.transform.localPosition = new Vector3(hs.x + S * 0.5f + 0.004f, -hs.y - S * 0.5f - 0.004f, 0f);
+            // poignée de taille : SOUS la fenêtre, dans son aplomb (jamais à droite : elle tomberait sur l'écran voisin)
+            bResize.transform.localPosition = new Vector3(hs.x - S * 0.5f, -hs.y - Gap - S * 0.5f, 0f);
         }
 
         // ---- actions

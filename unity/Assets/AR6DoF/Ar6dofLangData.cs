@@ -323,6 +323,16 @@ namespace AR6DoF
             "Bas gauche => Bottom left",
             "Bas droite => Bottom right",
             "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre. => Applies to all screens and menus. Default: Windows, top right. Resizing is done with the single handle at the bottom right of each window.",
+            "Calibration 1/2 dans {0} s : pose la telecommande a plat, immobile => Calibration 1/2 in {0} s: lay the remote flat, hold still",
+            "Calibration 2/2 dans {0} s : releve la pointe de ~30 deg, immobile => Calibration 2/2 in {0} s: raise the tip by ~30 deg, hold still",
+            "Un compte a rebours de 3 s laisse le temps de poser la telecommande => A 3 s countdown gives you time to put the remote down",
+            "Couleur aleatoire => Random colour",
+            "Palette aleatoire => Random palette",
+            "Rose => Pink",
+            "Menthe => Mint",
+            "Or => Gold",
+            "Gris => Grey",
+            "Contraste => High contrast",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -634,6 +644,17 @@ namespace AR6DoF
             "Bas gauche => Abajo izquierda",
             "Bas droite => Abajo derecha",
             "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre. => Vale para todas las pantallas y menus. Por defecto: Windows, arriba a la derecha. Se redimensiona con el unico tirador abajo a la derecha de cada ventana.",
+            "Calibration 1/2 dans {0} s : pose la telecommande a plat, immobile => Calibracion 1/2 en {0} s: pon el mando plano, inmovil",
+            "Calibration 2/2 dans {0} s : releve la pointe de ~30 deg, immobile => Calibracion 2/2 en {0} s: levanta la punta ~30 grados, inmovil",
+            "Un compte a rebours de 3 s laisse le temps de poser la telecommande => Una cuenta atras de 3 s da tiempo a dejar el mando",
+            "Couleur aleatoire => Color aleatorio",
+            "Palette aleatoire => Paleta aleatoria",
+            "Ocean => Oceano",
+            "Orange => Naranja",
+            "Rose => Rosa",
+            "Menthe => Menta",
+            "Or => Oro",
+            "Contraste => Alto contraste",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -953,6 +974,17 @@ namespace AR6DoF
             "Bas gauche => Unten links",
             "Bas droite => Unten rechts",
             "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre. => Gilt fuer alle Bildschirme und Menues. Standard: Windows, oben rechts. Die Groesse aendert man am einzigen Griff unten rechts in jedem Fenster.",
+            "Calibration 1/2 dans {0} s : pose la telecommande a plat, immobile => Kalibrierung 1/2 in {0} s: Fernbedienung flach hinlegen, still halten",
+            "Calibration 2/2 dans {0} s : releve la pointe de ~30 deg, immobile => Kalibrierung 2/2 in {0} s: Spitze ca. 30 Grad anheben, still halten",
+            "Un compte a rebours de 3 s laisse le temps de poser la telecommande => Ein 3-s-Countdown gibt dir Zeit, die Fernbedienung abzulegen",
+            "Couleur aleatoire => Zufallsfarbe",
+            "Palette aleatoire => Zufallspalette",
+            "Ocean => Ozean",
+            "Rose => Rosa",
+            "Menthe => Minze",
+            "Or => Gold",
+            "Gris => Grau",
+            "Contraste => Hoher Kontrast",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -1270,6 +1302,18 @@ namespace AR6DoF
             "Bas gauche => In basso a sinistra",
             "Bas droite => In basso a destra",
             "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre. => Vale per tutti gli schermi e i menu. Predefinito: Windows, in alto a destra. Si ridimensiona con l'unica maniglia in basso a destra di ogni finestra.",
+            "Calibration 1/2 dans {0} s : pose la telecommande a plat, immobile => Calibrazione 1/2 tra {0} s: appoggia il telecomando piatto, fermo",
+            "Calibration 2/2 dans {0} s : releve la pointe de ~30 deg, immobile => Calibrazione 2/2 tra {0} s: solleva la punta di ~30 gradi, fermo",
+            "Un compte a rebours de 3 s laisse le temps de poser la telecommande => Un conto alla rovescia di 3 s lascia il tempo di appoggiare il telecomando",
+            "Couleur aleatoire => Colore casuale",
+            "Palette aleatoire => Tavolozza casuale",
+            "Ocean => Oceano",
+            "Orange => Arancione",
+            "Rose => Rosa",
+            "Menthe => Menta",
+            "Or => Oro",
+            "Gris => Grigio",
+            "Contraste => Alto contrasto",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -1586,6 +1630,18 @@ namespace AR6DoF
             "Bas gauche => Em baixo a esquerda",
             "Bas droite => Em baixo a direita",
             "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre. => Vale para todos os ecras e menus. Por omissao: Windows, em cima a direita. Redimensiona-se com a unica pega em baixo a direita de cada janela.",
+            "Calibration 1/2 dans {0} s : pose la telecommande a plat, immobile => Calibracao 1/2 em {0} s: pousa o comando plano, imovel",
+            "Calibration 2/2 dans {0} s : releve la pointe de ~30 deg, immobile => Calibracao 2/2 em {0} s: levanta a ponta ~30 graus, imovel",
+            "Un compte a rebours de 3 s laisse le temps de poser la telecommande => Uma contagem de 3 s da tempo para pousar o comando",
+            "Couleur aleatoire => Cor aleatoria",
+            "Palette aleatoire => Paleta aleatoria",
+            "Ocean => Oceano",
+            "Orange => Laranja",
+            "Rose => Rosa",
+            "Menthe => Menta",
+            "Or => Ouro",
+            "Gris => Cinzento",
+            "Contraste => Alto contraste",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

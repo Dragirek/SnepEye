@@ -289,6 +289,9 @@ namespace AR6DoF
         }
 
         // ---- Unity UI (boutons...) ----
+        /// <summary>Élément Unity UI actuellement visé par le laser (null si aucun).</summary>
+        public GameObject HoverUi { get { return uiHover; } }
+
         void UiHover(GameObject go)
         {
             if (go == uiHover) return;

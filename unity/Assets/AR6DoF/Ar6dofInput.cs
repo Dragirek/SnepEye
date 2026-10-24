@@ -38,5 +38,18 @@ namespace AR6DoF
             return false;
 #endif
         }
+
+        /// <summary>Molette d'une vraie souris (positive = vers le haut), avec les deux systèmes d'entrée. Indépendant des raccourcis clavier.</summary>
+        public static float ScrollY()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var m = UnityEngine.InputSystem.Mouse.current;
+            return m != null ? m.scroll.ReadValue().y / 120f : 0f;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+            return Input.mouseScrollDelta.y;
+#else
+            return 0f;
+#endif
+        }
     }
 }

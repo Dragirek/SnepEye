@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -55,9 +56,25 @@ namespace AR6DoF
         RectTransform eyeSelBox;
         Text eyeHint;
 
-        // onglet Système
+        // onglet Système : calibration de la télécommande avec compte à rebours (pour avoir le temps de poser la manette)
         Text calMsg;
         string calMsgFr = "";
+        int calStep;                // 0 = rien, 1 ou 2 = étape en attente
+        float calAt;
+        const float CalDelay = 3f;
+
+        // défilement des pages
+        readonly List<GameObject> views = new List<GameObject>();
+        readonly List<Ar6dofVrScrollArea> scrolls = new List<Ar6dofVrScrollArea>();
+        Button scrollUp, scrollDown;
+        Image scrollTrack, scrollHandle;
+
+        // sélecteur de couleur
+        Ar6dofVrColorPicker picker;
+        Image preview;
+        Ar6dofVrTextField fHex;
+        readonly Ar6dofVrTextField[] fRgb = new Ar6dofVrTextField[3];
+        readonly Ar6dofVrTextField[] fHsv = new Ar6dofVrTextField[3];
 
         // onglet Langue
         readonly List<Button> langButtons = new List<Button>();
@@ -80,12 +97,29 @@ namespace AR6DoF
             }
             for (int i = 0; i < TabNames.Length; i++)
             {
+                // fenêtre (découpe + zone vide qui capte le glissement) contenant la page, que le défilement déplace
+                var vp = new GameObject("Vue" + i, typeof(RectTransform));
+                vp.transform.SetParent(canvas.transform, false);
+                var vrt = (RectTransform)vp.transform;
+                vrt.sizeDelta = new Vector2(W, PageH);
+                vrt.anchoredPosition = Vector2.zero;
+                var vimg = vp.AddComponent<Image>();
+                vimg.color = new Color(0f, 0f, 0f, 0f);
+                vp.AddComponent<RectMask2D>();
                 var go = new GameObject("Page" + i, typeof(RectTransform));
-                go.transform.SetParent(canvas.transform, false);
+                go.transform.SetParent(vrt, false);
                 var rt = (RectTransform)go.transform;
                 rt.sizeDelta = new Vector2(W, PageH);
                 rt.anchoredPosition = Vector2.zero;
                 pages.Add(rt);
+                var sa = vp.AddComponent<Ar6dofVrScrollArea>();
+                int tabIdx = i;
+                sa.content = rt;
+                sa.viewport = vrt;
+                sa.maxScroll = () => MaxScroll(tabIdx);
+                sa.onChanged = UpdateScrollUi;
+                views.Add(vp);
+                scrolls.Add(sa);
             }
             BuildPassthrough(pages[TabImage]);
             BuildOptics(pages[TabOptics]);
@@ -96,6 +130,7 @@ namespace AR6DoF
             BuildDock(pages[TabDock]);
             BuildLanguage(pages[TabLang]);
             BuildBottom();
+            BuildScrollControls();
             Ar6dofSettings.Changed += OnSettingsChanged;
             Ar6dofLoc.Changed += OnSettingsChanged;
             ShowTab(0);
@@ -117,6 +152,52 @@ namespace AR6DoF
             foreach (var r in refreshers) r();
             foreach (var kv in live) kv.Value();
             UpdateStatus();
+            if (scrollUp != null && curTab < scrolls.Count) scrolls[curTab].SetOffset(scrolls[curTab].offset);   // recale + met à jour l'ascenseur
+        }
+
+        // ---- défilement ----
+        /// <summary>Hauteur à découvrir en plus pour un onglet (0 = tout tient).</summary>
+        float MaxScroll(int tab)
+        {
+            if (tab == TabStyle && styleSub == 0) return 190f;
+            return 0f;
+        }
+
+        void ScrollBy(float d) { if (curTab < scrolls.Count) scrolls[curTab].By(d); }
+
+        void BuildScrollControls()
+        {
+            float x = W * 0.5f - 22f, top = PageH * 0.5f;
+            Text t;
+            scrollUp = Ar6dofVrUi.MakeButton(canvas.transform, "^", new Vector2(x, top - 24f), new Vector2(38f, 38f), () => ScrollBy(-150f), out t, 22);
+            scrollDown = Ar6dofVrUi.MakeButton(canvas.transform, "v", new Vector2(x, -top + 24f), new Vector2(38f, 38f), () => ScrollBy(150f), out t, 22);
+            var tr = Ar6dofVrUi.Rect(canvas.transform, "PisteDefilement", new Vector2(x, 0f), new Vector2(6f, PageH - 110f));
+            scrollTrack = tr.gameObject.AddComponent<Image>();
+            scrollTrack.raycastTarget = false;
+            Ar6dofTheme.Attach(tr.gameObject, Ar6dofRole.Track, 3);
+            var hd = Ar6dofVrUi.Rect(tr, "Poignee", Vector2.zero, new Vector2(10f, 40f));
+            scrollHandle = hd.gameObject.AddComponent<Image>();
+            scrollHandle.raycastTarget = false;
+            Ar6dofTheme.Attach(hd.gameObject, Ar6dofRole.Accent, 5);
+            UpdateScrollUi();
+        }
+
+        void UpdateScrollUi()
+        {
+            if (scrollUp == null || curTab >= scrolls.Count) return;
+            var sa = scrolls[curTab];
+            float max = sa.Max;
+            bool on = max > 0.5f;
+            scrollUp.gameObject.SetActive(on);
+            scrollDown.gameObject.SetActive(on);
+            scrollTrack.gameObject.SetActive(on);
+            if (!on) return;
+            float trackH = PageH - 110f;
+            float hh = Mathf.Clamp(trackH * PageH / (PageH + max), 30f, trackH);
+            var hr = (RectTransform)scrollHandle.transform;
+            hr.sizeDelta = new Vector2(10f, hh);
+            float frac = Mathf.Clamp01(sa.offset / max);
+            hr.anchoredPosition = new Vector2(0f, (trackH - hh) * 0.5f - frac * (trackH - hh));
         }
 
         void Live(int tab, Action a) { live.Add(new KeyValuePair<int, Action>(tab, a)); a(); }
@@ -127,6 +208,24 @@ namespace AR6DoF
             if (canvas == null || !canvas.gameObject.activeInHierarchy) return;
             float now = Time.unscaledTime;
             if (resetArmed && now > resetUntil) { resetArmed = false; UpdateResetLabel(); }
+            // molette d'une vraie souris : fait défiler la page visée par le laser
+            float wheel = Ar6dofInput.ScrollY();
+            if (wheel != 0f && dock.pointer != null)
+            {
+                var hov = dock.pointer.HoverUi;
+                if (hov != null && hov.transform.IsChildOf(canvas.transform)) ScrollBy(-wheel * 90f);
+            }
+            // calibration de la télécommande : l'étape part quand le compte à rebours est fini
+            if (calStep != 0)
+            {
+                if (now >= calAt)
+                {
+                    var r = Remote;
+                    calMsgFr = r == null ? "telecommande introuvable" : (calStep == 1 ? r.CalibrateStep1() : r.CalibrateStep2());
+                    calStep = 0;
+                }
+                UpdateCalMsg();
+            }
             if (now < nextLive) return;
             nextLive = now + 0.25f;
             foreach (var kv in live) if (kv.Key == curTab) kv.Value();
@@ -138,7 +237,8 @@ namespace AR6DoF
             curTab = i;
             for (int k = 0; k < pages.Count; k++)
             {
-                pages[k].gameObject.SetActive(k == i);
+                views[k].SetActive(k == i);
+                if (k != i) scrolls[k].SetOffset(0f);
                 Ar6dofTheme.SetSelected(tabButtons[k], k == i);
             }
             RefreshAll();
@@ -400,6 +500,25 @@ namespace AR6DoF
             }
         }
 
+        void StartCal(int step)
+        {
+            calStep = step;
+            calAt = Time.unscaledTime + CalDelay;
+            calMsgFr = "";
+            UpdateCalMsg();
+        }
+
+        void UpdateCalMsg()
+        {
+            if (calMsg == null) return;
+            if (calStep != 0)
+            {
+                int left = Mathf.CeilToInt(Mathf.Max(0f, calAt - Time.unscaledTime));
+                calMsg.text = Ar6dofLoc.F(calStep == 1 ? "Calibration 1/2 dans {0} s : pose la telecommande a plat, immobile" : "Calibration 2/2 dans {0} s : releve la pointe de ~30 deg, immobile", left);
+            }
+            else calMsg.text = calMsgFr.Length > 0 ? Ar6dofLoc.T(calMsgFr) : "";
+        }
+
         void BuildSystem(RectTransform page)
         {
             float y = TopY;
@@ -436,12 +555,13 @@ namespace AR6DoF
                 string b = (r.Left ? Ar6dofLoc.T("G") : "-") + " " + (r.Right ? Ar6dofLoc.T("D") : "-");
                 return Ar6dofLoc.F("Telecommande : connectee   -   {0} paquets/s   -   boutons {1}", r.PacketsPerSec, b);
             }); y -= 30f;
-            Ar6dofVrUi.Label(page, "Recentrer le rayon : maintenir les 2 boutons 0,6 s", new Vector2(0f, y), new Vector2(W - 70f, 26f), 17, TextAnchor.MiddleLeft); y -= 44f;
-            Btn(page, -178f, y, 340f, "Calibrer 1/2 (a plat)", () => { var r = Remote; calMsgFr = r != null ? r.CalibrateStep1() : "telecommande introuvable"; RefreshAll(); }, 19);
-            Btn(page, 178f, y, 340f, "Calibrer 2/2 (pointe relevee)", () => { var r = Remote; calMsgFr = r != null ? r.CalibrateStep2() : "telecommande introuvable"; RefreshAll(); }, 19);
+            Ar6dofVrUi.Label(page, "Recentrer le rayon : maintenir les 2 boutons 0,6 s", new Vector2(0f, y), new Vector2(W - 70f, 26f), 17, TextAnchor.MiddleLeft); y -= 28f;
+            Ar6dofVrUi.Label(page, "Un compte a rebours de 3 s laisse le temps de poser la telecommande", new Vector2(0f, y), new Vector2(W - 70f, 26f), 17, TextAnchor.MiddleLeft); y -= 40f;
+            Btn(page, -178f, y, 340f, "Calibrer 1/2 (a plat)", () => StartCal(1), 19);
+            Btn(page, 178f, y, 340f, "Calibrer 2/2 (pointe relevee)", () => StartCal(2), 19);
             y -= 38f;
             calMsg = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 70f, 28f), 17, TextAnchor.MiddleLeft);
-            refreshers.Add(() => calMsg.text = calMsgFr.Length > 0 ? Ar6dofLoc.T(calMsgFr) : "");
+            refreshers.Add(UpdateCalMsg);
             y -= 54f;
             Heading(page, y + 16f, "Telecommande : filtre du rayon"); y -= 40f;
             Slider(page, ref y, "Stabilite (plus bas = plus stable)", 0.5f, 8f, () => Ar6dofSettings.Current.remoteMinCutoff, v => { Ar6dofSettings.Current.remoteMinCutoff = v; Touch(); }, "0.0", 70f);
@@ -569,9 +689,9 @@ namespace AR6DoF
             }, 470f);
 
             // 2) Couleurs / Forme
-            subButtons.Add(Btn(page, -220f, 140f, 210f, "Couleurs", () => { styleSub = 0; RefreshAll(); }));
-            subButtons.Add(Btn(page, 0f, 140f, 210f, "Forme", () => { styleSub = 1; RefreshAll(); }));
-            subButtons.Add(Btn(page, 220f, 140f, 210f, "Fenetres", () => { styleSub = 2; RefreshAll(); }));
+            subButtons.Add(Btn(page, -220f, 140f, 210f, "Couleurs", () => { styleSub = 0; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }));
+            subButtons.Add(Btn(page, 0f, 140f, 210f, "Forme", () => { styleSub = 1; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }));
+            subButtons.Add(Btn(page, 220f, 140f, 210f, "Fenetres", () => { styleSub = 2; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }));
 
             // ---- Couleurs
             colorsBox = NewBox(page, "Couleurs");
@@ -594,17 +714,7 @@ namespace AR6DoF
                 if (lbl != null) lbl.rectTransform.offsetMin = new Vector2(26f, 0f);
             }
             refreshers.Add(SyncHsv);
-            float y = 26f;
-            Slider(colorsBox, ref y, "Teinte", 0f, 1f, () => hue, v => { hue = v; SetHsv(); }, "0.00");
-            Slider(colorsBox, ref y, "Saturation", 0f, 1f, () => sat, v => { sat = v; SetHsv(); }, "0.00");
-            Slider(colorsBox, ref y, "Luminosite", 0f, 1f, () => val, v => { val = v; SetHsv(); }, "0.00");
-            Ar6dofVrUi.Label(colorsBox, "Palettes", new Vector2(-250f, -200f), new Vector2(200f, 28f), 18, TextAnchor.MiddleLeft);
-            string[] palNames = { "Nuit", "Rouge", "Vert", "Violet", "Clair" };
-            for (int i = 0; i < palNames.Length; i++)
-            {
-                int pi = i;
-                Btn(colorsBox, -240f + 120f * i, -240f, 112f, palNames[i], () => ApplyPalette(pi), 18);
-            }
+            BuildColorPicker(colorsBox);
 
             // ---- Forme
             formBox = NewBox(page, "Forme");
@@ -652,18 +762,184 @@ namespace AR6DoF
             Touch();
         }
 
+        // 12 palettes : nom, fond, boutons, accent, texte
+        static readonly string[] PalNames = { "Nuit", "Rouge", "Vert", "Violet", "Clair", "Ocean", "Orange", "Rose", "Menthe", "Or", "Gris", "Contraste" };
+        static readonly string[,] PalCols =
+        {
+            { "#14171C", "#384252", "#40D9FF", "#FFFFFF" },
+            { "#240D0F", "#5C2429", "#FF4D4D", "#FFFFFF" },
+            { "#0D1F12", "#245233", "#59FF73", "#FFFFFF" },
+            { "#1A0F29", "#452E66", "#BF73FF", "#FFFFFF" },
+            { "#EBEDF2", "#B8C2D1", "#1A73D9", "#14171C" },
+            { "#071A2B", "#15446B", "#29B6F6", "#FFFFFF" },
+            { "#211208", "#5E3410", "#FF9A1F", "#FFFFFF" },
+            { "#2A0F1F", "#6B2A4F", "#FF6EB4", "#FFFFFF" },
+            { "#0A211F", "#1D5C55", "#4DFFD2", "#FFFFFF" },
+            { "#1C1608", "#524215", "#FFD23F", "#FFFFFF" },
+            { "#1B1B1B", "#4A4A4A", "#B0B0B0", "#FFFFFF" },
+            { "#000000", "#262626", "#FFE600", "#FFFFFF" },
+        };
+
+        static Color Hex(string h)
+        {
+            Color c;
+            if (!ColorUtility.TryParseHtmlString(h, out c)) c = Color.magenta;
+            c.a = 1f;
+            return c;
+        }
+
         void ApplyPalette(int p)
         {
             var st = CurStyle(selElem);
-            switch (p)
+            st.bg = Hex(PalCols[p, 0]);
+            st.button = Hex(PalCols[p, 1]);
+            st.accent = Hex(PalCols[p, 2]);
+            st.text = Hex(PalCols[p, 3]);
+            Touch();
+        }
+
+        static float Rnd(float a, float b) { return UnityEngine.Random.Range(a, b); }
+
+        /// <summary>Couleur aléatoire pour la case choisie (fond sombre, boutons moyens, accent vif, texte clair).</summary>
+        void RandomColor()
+        {
+            float h = UnityEngine.Random.value, s, v;
+            switch (colorSlot)
             {
-                case 0: st.bg = new Color(0.08f, 0.09f, 0.11f); st.button = new Color(0.22f, 0.26f, 0.32f); st.accent = new Color(0.25f, 0.85f, 1f); st.text = Color.white; break;
-                case 1: st.bg = new Color(0.14f, 0.05f, 0.06f); st.button = new Color(0.36f, 0.14f, 0.16f); st.accent = new Color(1f, 0.30f, 0.30f); st.text = Color.white; break;
-                case 2: st.bg = new Color(0.05f, 0.12f, 0.07f); st.button = new Color(0.14f, 0.32f, 0.20f); st.accent = new Color(0.35f, 1f, 0.45f); st.text = Color.white; break;
-                case 3: st.bg = new Color(0.10f, 0.06f, 0.16f); st.button = new Color(0.27f, 0.18f, 0.40f); st.accent = new Color(0.75f, 0.45f, 1f); st.text = Color.white; break;
-                default: st.bg = new Color(0.92f, 0.93f, 0.95f); st.button = new Color(0.72f, 0.76f, 0.82f); st.accent = new Color(0.10f, 0.45f, 0.85f); st.text = new Color(0.08f, 0.09f, 0.11f); break;
+                case 0: s = Rnd(0.25f, 0.75f); v = Rnd(0.06f, 0.22f); break;
+                case 1: s = Rnd(0.3f, 0.7f); v = Rnd(0.25f, 0.5f); break;
+                case 2: s = Rnd(0.6f, 1f); v = Rnd(0.85f, 1f); break;
+                default: s = Rnd(0f, 0.12f); v = Rnd(0.9f, 1f); break;
+            }
+            hue = h; sat = s; val = v;
+            SetHsv();
+        }
+
+        /// <summary>Palette aléatoire harmonieuse : une teinte pour le fond et les boutons, la teinte opposée pour l'accent.</summary>
+        void RandomPalette()
+        {
+            var st = CurStyle(selElem);
+            float h = UnityEngine.Random.value;
+            float h2 = Mathf.Repeat(h + Rnd(0.35f, 0.65f), 1f);
+            if (UnityEngine.Random.value < 0.15f)
+            {
+                st.bg = Color.HSVToRGB(h, Rnd(0.03f, 0.1f), Rnd(0.9f, 0.97f));
+                st.button = Color.HSVToRGB(h, Rnd(0.1f, 0.25f), Rnd(0.7f, 0.82f));
+                st.accent = Color.HSVToRGB(h2, Rnd(0.7f, 0.95f), Rnd(0.6f, 0.85f));
+                st.text = Color.HSVToRGB(h, 0.2f, 0.1f);
+            }
+            else
+            {
+                st.bg = Color.HSVToRGB(h, Rnd(0.35f, 0.7f), Rnd(0.07f, 0.16f));
+                st.button = Color.HSVToRGB(h, Rnd(0.3f, 0.55f), Rnd(0.25f, 0.4f));
+                st.accent = Color.HSVToRGB(h2, Rnd(0.6f, 0.95f), 1f);
+                st.text = Color.white;
             }
             Touch();
+        }
+
+        // ---- sélecteur : anneau de teinte + carré saturation / luminosité + champs HEX, RGB et HSV
+        static void SetFld(Ar6dofVrTextField f, string t)
+        {
+            if (f != null && Ar6dofVrTextField.Current != f) f.SetText(t);
+        }
+
+        void ApplyHex(string t)
+        {
+            if (string.IsNullOrEmpty(t)) return;
+            t = t.Trim();
+            if (t.StartsWith("#")) t = t.Substring(1);
+            if (t.Length != 6 && t.Length != 3) return;
+            Color c;
+            if (!ColorUtility.TryParseHtmlString("#" + t, out c)) return;
+            SetC(colorSlot, c);
+        }
+
+        void ApplyRgb(int ch, string t)
+        {
+            int v;
+            if (!int.TryParse((t ?? "").Trim(), out v)) return;
+            v = Mathf.Clamp(v, 0, 255);
+            Color c = GetC(colorSlot);
+            if (ch == 0) c.r = v / 255f; else if (ch == 1) c.g = v / 255f; else c.b = v / 255f;
+            SetC(colorSlot, c);
+        }
+
+        void ApplyHsvField(int k, string t)
+        {
+            float v;
+            if (!float.TryParse((t ?? "").Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out v)) return;
+            if (k == 0) hue = Mathf.Repeat(v, 360f) / 360f;
+            else if (k == 1) sat = Mathf.Clamp01(v / 100f);
+            else val = Mathf.Clamp01(v / 100f);
+            SetHsv();
+        }
+
+        Ar6dofVrTextField ColorField(RectTransform box, float gx, float y, string label, Action<string> onValue)
+        {
+            Ar6dofVrUi.Label(box, label, new Vector2(gx + 12f, y), new Vector2(26f, 30f), 20, TextAnchor.MiddleCenter);
+            return Ar6dofVrTextField.Make(box, new Vector2(gx + 65f, y), new Vector2(78f, 44f), "", "", t => onValue(t), t => { onValue(t); RefreshAll(); }, 21);
+        }
+
+        void BuildColorPicker(RectTransform box)
+        {
+            picker = Ar6dofVrColorPicker.Make(box, new Vector2(-175f, -95f), 300f, h => { hue = h; SetHsv(); }, (sa, va) => { sat = sa; val = va; SetHsv(); });
+
+            var pv = Ar6dofVrUi.Rect(box, "Apercu", new Vector2(160f, 22f), new Vector2(300f, 44f));
+            preview = pv.gameObject.AddComponent<Image>();
+            preview.raycastTarget = false;
+            Ar6dofTheme.SetRounded(preview, 10);
+
+            Ar6dofVrUi.Label(box, "HEX", new Vector2(48f, -40f), new Vector2(70f, 30f), 20, TextAnchor.MiddleLeft);
+            fHex = Ar6dofVrTextField.Make(box, new Vector2(215f, -40f), new Vector2(190f, 44f), "", "#RRGGBB", t => ApplyHex(t), t => { ApplyHex(t); RefreshAll(); }, 22);
+
+            string[] rgbN = { "R", "G", "B" }, hsvN = { "H", "S", "V" };
+            for (int k = 0; k < 3; k++)
+            {
+                int kk = k;
+                float gx = 10f + 100f * k;
+                fRgb[k] = ColorField(box, gx, -100f, rgbN[k], t => ApplyRgb(kk, t));
+                fHsv[k] = ColorField(box, gx, -160f, hsvN[k], t => ApplyHsvField(kk, t));
+            }
+            Btn(box, 160f, -222f, 300f, "Couleur aleatoire", RandomColor, 20, 44f);
+
+            Ar6dofVrUi.Label(box, "Palettes", new Vector2(-250f, -300f), new Vector2(200f, 28f), 18, TextAnchor.MiddleLeft);
+            Btn(box, 150f, -300f, 320f, "Palette aleatoire", RandomPalette, 18, 40f);
+            for (int i = 0; i < PalNames.Length; i++)
+            {
+                int pi = i;
+                var b = Btn(box, -234f + 156f * (i % 4), -360f - 54f * (i / 4), 150f, PalNames[i], () => ApplyPalette(pi), 17, 46f);
+                // échantillon : carré de la couleur de fond avec un rond d'accent
+                var sw = Ar6dofVrUi.Rect(b.transform, "Echantillon", new Vector2(-52f, 0f), new Vector2(28f, 28f));
+                var si = sw.gameObject.AddComponent<Image>();
+                si.color = Hex(PalCols[i, 0]);
+                si.raycastTarget = false;
+                Ar6dofTheme.SetRounded(si, 6);
+                var ac = Ar6dofVrUi.Rect(sw, "Accent", Vector2.zero, new Vector2(14f, 14f));
+                var ai = ac.gameObject.AddComponent<Image>();
+                ai.color = Hex(PalCols[i, 2]);
+                ai.raycastTarget = false;
+                Ar6dofTheme.SetRounded(ai, 100);
+                var lbl = b.GetComponentInChildren<Text>();
+                if (lbl != null) lbl.rectTransform.offsetMin = new Vector2(24f, 0f);
+            }
+            refreshers.Add(RefreshPicker);
+        }
+
+        void RefreshPicker()
+        {
+            if (picker == null) return;
+            Color c = GetC(colorSlot);
+            c.a = 1f;
+            picker.SetHsv(hue, sat, val);
+            preview.color = c;
+            SetFld(fHex, "#" + ColorUtility.ToHtmlStringRGB(c));
+            SetFld(fRgb[0], Mathf.RoundToInt(c.r * 255f).ToString());
+            SetFld(fRgb[1], Mathf.RoundToInt(c.g * 255f).ToString());
+            SetFld(fRgb[2], Mathf.RoundToInt(c.b * 255f).ToString());
+            SetFld(fHsv[0], Mathf.RoundToInt(hue * 360f).ToString());
+            SetFld(fHsv[1], Mathf.RoundToInt(sat * 100f).ToString());
+            SetFld(fHsv[2], Mathf.RoundToInt(val * 100f).ToString());
         }
 
         void RefreshStyleUi()

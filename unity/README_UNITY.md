@@ -118,15 +118,18 @@ Les angles, la distance, la taille et l'inclinaison se règlent dans l'onglet *D
 - **La roue** ouvre les réglages en VR : onglets *Image* (infos de l'image en direct, FOV, IPD, délai, calibration, reprojection...), *Optique* (décalage, lentilles, miroir, rotation, yeux liés), *Ecrans* (images/s, collage, courbure, ajouter un écran),
   *Systeme* (état de la tête et de la télécommande, calibration, filtre du rayon), *Yeux* (eye tracking), *Style*, *Dock* et *Langue*.
 
+### Défilement des menus
+Quand un onglet est plus haut que le panneau (ex. *Style* > *Couleurs*), des boutons **^** et **v** et un ascenseur apparaissent à droite. Tu peux aussi appuyer sur une zone vide et **glisser** avec le laser, ou utiliser la **molette** d'une souris.
+
 ### Fenêtres : réduire, fermer, redimensionner
-Chaque écran et chaque menu a, dans un coin, deux boutons : **Réduire** (range la fenêtre dans la barre, comme un clic sur son icône) et **Fermer** (pour un écran : le retire, avec un second clic de confirmation ; il en reste toujours au moins un, qui est alors rangé). Une **seule poignée de redimensionnement**, en bas à droite, sur tous.
+Chaque écran et chaque menu a, dans un coin, deux boutons : **Réduire** (range la fenêtre dans la barre, comme un clic sur son icône) et **Fermer** (pour un écran : le retire, avec un second clic de confirmation ; il en reste toujours au moins un, qui est alors rangé). Une **seule poignée de redimensionnement**, juste **sous** la fenêtre à droite (jamais sur le côté : elle ne tombe pas sur l'écran voisin), sur tous.
 Style **Windows** (par défaut) ou **Mac**, et coin au choix (haut/bas, gauche/droite ; par défaut en haut à droite) : onglet *Style* > *Fenetres*. Sous un écran, la **roue** ouvre ses réglages et change de couleur tant qu'ils sont ouverts ; un second clic dessus les referme.
 
 ### Style, langue et paramètres globaux (onglets Style / Dock / Langue)
 Tout ça est **global** (pas lié à un projet Unity) : fichier `%APPDATA%\AR6DoF\settings.json`.
 - **Aperçu puis Enregistrer** : un changement s'applique tout de suite mais n'est gardé que si tu cliques **Enregistrer** (en bas du panneau). **Annuler** revient au dernier enregistrement, **Par defaut** (2 clics) remet les valeurs d'usine, en aperçu aussi.
 - **Style** : choisis *Tout* (style commun à toute l'interface) ou un élément : *Dock*, *Menus*, *Clavier*, *Ecrans*, *Rayon*. Coche **Style à part pour cet élément** pour qu'il ait ses propres réglages (ex. clavier rouge, rayon vert) ; sinon il suit le style commun.
-  *Couleurs* : fond, boutons, accent (survol, sélection, rayon), texte ; curseurs teinte / saturation / luminosité et quelques palettes. *Forme* : opacité des fonds, coins arrondis, texture de fond (grille, points, carbone, rayures, dégradé, bruit, ou ton image), épaisseur du rayon.
+  *Couleurs* : fond, boutons, accent (survol, sélection, rayon), texte ; **anneau de teinte + carré saturation / luminosité**, champs **HEX, RGB et HSV** modifiables (clique un champ : le clavier virtuel s'ouvre), **Couleur aléatoire**, **Palette aléatoire** et **12 palettes** prédéfinies. *Forme* : opacité des fonds, coins arrondis, texture de fond (grille, points, carbone, rayures, dégradé, bruit, ou ton image), épaisseur du rayon.
 - **Tes images** : dossier **`%APPDATA%\AR6DoF\pictures`** (créé tout seul ; bouton *Ouvrir le dossier pictures* dans *Style* > *Forme*). Mets-y un `.png` ou `.jpg`, elle apparaît dans la liste des textures (petite image = motif répété, grande = étirée). L'ancien dossier `textures` est encore lu.
 - **Clavier** : barre sous le clavier = le **déplacer** (bouton gauche ou droit, il reste face à toi), petit carré à droite = **taille**. La taille se règle aussi dans l'onglet *Dock*.
 - **Langue** : français, English, Español, Deutsch, Italiano, Português, ou *Automatique* (langue de Windows). Pour ajouter ou corriger une langue sans toucher au code : fichier texte `%APPDATA%\AR6DoF\lang\xx.txt` (xx = code de la langue), première ligne `# Nom de la langue` (facultative), puis une ligne par texte : `texte français => traduction` (modèle : les textes français sont ceux du code).
@@ -154,7 +157,7 @@ Bouton *Sauver ces réglages* pour les garder.
 1. Flashe `firmware/ar6dof_remote/ar6dof_remote.ino` sur l'ESP32-C3 (câblage et broches : en-tête du fichier). Pas de WiFi, pas de mot de passe.
 2. Active le Bluetooth du PC. **Ne l'appaire pas** dans les paramètres Windows. Si « AR6DoF-Remote » y apparaît déjà (essais précédents), **supprime-le** de la liste.
 3. Le Bluetooth passe par ar6dof_probe : il cherche « AR6DoF-Remote », se connecte, se reconnecte. Console : `[probe] [ble] telecommande connectee`.
-4. Réglages > *Systeme* > *Telecommande* : *Calibrer 1/2* (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
+4. Réglages > *Systeme* > *Telecommande* : *Calibrer 1/2* (compte à rebours de 3 s pour avoir le temps de poser la manette) (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
 5. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
 6. **Latence et stabilité** (composant `Ar6dofRemote`) : le filtre tourne à chaque paquet (125 Hz) avec l'horloge du capteur. *Filter Min Cutoff Hz* (2) : plus bas = plus stable à l'arrêt. *Filter Beta* (0,15) : plus haut = moins de retard en mouvement. *Predict Ms* (10) : avance le laser de ce temps pour compenser le Bluetooth et l'affichage ; monte-le si le laser traîne, baisse-le s'il dépasse la cible. Dans `Ar6dofPointer`, *Extra Smoothing* reste décoché (il ajouterait du retard).
 7. **Portée** : antenne de l'ESP32-C3 dégagée (pas de main, batterie ni fils dessus), dongle Bluetooth sur un port USB 2 ou une rallonge (l'USB 3 brouille le 2,4 GHz). Au démarrage, ar6dof_probe demande à Windows un intervalle de connexion court : `[ble] intervalle de connexion court : accepte`.
