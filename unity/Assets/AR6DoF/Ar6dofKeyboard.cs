@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -35,6 +36,12 @@ namespace AR6DoF
         public KeyCode summonKey = KeyCode.B;
 
         bool shift, ctrl, alt, visible = true;
+        bool builtNumpad;
+        float kbMinX, kbMaxX, kbMinY, kbMaxY;
+        float nextFx, fxAnimEnd;
+        bool fxWasOn;
+        Vector2 ripplePos;
+        float rippleT = -10f;
         Transform keysRoot;
         Font font;
         Shader shader;
@@ -135,6 +142,27 @@ namespace AR6DoF
             return rows;
         }
 
+        /// <summary>Pavé numérique : 4 colonnes x 5 lignes, aligné sur les 5 lignes du clavier. Les chiffres sont envoyés comme des caractères (marche sans verrouillage numérique).</summary>
+        static List<List<KeyDef>> NumpadRows()
+        {
+            Func<string, KeyDef> c = s => new KeyDef { label = s, ch = s[0], shiftCh = s[0], kind = Kind.Char };
+            var rows = new List<List<KeyDef>>();
+            rows.Add(new List<KeyDef> { Vk(Ar6dofLoc.T("Retour"), 0x08), c("/"), c("*"), c("-") });
+            rows.Add(new List<KeyDef> { c("7"), c("8"), c("9"), c("+") });
+            rows.Add(new List<KeyDef> { c("4"), c("5"), c("6"), c(",") });
+            rows.Add(new List<KeyDef> { c("1"), c("2"), c("3"), Vk(Ar6dofLoc.T("Entree"), 0x0D) });
+            var zero = c("0"); zero.width = 2f;
+            rows.Add(new List<KeyDef> { zero, c("."), c("=") });
+            return rows;
+        }
+
+        static float RowWidth(List<KeyDef> row, float keySize, float gap)
+        {
+            float w = 0f;
+            foreach (var d in row) w += d.width * keySize + (d.width - 1f) * gap + gap;
+            return w - gap;
+        }
+
         void Build()
         {
             if (keysRoot != null) Destroy(keysRoot.gameObject);
@@ -146,16 +174,21 @@ namespace AR6DoF
             keysRoot.localScale = Vector3.one * Mathf.Clamp(Ar6dofSettings.Current.keyboardScale, 0.4f, 3f);
 
             var rows = Layout();
+            builtNumpad = Ar6dofSettings.Current.kbNumpad;
+            var pad = builtNumpad ? NumpadRows() : null;
             float pitch = keySize + gap;
             float top = (rows.Count - 1) * pitch * 0.5f;
-            float maxW = 0f;
+            float mainW = 0f;
+            foreach (var r0 in rows) mainW = Mathf.Max(mainW, RowWidth(r0, keySize, gap));
+            float padW = pad != null ? 4f * keySize + 3f * gap : 0f;
+            float padGap = pad != null ? keySize * 0.7f : 0f;
+            float maxW = mainW + padGap + padW;                       // largeur totale
+            float originX = -maxW * 0.5f;
+            kbMinX = kbMinY = 1e9f; kbMaxX = kbMaxY = -1e9f;
             for (int ri = 0; ri < rows.Count; ri++)
             {
-                float rowWidth = 0f;
-                foreach (var d in rows[ri]) rowWidth += d.width * keySize + (d.width - 1f) * gap + gap;
-                rowWidth -= gap;
-                maxW = Mathf.Max(maxW, rowWidth);
-                float x = -rowWidth * 0.5f;
+                float rowWidth = RowWidth(rows[ri], keySize, gap);
+                float x = originX + (mainW - rowWidth) * 0.5f;
                 float y = top - ri * pitch;
                 foreach (var d in rows[ri])
                 {
@@ -164,6 +197,20 @@ namespace AR6DoF
                     x += w + gap;
                 }
             }
+            if (pad != null)
+                for (int ri = 0; ri < pad.Count; ri++)
+                {
+                    float x = originX + mainW + padGap;
+                    float y = top - ri * pitch;
+                    foreach (var d in pad[ri])
+                    {
+                        float w = d.width * keySize + (d.width - 1f) * gap;
+                        AddKey(d, x + w * 0.5f, y, w, keySize);
+                        x += w + gap;
+                    }
+                }
+            ApplyGameTints();
+            foreach (var k in keys) k.Refresh();
             // poignées sous le clavier : barre = déplacer, coin = taille
             float barY = -top - keySize * 0.5f - 0.032f;
             AddHandle(Ar6dofKeyboardHandle.Kind.Move, 0f, barY, 0.30f, 0.024f);
@@ -198,8 +245,10 @@ namespace AR6DoF
         void OnStyleChanged()
         {
             if (keysRoot == null) return;
+            if (Ar6dofSettings.Current.kbNumpad != builtNumpad) { Build(); return; }   // pavé numérique ajouté ou retiré
             keysRoot.localScale = Vector3.one * Mathf.Clamp(Ar6dofSettings.Current.keyboardScale, 0.4f, 3f);
             int corner = Ar6dofSettings.StyleFor(Ar6dofElem.Keyboard).corner;
+            ApplyGameTints();
             foreach (var k in keys)
             {
                 if (roundedShader && k.quad != null) Ar6dofTheme.SetRoundedSize(k.quad.sharedMaterial, k.quad.transform.localScale.x, k.quad.transform.localScale.y, corner);
@@ -292,8 +341,119 @@ namespace AR6DoF
             key.def = d;
             key.label = tm;
             key.quad = rend;
+            key.pos = new Vector2(cx, cy);
+            key.seed = UnityEngine.Random.value;
+            kbMinX = Mathf.Min(kbMinX, cx); kbMaxX = Mathf.Max(kbMaxX, cx);
+            kbMinY = Mathf.Min(kbMinY, cy); kbMaxY = Mathf.Max(kbMaxY, cy);
             key.Refresh();
             keys.Add(key);
+        }
+
+        // ------------------------------------------------------------------ touches de jeu + animation lumineuse
+        /// <summary>Colore Z Q S D et / ou W A S D (couleurs au choix) ; une touche commune aux deux (S, D) prend le mélange.</summary>
+        void ApplyGameTints()
+        {
+            var d = Ar6dofSettings.Current;
+            Color cw = Ar6dofKbFx.Tint(d.kbWasdColor), cz = Ar6dofKbFx.Tint(d.kbZqsdColor);
+            foreach (var k in keys)
+            {
+                k.hasTint = false;
+                if (k.def.kind != Kind.Char || k.def.label == null || k.def.label.Length != 1) continue;
+                char ch = char.ToLowerInvariant(k.def.label[0]);
+                bool w = d.kbShowWasd && (ch == 'w' || ch == 'a' || ch == 's' || ch == 'd');
+                bool z = d.kbShowZqsd && (ch == 'z' || ch == 'q' || ch == 's' || ch == 'd');
+                if (w && z) { k.hasTint = true; k.tint = Color.Lerp(cw, cz, 0.5f); }
+                else if (w) { k.hasTint = true; k.tint = cw; }
+                else if (z) { k.hasTint = true; k.tint = cz; }
+            }
+        }
+
+        /// <summary>Appelé à chaque touche : lance l'onde et le flash de l'animation "Reactif".</summary>
+        void NoteKeyPress(KeyDef def)
+        {
+            foreach (var k in keys)
+                if (k.def == def) { ripplePos = k.pos; rippleT = Time.unscaledTime; k.flash = 1f; break; }
+        }
+
+        void Update()
+        {
+            if (keysRoot == null || !visible) return;
+            var d = Ar6dofSettings.Current;
+            float now = Time.unscaledTime;
+            if (d.kbAnim == 0)
+            {
+                if (fxWasOn)
+                {   // animation coupée : toutes les touches reprennent leur couleur normale
+                    fxWasOn = false;
+                    foreach (var k in keys) { k.animAmount = 0f; k.flash = 0f; k.Refresh(); }
+                }
+                return;
+            }
+            if (now < nextFx) return;
+            nextFx = now + 1f / 30f;   // 30 mises à jour par seconde suffisent à l'oeil et coûtent très peu
+            fxWasOn = true;
+
+            float t = now * Mathf.Clamp(d.kbAnimSpeed, 0.05f, 6f);
+            float strength = Mathf.Clamp01(d.kbAnimStrength);
+            float w = Mathf.Max(0.001f, kbMaxX - kbMinX), h = Mathf.Max(0.001f, kbMaxY - kbMinY);
+            Vector2 center = new Vector2((kbMinX + kbMaxX) * 0.5f, (kbMinY + kbMaxY) * 0.5f);
+            foreach (var k in keys)
+            {
+                float u = (k.pos.x - kbMinX) / w, v = (k.pos.y - kbMinY) / h;   // 0..1 sur le clavier
+                float amount = 1f;
+                Color col;
+                switch (d.kbAnim)
+                {
+                    case 1:   // vague : la palette défile dans le sens choisi
+                    {
+                        float p;
+                        switch (d.kbAnimDir)
+                        {
+                            case 1: p = -u; break;
+                            case 2: p = -v; break;     // vers le bas
+                            case 3: p = v; break;      // vers le haut
+                            case 4: p = ((k.pos - center).magnitude / (0.5f * Mathf.Sqrt(w * w + h * h))); break;
+                            default: p = u; break;
+                        }
+                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, p * 0.8f - t * 0.2f);
+                        break;
+                    }
+                    case 2:   // cycle : toutes les touches ensemble
+                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, t * 0.12f);
+                        break;
+                    case 3:   // respiration : fondu doux
+                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, t * 0.05f);
+                        amount = 0.5f + 0.5f * Mathf.Sin(t * 1.8f);
+                        break;
+                    case 4:   // réactif : la touche s'allume quand on l'appuie, puis s'éteint
+                        k.flash = Mathf.Max(0f, k.flash - (1f / 30f) * 1.4f / Mathf.Max(0.3f, d.kbAnimSpeed));
+                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, u * 0.6f + t * 0.1f);
+                        amount = k.flash;
+                        break;
+                    case 5:   // scintillement : chaque touche brille à son tour, au hasard
+                    {
+                        float s = Mathf.Sin(t * 2.2f + k.seed * 40f);
+                        amount = Mathf.Pow(Mathf.Clamp01(s), 6f);
+                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, k.seed + t * 0.05f);
+                        break;
+                    }
+                    default:  // 6 onde : un cercle part de la dernière touche appuyée (ou du centre au repos)
+                    {
+                        Vector2 o = rippleT > 0f && now - rippleT < 4f ? ripplePos : center;
+                        float age = rippleT > 0f && now - rippleT < 4f ? now - rippleT : Mathf.Repeat(t * 0.5f, 2.5f);
+                        float dist = (k.pos - o).magnitude;
+                        float front = age * 0.28f * Mathf.Max(0.3f, d.kbAnimSpeed);
+                        float ring = Mathf.Exp(-Mathf.Pow((dist - front) / 0.035f, 2f));
+                        amount = ring * Mathf.Clamp01(1.2f - age * 0.3f);
+                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, dist * 3f - t * 0.1f);
+                        break;
+                    }
+                }
+                k.animColor = col;
+                k.animAmount = Mathf.Clamp01(amount * strength);
+                if (d.kbAnim == 4 && k.flash > 0f) k.animAmount = Mathf.Clamp01(Mathf.Max(k.animAmount, k.flash * Mathf.Max(0.5f, strength)));
+                k.Refresh();
+            }
         }
 
         // ------------------------------------------------------------------ frappe
@@ -325,6 +485,7 @@ namespace AR6DoF
 
         public void Press(KeyDef d)
         {
+            NoteKeyPress(d);
             switch (d.kind)
             {
                 case Kind.Shift: shift = !shift; RefreshAll(); return;

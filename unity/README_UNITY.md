@@ -165,13 +165,17 @@ Bouton *Sauver ces réglages* pour les garder.
 ## 8. Écrans virtuels
 La capture est faite par `ar6dof_screen.dll` (DXGI, GPU vers GPU, aucun travail quand le bureau ne change pas). Icône « écrans » de la barre.
 - Barre sous un écran = déplacer (bouton gauche : tout le groupe ; bouton droit : cet écran seul). **Coin bas droit** = taille. **Roue** à côté de la barre = moniteur capturé, images/s, collage, courbure, ajouter (3 max) / retirer. Réduire / Fermer : voir « Fenêtres » plus haut.
+- **Nouvel écran** : le bouton *+ Ajouter un écran* ouvre un choix : un **moniteur réel** (avec sa résolution) ou un **écran virtuel**. Un écran virtuel est un écran Windows de plus fourni par un pilote d'affichage virtuel (voir ci-dessous) : il apparaît ensuite dans la liste, à la résolution choisie dans Windows.
 - **Écran dans l'écran** : installe un pilote d'écran virtuel Windows (ex. *Virtual Display Driver*) en 1920x1080 / 60 Hz, glisse tes fenêtres dessus, c'est lui qu'on capture.
 - Image à l'envers : décocher *Flip Y* sur `Ar6dofScreens`. Clics à côté : mettre le moniteur capturé à 100 % de mise à l'échelle.
 - Limites : bureau en SDR, même carte graphique pour Unity et le moniteur capturé, le curseur Windows n'est pas dans la capture : Unity dessine un petit losange noir et blanc à l'endroit visé, sans aucun retard.
 
 ## 9. Clavier virtuel
 Icône « KB ». AZERTY / QWERTY sans dépendre du clavier Windows (envoi Unicode). Maj / Ctrl / Alt restent actives pour la touche suivante. Un champ de texte d'un menu VR reçoit les lettres à la place de Windows.
-Touches arrondies, colorables (onglet *Style* > *Clavier*). **Déplaçable** : attrape la barre sous le clavier ; **redimensionnable** : petit carré à droite de la barre. Le bouton **Clavier ici** du dock le ramène devant toi.
+Touches arrondies, colorables (onglet *Style* > *Clavier* pour le style ; réglages du clavier dans *Style* > sous-onglet *Clavier*).
+- **Pavé numérique** : case à cocher, affiché à droite du clavier (chiffres envoyés comme des caractères : pas besoin du verrouillage numérique).
+- **Touches de jeu** : W A S D et Z Q S D peuvent être colorées chacune d'une couleur au choix (S et D, communes, prennent le mélange).
+- **Animation lumineuse** : *Vague* (sens au choix : droite, gauche, bas, haut, depuis le centre), *Cycle*, *Respiration*, *Réactif* (la touche s'allume quand on l'appuie), *Scintillement*, *Onde* (cercle qui part de la dernière touche). **Vitesse** et **intensité** réglables, 11 palettes de couleurs (arc-en-ciel, océan, feu, néon...). Coût nul quand l'animation est sur *Aucune*. **Déplaçable** : attrape la barre sous le clavier ; **redimensionnable** : petit carré à droite de la barre. Le bouton **Clavier ici** du dock le ramène devant toi.
 
 ## 10. Menus d'appareils Bluetooth (fursuit, LED...)
 Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit tourner, sans `--no-ble`).

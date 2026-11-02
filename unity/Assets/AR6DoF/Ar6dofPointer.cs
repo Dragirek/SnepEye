@@ -52,6 +52,7 @@ namespace AR6DoF
             public Vector3 point;
             public GameObject ui;
             public Vector3 uiPoint;
+            public bool blocked;   // un menu est touché (même sur une zone vide) : rien derrière ne peut être cliqué
             public RaycastResult uiRes;
         }
 
@@ -189,7 +190,7 @@ namespace AR6DoF
             Hit hit = Resolve(ray, ec);
 
             laser.enabled = true;
-            Vector3 end = hit.ui != null ? hit.uiPoint : (hit.target != null ? hit.point : origin + aim * 2f);
+            Vector3 end = (hit.ui != null || hit.blocked) ? hit.uiPoint : (hit.target != null ? hit.point : origin + aim * 2f);
             laser.SetPosition(0, origin);
             laser.SetPosition(1, end);
 
@@ -275,7 +276,20 @@ namespace AR6DoF
                     uiData.position = ec.WorldToScreenPoint(wp);
                     results.Clear();
                     EventSystem.current.RaycastAll(uiData, results);
-                    if (results.Count > 0) { h.ui = results[0].gameObject; h.uiRes = results[0]; h.uiPoint = wp; best = dist; h.target = null; }
+                    // Ce menu est le plus proche sur le rayon : seuls SES éléments comptent. S'il n'y en a pas à cet endroit
+                    // (zone vide du fond), le menu BLOQUE quand même le rayon : on ne clique jamais ce qui se trouve derrière.
+                    int mine = -1;
+                    for (int ri = 0; ri < results.Count && mine < 0; ri++)
+                    {
+                        var rc = results[ri].gameObject != null ? results[ri].gameObject.GetComponentInParent<Canvas>() : null;
+                        if (rc != null && rc.rootCanvas == c) mine = ri;
+                    }
+                    best = dist;
+                    h.target = null;
+                    h.uiPoint = wp;
+                    h.blocked = true;
+                    if (mine >= 0) { h.ui = results[mine].gameObject; h.uiRes = results[mine]; }
+                    else { h.ui = null; h.uiRes = default(RaycastResult); }
                 }
             return h;
         }

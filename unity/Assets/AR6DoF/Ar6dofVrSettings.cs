@@ -47,7 +47,12 @@ namespace AR6DoF
         readonly List<Button> subButtons = new List<Button>();
         readonly List<Button> chromeStyleButtons = new List<Button>();
         readonly List<Button> chromeCornerButtons = new List<Button>();
-        RectTransform colorsBox, formBox, shapeBox, texBox, laserBox, separateBox, windowsBox;
+        RectTransform colorsBox, formBox, shapeBox, texBox, laserBox, separateBox, windowsBox, kbBox, kbDirBox;
+        readonly List<Button> kbModeBtns = new List<Button>();
+        readonly List<Button> kbDirBtns = new List<Button>();
+        readonly List<Button> kbPalBtns = new List<Button>();
+        readonly List<Texture2D> kbPalTex = new List<Texture2D>();
+        readonly bool[] kbPalDrawn = new bool[16];
         Text scopeLbl, texNameLbl;
 
         // onglet Optique
@@ -160,6 +165,7 @@ namespace AR6DoF
         float MaxScroll(int tab)
         {
             if (tab == TabStyle && styleSub == 0) return 190f;
+            if (tab == TabStyle && styleSub == 3) return 360f;
             return 0f;
         }
 
@@ -484,7 +490,7 @@ namespace AR6DoF
             Text hinge = ButtonText(page, 0f, y, 440f, "", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.CycleHinge(); });
             refreshers.Add(() => hinge.text = Ar6dofLoc.F("Courbure : {0} deg", Ar6dofScreens.Instance != null ? Mathf.RoundToInt(Ar6dofScreens.Instance.hingeDegrees) : 0));
             y -= 64f;
-            Btn(page, 0f, y, 440f, "+ Ajouter un ecran", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.AddScreen(); }); y -= 64f;
+            Btn(page, 0f, y, 440f, "+ Ajouter un ecran", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.RequestAddScreen(); }); y -= 64f;
             Btn(page, 0f, y, 440f, "Recentrer les ecrans devant moi", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.RecenterAll(); }); y -= 64f;
             InfoLine(page, y, TabScreens, () => Ar6dofLoc.F("Ecrans actifs : {0}", Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.panels.Count : 0), 20); y -= 60f;
             Ar6dofVrUi.Label(page, "La roue sous un ecran ouvre ses reglages (source, images/s...) ; clique-la encore pour les fermer. Le coin bas droit redimensionne, les boutons du coin reduisent ou ferment. La resolution est celle du moniteur Windows capture.", new Vector2(0f, y - 50f), new Vector2(W - 80f, 140f), 19, TextAnchor.UpperLeft).horizontalOverflow = HorizontalWrapMode.Wrap;
@@ -689,9 +695,10 @@ namespace AR6DoF
             }, 470f);
 
             // 2) Couleurs / Forme
-            subButtons.Add(Btn(page, -220f, 140f, 210f, "Couleurs", () => { styleSub = 0; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }));
-            subButtons.Add(Btn(page, 0f, 140f, 210f, "Forme", () => { styleSub = 1; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }));
-            subButtons.Add(Btn(page, 220f, 140f, 210f, "Fenetres", () => { styleSub = 2; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }));
+            subButtons.Add(Btn(page, -264f, 140f, 168f, "Couleurs", () => { styleSub = 0; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, -88f, 140f, 168f, "Forme", () => { styleSub = 1; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, 88f, 140f, 168f, "Fenetres", () => { styleSub = 2; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, 264f, 140f, 168f, "Clavier", () => { styleSub = 3; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
 
             // ---- Couleurs
             colorsBox = NewBox(page, "Couleurs");
@@ -745,8 +752,10 @@ namespace AR6DoF
                 int ci = i;
                 chromeCornerButtons.Add(Btn(windowsBox, (i % 2 == 0) ? -178f : 178f, (i < 2) ? 66f : 8f, 340f, corners[i], () => { Ar6dofSettings.Current.chromeCorner = ci; Touch(); }, 22));
             }
-            Ar6dofVrUi.Label(windowsBox, "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre.", new Vector2(0f, -110f), new Vector2(W - 90f, 120f), 19, TextAnchor.UpperLeft).horizontalOverflow = HorizontalWrapMode.Wrap;
+            SliderAt(windowsBox, 0f, -70f, W - 100f, "Taille des boutons de fenetre", 0.6f, 2.5f, () => Ar6dofSettings.Current.chromeScale, v => { Ar6dofSettings.Current.chromeScale = v; Touch(); }, "0.00");
+            Ar6dofVrUi.Label(windowsBox, "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre.", new Vector2(0f, -190f), new Vector2(W - 100f, 120f), 19, TextAnchor.UpperLeft).horizontalOverflow = HorizontalWrapMode.Wrap;
             windowsBox.gameObject.SetActive(false);
+            BuildKeyboardBox(page);
 
             refreshers.Add(RefreshStyleUi);
         }
@@ -836,6 +845,79 @@ namespace AR6DoF
                 st.text = Color.white;
             }
             Touch();
+        }
+
+        // ---- Clavier : pavé numérique, touches de jeu, animation lumineuse
+        static Ar6dofSettingsData D { get { return Ar6dofSettings.Current; } }
+
+        void TintButton(RectTransform box, float x, float y, string label, Func<int> get, Action<int> set)
+        {
+            var b = Btn(box, x, y, 340f, label, () => { set((get() + 1) % Ar6dofKbFx.TintHex.Length); Touch(); }, 20);
+            var sw = Ar6dofVrUi.Rect(b.transform, "Echantillon", new Vector2(130f, 0f), new Vector2(60f, 28f));
+            var si = sw.gameObject.AddComponent<Image>();
+            si.raycastTarget = false;
+            Ar6dofTheme.SetRounded(si, 8);
+            refreshers.Add(() => si.color = Ar6dofKbFx.Tint(get()));
+        }
+
+        void BuildKeyboardBox(RectTransform page)
+        {
+            kbBox = NewBox(page, "ClavierBox");
+            const float cx = 178f;
+            Toggle(kbBox, -cx, 80f, "Pave numerique", () => D.kbNumpad, v => { D.kbNumpad = v; Touch(); }, 340f);
+            Toggle(kbBox, -cx, 24f, "Touches W A S D en couleur", () => D.kbShowWasd, v => { D.kbShowWasd = v; Touch(); }, 340f);
+            TintButton(kbBox, cx, 24f, "Couleur W A S D", () => D.kbWasdColor, v => D.kbWasdColor = v);
+            Toggle(kbBox, -cx, -32f, "Touches Z Q S D en couleur", () => D.kbShowZqsd, v => { D.kbShowZqsd = v; Touch(); }, 340f);
+            TintButton(kbBox, cx, -32f, "Couleur Z Q S D", () => D.kbZqsdColor, v => D.kbZqsdColor = v);
+
+            Ar6dofVrUi.Label(kbBox, "Animation lumineuse", new Vector2(0f, -96f), new Vector2(W - 100f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            for (int i = 0; i < Ar6dofKbFx.AnimNames.Length; i++)
+            {
+                int mi = i;
+                kbModeBtns.Add(Btn(kbBox, -264f + 176f * (i % 4), -144f - 52f * (i / 4), 168f, Ar6dofKbFx.AnimNames[i], () => { D.kbAnim = mi; Touch(); }, 19, 46f));
+            }
+            kbDirBox = NewBox(kbBox, "SensVague");
+            for (int i = 0; i < Ar6dofKbFx.DirNames.Length; i++)
+            {
+                int di = i;
+                kbDirBtns.Add(Btn(kbDirBox, -270f + 135f * i, -256f, 130f, Ar6dofKbFx.DirNames[i], () => { D.kbAnimDir = di; Touch(); }, 14, 44f));
+            }
+            SliderAt(kbBox, 0f, -326f, W - 100f, "Vitesse de l'animation", 0.1f, 4f, () => D.kbAnimSpeed, v => { D.kbAnimSpeed = v; Touch(); }, "0.00");
+            SliderAt(kbBox, 0f, -402f, W - 100f, "Intensite", 0f, 1f, () => D.kbAnimStrength, v => { D.kbAnimStrength = v; Touch(); }, "0.00");
+
+            Ar6dofVrUi.Label(kbBox, "Couleurs de l'animation", new Vector2(0f, -462f), new Vector2(W - 100f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            for (int i = 0; i < Ar6dofKbFx.PaletteNames.Length; i++)
+            {
+                int pi = i;
+                var b = Btn(kbBox, -264f + 176f * (i % 4), -512f - 52f * (i / 4), 168f, Ar6dofKbFx.PaletteNames[i], () => { D.kbAnimPalette = pi; Touch(); }, 14, 46f);
+                var tex = new Texture2D(32, 1, TextureFormat.RGBA32, false);
+                tex.wrapMode = TextureWrapMode.Clamp;
+                kbPalTex.Add(tex);
+                var gr = Ar6dofVrUi.Rect(b.transform, "Degrade", new Vector2(0f, -14f), new Vector2(140f, 8f));
+                var raw = gr.gameObject.AddComponent<RawImage>();
+                raw.texture = tex;
+                raw.raycastTarget = false;
+                var lbl = b.GetComponentInChildren<Text>();
+                if (lbl != null) lbl.rectTransform.offsetMax = new Vector2(0f, -4f);   // le texte laisse la place à la bande de couleurs
+                kbPalBtns.Add(b);
+            }
+            refreshers.Add(() =>
+            {
+                for (int i = 0; i < kbModeBtns.Count; i++) Ar6dofTheme.SetSelected(kbModeBtns[i], D.kbAnim == i);
+                for (int i = 0; i < kbDirBtns.Count; i++) Ar6dofTheme.SetSelected(kbDirBtns[i], D.kbAnimDir == i);
+                for (int i = 0; i < kbPalBtns.Count; i++) Ar6dofTheme.SetSelected(kbPalBtns[i], D.kbAnimPalette == i);
+                kbDirBox.gameObject.SetActive(D.kbAnim == 1);
+                for (int i = 0; i < kbPalTex.Count; i++)
+                {
+                    if (kbPalDrawn[i] && i != 10) continue;   // palettes fixes : dessinées une seule fois ; "Style du clavier" suit le style
+                    kbPalDrawn[i] = true;
+                    var px = new Color[32];
+                    for (int x = 0; x < 32; x++) px[x] = Ar6dofKbFx.Sample(i, x / 32f);
+                    kbPalTex[i].SetPixels(px);
+                    kbPalTex[i].Apply(false);
+                }
+            });
+            kbBox.gameObject.SetActive(false);
         }
 
         // ---- sélecteur : anneau de teinte + carré saturation / luminosité + champs HEX, RGB et HSV
@@ -956,13 +1038,14 @@ namespace AR6DoF
             bool separate = es != null && es.separate;
             if (scopeLbl != null)
                 scopeLbl.text = Ar6dofLoc.T(selElem == Ar6dofElem.Global ? "Style commun : s'applique a tout" : separate ? "Style propre a cet element" : "Modifie le style commun (tout le reste le suit)");
-            bool win = styleSub == 2;
+            bool win = styleSub >= 2;   // Fenetres et Clavier : réglages globaux, sans choix d'élément
             foreach (var eb in elemButtons) eb.gameObject.SetActive(!win);
             scopeLbl.gameObject.SetActive(!win);
+            kbBox.gameObject.SetActive(styleSub == 3);
             separateBox.gameObject.SetActive(!win && selElem != Ar6dofElem.Global);
             colorsBox.gameObject.SetActive(styleSub == 0);
             formBox.gameObject.SetActive(styleSub == 1);
-            windowsBox.gameObject.SetActive(win);
+            windowsBox.gameObject.SetActive(styleSub == 2);
             for (int i = 0; i < chromeStyleButtons.Count; i++) Ar6dofTheme.SetSelected(chromeStyleButtons[i], Ar6dofSettings.Current.chromeStyle == i);
             for (int i = 0; i < chromeCornerButtons.Count; i++) Ar6dofTheme.SetSelected(chromeCornerButtons[i], Ar6dofSettings.Current.chromeCorner == i);
             shapeBox.gameObject.SetActive(selElem != Ar6dofElem.Laser);

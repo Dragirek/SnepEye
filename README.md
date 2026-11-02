@@ -24,6 +24,12 @@ Deux caméras d'oeil infrarouges (ex. GC0308 320x240 @ 120 fps, avec LED IR) -> 
 - `tests/eye_math_test.cpp` (maths, g++) et `tests/eye_pupil_ref.py` (détecteur de référence sur images synthétiques, Python + OpenCV).
 - Ports UDP locaux : 9883 regard (44 octets), 9884 commandes, 9885 évènements. Voir `src/eye_math.h`.
 
+## Performances (CPU et latence)
+- **Threads d'OpenCV** : par défaut 2 (`--cv-threads N` pour changer). Sans cette limite OpenCV disperse chaque petit calcul (flot optique, remap) sur tous les coeurs : sur un CPU à 16 threads, ~50 % de CPU partout pour un suivi léger.
+- **Seul, sans Unity** : réponds `0` à « Afficher les fenêtres » ou lance avec `--no-windows` (Unity le fait déjà). Les 4 fenêtres OpenCV (image, orientation, trajectoire, yeux) redessinent à 30 Hz et coûtent cher.
+- **Compilation** : `/O2 /GL /arch:AVX2 /LTCG` pour le code d'ar6dof, OpenCV minimal (JPEG + PNG seulement, sans TIFF / WebP / lecteur de QR code) : build plus court et exe plus léger.
+- Le journal de l'exe affiche `cpu NN%` une fois par seconde en mode sans fenêtre : compare avant / après.
+
 ## Compiler
 Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6dof_probe.exe`, ses DLL et `ar6dof_screen.dll`.
 

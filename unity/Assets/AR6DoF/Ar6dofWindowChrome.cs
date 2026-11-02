@@ -142,7 +142,10 @@ namespace AR6DoF
         public Action<Ray> resizeDrag;
         public Action resizeEnd;
 
-        const float S = 0.045f, Gap = 0.008f;
+        const float Gap = 0.008f;
+        /// <summary>Taille d'un bouton en mètres : 4,5 cm x le réglage global "Taille des boutons de fenêtre".</summary>
+        static float S { get { return 0.045f * Mathf.Clamp(Ar6dofSettings.Current.chromeScale, 0.5f, 3f); } }
+        float lastS = -1f;
         Ar6dofChromeButton bMin, bClose, bResize;
         GameObject group;
         float baseScale = 1f, startRadius = 0.1f, startScale = 1f, armedUntil;
@@ -247,6 +250,13 @@ namespace AR6DoF
             bool vis = target.gameObject.activeInHierarchy;
             if (group.activeSelf != vis) group.SetActive(vis);
             if (!vis) return;
+            float sc = S;
+            if (Mathf.Abs(sc - lastS) > 1e-4f)
+            {
+                lastS = sc;
+                foreach (var b in new[] { bMin, bClose, bResize }) b.transform.localScale = new Vector3(sc, sc, 1f);
+                dirty = true;
+            }
             if (dirty) { dirty = false; ApplyShape(); }
             if (bClose.armed && Time.unscaledTime > armedUntil) { bClose.armed = false; bClose.Refresh(); }
 

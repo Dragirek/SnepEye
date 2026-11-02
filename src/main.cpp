@@ -30,6 +30,7 @@
 #include <utility>
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/core/ocl.hpp>
 
 #include "calib.h"
 #include "camera_model_json.h"
@@ -595,6 +596,7 @@ static void StartParentWatch(DWORD pid) {
 
 int main(int argc, char** argv) {
   bool noWindowsFlag = false, noBle = false;
+  int cvThreads = 2;
   std::ofstream logFile(ExeDir() + "\\ar6dof_probe.log", std::ios::trunc);
   TeeBuf tee(std::cout.rdbuf(), logFile.rdbuf());
   std::streambuf* origCout = std::cout.rdbuf(&tee);
@@ -608,7 +610,13 @@ int main(int argc, char** argv) {
     else if (a == "--no-ble") noBle = true;            // ne pas ecouter la telecommande Bluetooth
     else if (a == "--no-windows") noWindowsFlag = true;  // aucune fenêtre OpenCV : bien moins de CPU
     else if (a == "--parent" && i + 1 < argc) { long long pid = atoll(argv[++i]); if (pid > 0) StartParentWatch((DWORD)pid); }
+    else if (a == "--cv-threads" && i + 1 < argc) cvThreads = std::max(1, atoi(argv[++i]));   // threads d'OpenCV (defaut 2)
   }
+  // OpenCV repartit chaque petit calcul (flot optique, remap...) sur TOUS les coeurs : sur un CPU a 16 threads la synchronisation
+  // coute plus que le calcul (50 % de CPU partout pour un suivi leger). 2 threads suffisent largement et liberent le reste.
+  cv::setNumThreads(cvThreads);
+  cv::ocl::setUseOpenCL(false);   // pas de GPU OpenCL pour ces petits traitements : le transfert coute plus que le gain
+  std::cout << "OpenCV : " << cvThreads << " thread(s) de calcul (option --cv-threads N)\n";
   LoadConfig();   // les réponses précédentes servent de valeurs par défaut, même sans --auto
   if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
   std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";

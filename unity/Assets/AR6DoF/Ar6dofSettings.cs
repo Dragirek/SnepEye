@@ -58,6 +58,19 @@ namespace AR6DoF
         // Boutons de fenêtre (fermer / réduire) de tous les écrans et menus
         public int chromeStyle = 0;        // 0 = style Windows, 1 = style Mac
         public int chromeCorner = 1;       // 0 haut gauche, 1 haut droite, 2 bas gauche, 3 bas droite
+        public float chromeScale = 1f;     // taille des boutons réduire / fermer / redimensionner (1 = normal)
+
+        // Clavier virtuel : pavé numérique, touches de jeu en couleur, animation lumineuse
+        public bool kbNumpad = false;
+        public bool kbShowWasd = false;    // W A S D colorées
+        public bool kbShowZqsd = false;    // Z Q S D colorées
+        public int kbWasdColor = 0;        // index dans la liste de couleurs prédéfinies du clavier
+        public int kbZqsdColor = 3;
+        public int kbAnim = 0;             // 0 aucune, 1 vague, 2 cycle, 3 respiration, 4 réactif, 5 scintillement, 6 onde
+        public int kbAnimDir = 0;          // sens de la vague : 0 droite, 1 gauche, 2 bas, 3 haut, 4 depuis le centre
+        public int kbAnimPalette = 0;      // 0 arc-en-ciel, 1.. autres palettes
+        public float kbAnimSpeed = 1f;     // 0.1 .. 4
+        public float kbAnimStrength = 0.7f;// 0 .. 1 : part de la couleur animée mélangée à la touche
 
         // Télécommande
         public float remoteMinCutoff = 2f;

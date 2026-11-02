@@ -1,5 +1,11 @@
 {
   "name": "ar6dof",
   "version-string": "0.1.0",
-  "dependencies": ["opencv4"]
+  "dependencies": [
+    {
+      "name": "opencv4",
+      "default-features": false,
+      "features": ["jpeg", "png"]
+    }
+  ]
 }

@@ -177,10 +177,12 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ ajout / retrait
-        public void AddScreen()
+        public void AddScreen() { AddScreen(PickMonitor()); }
+
+        public void AddScreen(int monitor)
         {
             if (panels.Count >= maxScreens || panels.Count >= 4) return;
-            var p = NewPanel(PickMonitor(), defaultFps, startWidth);
+            var p = NewPanel(monitor, defaultFps, startWidth);
             // le premier côté libre d'un écran existant, sinon devant toi
             bool placed = false;
             foreach (var q in panels)
@@ -358,7 +360,7 @@ namespace AR6DoF
             fpsText = MakeButton("", new Vector2(0, y), W, () => CycleFps()); y -= 52;
             snapText = MakeButton("", new Vector2(0, y), W, () => { snapEnabled = !snapEnabled; Refresh(); Save(); }); y -= 52;
             hingeText = MakeButton("", new Vector2(0, y), W, () => CycleHinge()); y -= 52;
-            addText = MakeButton("+ Ajouter un ecran", new Vector2(0, y), W, () => { AddScreen(); Refresh(); }); y -= 52;
+            addText = MakeButton("+ Ajouter un ecran", new Vector2(0, y), W, () => RequestAddScreen()); y -= 52;
             MakeButton("Retirer cet ecran", new Vector2(0, y), W, () => { if (settingsFor != null) RemoveScreen(settingsFor); }); y -= 52;
             MakeButton("Dissocier cet ecran", new Vector2(0, y), W, () => { if (settingsFor != null) Detach(settingsFor); }); y -= 52;
             MakeButton("Recentrer devant moi", new Vector2(0, y), W, () => RecenterAll()); y -= 52;
@@ -378,6 +380,89 @@ namespace AR6DoF
         public bool SettingsOpenFor(Ar6dofScreenPanel p)
         {
             return settings != null && settings.gameObject.activeSelf && settingsFor == p;
+        }
+
+        // ------------------------------------------------------------------ choix du nouvel écran : écran réel ou virtuel
+        Canvas addDlg;
+        Text addInfo;
+        readonly List<Button> addMonBtns = new List<Button>();
+        readonly List<Text> addMonTexts = new List<Text>();
+        const int DlgMax = 6;
+
+        void BuildAddDialog()
+        {
+            addDlg = Ar6dofVrUi.NewCanvas("Nouvel ecran", new Vector2(560, 700));
+            var tr = addDlg.transform;
+            var row = new Vector2(500, 50);
+            Ar6dofVrUi.Label(tr, "Nouvel ecran", new Vector2(0, 315), new Vector2(500, 44), 30);
+            Ar6dofVrUi.Label(tr, "Ecrans reels (a leur resolution)", new Vector2(0, 262), new Vector2(500, 30), 20, TextAnchor.MiddleLeft);
+            for (int i = 0; i < DlgMax; i++)
+            {
+                int idx = i;
+                Text t;
+                var b = Ar6dofVrUi.MakeButton(tr, "", new Vector2(0, 205 - 56 * i), row, () => AddRealScreen(idx), out t, 21);
+                addMonBtns.Add(b);
+                addMonTexts.Add(t);
+            }
+            Text vt;
+            Ar6dofVrUi.MakeButton(tr, "Ecran virtuel (un ecran Windows de plus)", new Vector2(0, -150), row, () => ShowVirtualInfo(), out vt, 21);
+            addInfo = Ar6dofVrUi.Label(tr, "", new Vector2(0, -232), new Vector2(500, 100), 17, TextAnchor.UpperLeft);
+            addInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
+            Text ct;
+            Ar6dofVrUi.MakeButton(tr, "Annuler", new Vector2(0, -305), row, () => CloseAddDialog(), out ct, 22);
+            addDlg.gameObject.SetActive(false);
+            if (pointer != null) pointer.AddCanvas(addDlg);
+            Ar6dofWindowChrome.Create("Nouvel ecran", addDlg.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(addDlg), CloseAddDialog, CloseAddDialog);
+        }
+
+        void CloseAddDialog() { if (addDlg != null) addDlg.gameObject.SetActive(false); }
+
+        /// <summary>Demande quel écran ajouter : un moniteur réel (avec sa résolution) ou un écran virtuel.</summary>
+        public void RequestAddScreen()
+        {
+            if (panels.Count >= maxScreens || panels.Count >= 4) return;
+            if (addDlg == null) BuildAddDialog();
+            int n = Ar6dofScreenNative.MonitorCount();
+            for (int i = 0; i < DlgMax; i++)
+            {
+                bool on = i < n;
+                addMonBtns[i].gameObject.SetActive(on);
+                if (!on) continue;
+                int l, t, r, b;
+                int w = 0, h = 0;
+                if (Ar6dofScreenNative.MonitorRect(i, out l, out t, out r, out b)) { w = r - l; h = b - t; }
+                bool used = panels.Exists(x => x.monitor == i);
+                addMonTexts[i].text = Ar6dofLoc.F("Moniteur {0} - {1} x {2}", i + 1, w, h) + (used ? Ar6dofLoc.T("  (deja affiche)") : "");
+            }
+            addInfo.text = n == 0 ? Ar6dofLoc.T("Aucun moniteur capturable.") : "";
+            Transform hd = Head;
+            Vector3 pos = hd != null ? hd.position + FlatForward(hd) * 0.9f : transform.position;
+            if (hd != null) pos.y = hd.position.y - 0.05f;
+            Vector3 toHead = hd != null ? hd.position - pos : Vector3.back;
+            toHead.y = 0f;
+            if (toHead.sqrMagnitude < 1e-4f) toHead = Vector3.back;
+            addDlg.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toHead.normalized));
+            addDlg.gameObject.SetActive(true);
+        }
+
+        static Vector3 FlatForward(Transform t)
+        {
+            Vector3 f = t.forward;
+            f.y = 0f;
+            return f.sqrMagnitude > 1e-4f ? f.normalized : Vector3.forward;
+        }
+
+        void AddRealScreen(int monitor)
+        {
+            CloseAddDialog();
+            AddScreen(monitor);
+            Refresh();
+        }
+
+        void ShowVirtualInfo()
+        {
+            if (addInfo != null)
+                addInfo.text = Ar6dofLoc.T("Un ecran virtuel est un ecran Windows de plus, cree par un pilote d'affichage virtuel. Une fois le pilote installe (voir le README), il apparait dans la liste ci-dessus, a la resolution choisie dans les parametres d'affichage de Windows.");
         }
 
         public void OpenSettings(Ar6dofScreenPanel p)

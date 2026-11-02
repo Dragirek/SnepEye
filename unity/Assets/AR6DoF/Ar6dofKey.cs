@@ -11,16 +11,28 @@ namespace AR6DoF
         public Renderer quad;
         public bool active;   // Maj / Ctrl / Alt enfoncées
 
+        // animation lumineuse et touches de jeu (posées par Ar6dofKeyboard)
+        public Color animColor;
+        public float animAmount;      // 0..1 : part de la couleur animée
+        public bool hasTint;
+        public Color tint;            // couleur fixe (ZQSD / WASD)
+        public Vector2 pos;           // position sur le clavier (m), pour les vagues
+        public float seed;            // valeur aléatoire fixe par touche (scintillement)
+        public float flash;           // 1 quand on vient d'appuyer (animation "Reactif")
+
         bool hover, down;
 
         public void Refresh()
         {
             if (quad == null) return;
             var st = Ar6dofSettings.StyleFor(Ar6dofElem.Keyboard);
+            Color baseC = st.button;
+            if (hasTint) baseC = Color.Lerp(baseC, tint, 0.65f);
+            if (animAmount > 0.001f) baseC = Color.Lerp(baseC, animColor, animAmount);
             Color c = down ? Color.Lerp(st.accent, Color.white, 0.25f)
-                    : active ? Color.Lerp(st.button, st.accent, 0.85f)
-                    : hover ? Color.Lerp(st.button, st.accent, 0.5f)
-                    : st.button;
+                    : active ? Color.Lerp(baseC, st.accent, 0.85f)
+                    : hover ? Color.Lerp(baseC, st.accent, 0.5f)
+                    : baseC;
             c.a = Mathf.Lerp(1f, st.alpha, 0.5f);
             quad.sharedMaterial.color = c;
             if (label != null) label.color = st.text;
