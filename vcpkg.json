@@ -5,7 +5,7 @@
     {
       "name": "opencv4",
       "default-features": false,
-      "features": ["jpeg", "png"]
+      "features": ["calib3d", "highgui", "win32ui", "msmf", "dshow", "jpeg", "png", "intrinsics", "thread", "fs"]
     }
   ]
 }

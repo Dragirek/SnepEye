@@ -6,8 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Optimisations du code d'ar6dof (OpenCV est deja compile en Release par vcpkg) : -O2, instructions AVX2 (tout Ryzen depuis 2017),
 # optimisation a l'edition de liens. Retire /arch:AVX2 si tu veux un exe pour un tres vieux processeur.
 if(MSVC)
-  add_compile_options(/O2 /Ob2 /GL /arch:AVX2)
-  add_link_options(/LTCG)
+  add_compile_options(/arch:AVX2 $<$<CONFIG:Release>:/O2> $<$<CONFIG:Release>:/Ob2> $<$<CONFIG:Release>:/GL>)
+  add_link_options($<$<CONFIG:Release>:/LTCG>)
 endif()
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui calib3d features2d video)
