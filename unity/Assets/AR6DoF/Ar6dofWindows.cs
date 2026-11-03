@@ -47,6 +47,11 @@ namespace AR6DoF
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
         [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
         [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
+        [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
+        [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
+        [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 
         const int GWL_EXSTYLE = -20;
         const int WS_EX_TOOLWINDOW = 0x80;
@@ -143,6 +148,28 @@ namespace AR6DoF
             try { SetWindowPos((IntPtr)hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); } catch (Exception) { }   // HWND_TOP = 0
         }
 
+        /// <summary>
+        /// Prépare un clic en (x, y) : si autre chose que cette fenêtre se trouve à cet endroit (une autre fenêtre, ou la fenêtre de Unity),
+        /// la fenêtre est ramenée au premier plan ET activée. Sans cela le clic tombait sur la fenêtre du dessus : « pas de clic possible ».
+        /// </summary>
+        public static void Activate(long hwnd, int x, int y)
+        {
+            try
+            {
+                var h = (IntPtr)hwnd;
+                if (IsIconic(h)) ShowWindow(h, 9);   // SW_RESTORE
+                var at = WindowFromPoint(new POINT { x = x, y = y });
+                IntPtr root = at != IntPtr.Zero ? GetAncestor(at, 2) : IntPtr.Zero;   // GA_ROOT
+                if (root == h) return;                                                  // déjà au-dessus à cet endroit
+                SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);   // HWND_TOPMOST puis NOTOPMOST : la méthode fiable pour passer devant
+                SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                keybd_event(0x12, 0, 0, UIntPtr.Zero);        // un appui sur Alt autorise SetForegroundWindow
+                keybd_event(0x12, 0, 2, UIntPtr.Zero);
+                SetForegroundWindow(h);
+            }
+            catch (Exception) { }
+        }
+
         /// <summary>Règle la taille de la ZONE UTILE de la fenêtre (sans la barre de titre ni les bordures).</summary>
         public static bool SetClientSize(long hwnd, int w, int h)
         {
@@ -166,6 +193,7 @@ namespace AR6DoF
         public static bool IsMinimized(long hwnd) { return false; }
         public static void Restore(long hwnd) { }
         public static void Raise(long hwnd) { }
+        public static void Activate(long hwnd, int x, int y) { }
         public static bool SetClientSize(long hwnd, int w, int h) { return false; }
 #endif
     }

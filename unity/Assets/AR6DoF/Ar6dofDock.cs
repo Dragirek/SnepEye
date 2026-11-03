@@ -27,6 +27,7 @@ namespace AR6DoF
     class ScreenApp : Ar6dofDockApp
     {
         public Ar6dofScreenPanel panel;
+        public int number;
         public override Transform AnimRoot { get { return panel != null ? panel.transform : null; } }
         public override void Activate(bool on) { if (panel != null) { panel.SetContentActive(on); if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.Save(); } }
     }
@@ -201,6 +202,7 @@ namespace AR6DoF
             else canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
             foreach (var a in apps) SetIndicator(a);
             SetIndicator(settingsApp);
+            UpdateGearLook();
         }
 
         void OnLangChanged() { if (built) RebuildIcons(); }
@@ -323,6 +325,12 @@ namespace AR6DoF
 
         public void RefreshIcons() { if (built) RebuildIcons(); }
 
+        /// <summary>Range le clavier dans la barre (boutons réduire / fermer du clavier).</summary>
+        public void StowKeyboard()
+        {
+            if (kbApp != null && kbApp.open && !animating.Contains(kbApp)) Toggle(kbApp);
+        }
+
         /// <summary>Affiche le clavier virtuel (appelé quand un champ de texte est cliqué).</summary>
         public void ShowKeyboard()
         {
@@ -348,40 +356,79 @@ namespace AR6DoF
             iconOf.Clear();
             apps.Clear();
             var sc = Ar6dofScreens.Instance;
-            int n = 0;
+            // groupes d'icônes : chaque cluster d'écrans (de gauche à droite) reste côte à côte, puis le clavier et les menus d'appareils
+            var groups = new List<List<Ar6dofDockApp>>();
             if (sc != null)
-                foreach (var p in sc.panels)
+            {
+                int n = 0;
+                foreach (var cl in sc.Clusters())
                 {
-                    var a = screenApps[p];
-                    a.title = Ar6dofLoc.F("Ecran {0}", n + 1);
-                    a.icon = "E" + (n + 1);
-                    a.open = p.open;
-                    apps.Add(a);
-                    n++;
+                    var g = new List<Ar6dofDockApp>();
+                    foreach (var p in cl)
+                    {
+                        var a = screenApps[p];
+                        n++;
+                        a.number = n;
+                        a.title = Ar6dofLoc.F("Ecran {0}", n);
+                        a.icon = "";
+                        a.open = p.open;
+                        g.Add(a);
+                    }
+                    groups.Add(g);
                 }
-            if (kbApp != null) apps.Add(kbApp);
-            foreach (var m in devMenus.menus) apps.Add(m);
+            }
+            if (kbApp != null) groups.Add(new List<Ar6dofDockApp> { kbApp });
+            foreach (var m in devMenus.menus) groups.Add(new List<Ar6dofDockApp> { m });
+            foreach (var g in groups) apps.AddRange(g);
 
-            const float cell = 108f, size = 96f;
-            float total = (apps.Count + 1) * cell + 30f + size + 40f;   // + le bouton "ajouter un menu"
-            float barW = Mathf.Max(680f, total);
+            const float size = 96f, inCluster = 102f, between = 116f, gearSize = 116f;
+            // positions (de gauche à droite), puis largeur de la barre
+            var xs = new List<float>();
+            float cx = size * 0.5f;
+            bool first = true;
+            foreach (var g in groups)
+                for (int i = 0; i < g.Count; i++)
+                {
+                    if (!first) cx += (i == 0) ? between : inCluster;
+                    first = false;
+                    xs.Add(cx);
+                }
+            float addX = (first ? size * 0.5f : cx + between);
+            float gearX = addX + between * 0.5f + 34f + gearSize * 0.5f;      // la roue est séparée de tout le reste
+            float total = gearX + gearSize * 0.5f;
+            float barW = Mathf.Max(680f, total + 60f);
             barRt.sizeDelta = new Vector2(barW, BarHeight);
-            float x = -total * 0.5f + 20f + size * 0.5f;
+            float shift = -total * 0.5f;
             MakeQuickRow(barW);
-            foreach (var a in apps) { MakeIcon(a, x, size, false); x += cell; }
-            MakeAddButton(x, size);
-            x += cell;
-            x += 30f - (cell - size);
-            // séparateur + roue des réglages
+
+            // fond commun derrière les icônes d'un même cluster
+            int xi = 0;
+            foreach (var g in groups)
+            {
+                if (g.Count >= 2 && g[0] is ScreenApp)
+                {
+                    float x0 = xs[xi] + shift, x1 = xs[xi + g.Count - 1] + shift;
+                    var pill = Ar6dofVrUi.Rect(iconsRoot, "Cluster", new Vector2((x0 + x1) * 0.5f, -26f), new Vector2(x1 - x0 + size + 20f, size + 20f));
+                    var pim = pill.gameObject.AddComponent<Image>();
+                    pim.raycastTarget = false;
+                    Ar6dofTheme.Attach(pill.gameObject, Ar6dofRole.Band, 40);
+                }
+                xi += g.Count;
+            }
+            xi = 0;
+            foreach (var g in groups) foreach (var a in g) { MakeIcon(a, xs[xi] + shift, size, false); xi++; }
+            MakeAddButton(addX + shift, size);
+
+            // séparateur + roue des réglages : plus grande, en couleur d'accent, à part
             var sep = new GameObject("Separateur", typeof(RectTransform));
             sep.transform.SetParent(iconsRoot, false);
             var srt = (RectTransform)sep.transform;
-            srt.anchoredPosition = new Vector2(x - size * 0.5f - 15f, -26f);
-            srt.sizeDelta = new Vector2(3f, 90f);
+            srt.anchoredPosition = new Vector2((addX + between * 0.5f + gearX - gearSize * 0.5f) * 0.5f + shift + 4f, -26f);
+            srt.sizeDelta = new Vector2(4f, 120f);
             var simg = sep.AddComponent<Image>();
-            simg.color = new Color(1f, 1f, 1f, 0.25f);
             simg.raycastTarget = false;
-            MakeIcon(settingsApp, x, size, true);
+            Ar6dofTheme.Attach(sep, Ar6dofRole.Accent, 2);
+            MakeIcon(settingsApp, gearX + shift, gearSize, true);
         }
 
         // ------------------------------------------------------------------ actions rapides (remplacent les touches R, M et F)
@@ -441,22 +488,72 @@ namespace AR6DoF
             tip.text = () => "Nouveau menu d'appareil Bluetooth";
         }
 
+        static readonly Dictionary<string, Sprite> glyphs = new Dictionary<string, Sprite>();
+
+        static Sprite Glyph(string name)
+        {
+            Sprite sp;
+            if (glyphs.TryGetValue(name, out sp) && sp != null) return sp;
+            var tex = Ar6dofIcons.Get(name);
+            if (tex == null) return null;
+            sp = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
+            glyphs[name] = sp;
+            return sp;
+        }
+
+        Image gearImg;
+        Button gearBtn;
+        Text gearLbl;
+
+        /// <summary>La roue des réglages est en couleur d'accent : son dessin prend la couleur (noir ou blanc) qui s'y lit le mieux.</summary>
+        void UpdateGearLook()
+        {
+            if (gearImg == null) return;
+            Color on = Ar6dofTheme.OnColor(Ar6dofSettings.StyleFor(Ar6dofElem.Dock).accent);
+            gearImg.color = on;
+            if (gearLbl != null) gearLbl.color = on;
+        }
+
         void MakeIcon(Ar6dofDockApp a, float x, float size, bool isGear)
         {
             Text lbl;
             Ar6dofDockApp app = a;
-            var b = Ar6dofVrUi.MakeButton(iconsRoot, isGear ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
+            var sa = a as ScreenApp;
+            var b = Ar6dofVrUi.MakeButton(iconsRoot, (isGear || sa != null) ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
             var rt = (RectTransform)b.transform;
             iconOf[a] = rt;
             if (isGear)
             {
+                // bouton important : plein, en couleur d'accent, plus grand que les autres
+                var th = b.GetComponent<Ar6dofThemed>();
+                if (th != null) { th.concentric = true; th.Init(Ar6dofRole.Accent, 48); }
                 var g = new GameObject("Roue", typeof(RectTransform));
                 g.transform.SetParent(rt, false);
                 var grt = (RectTransform)g.transform;
-                grt.sizeDelta = new Vector2(size * 0.75f, size * 0.75f);
+                grt.anchoredPosition = new Vector2(0f, 8f);
+                grt.sizeDelta = new Vector2(size * 0.62f, size * 0.62f);
+                gearImg = g.AddComponent<Image>();
+                gearImg.sprite = gear;
+                gearImg.raycastTarget = false;
+                gearBtn = b;
+                UpdateGearLook();
+                gearLbl = Ar6dofVrUi.Label(rt, "Reglages", new Vector2(0f, -size * 0.5f + 20f), new Vector2(size, 22f), 16);
+                UpdateGearLook();
+            }
+            else if (sa != null)
+            {
+                // icône d'écran avec son numéro dedans (une fenêtre d'application a une barre de titre)
+                var g = new GameObject("Glyphe", typeof(RectTransform));
+                g.transform.SetParent(rt, false);
+                var grt = (RectTransform)g.transform;
+                grt.anchoredPosition = new Vector2(0f, 2f);
+                grt.sizeDelta = new Vector2(size * 0.9f, size * 0.9f);
                 var gi = g.AddComponent<Image>();
-                gi.sprite = gear;
+                gi.sprite = Glyph(sa.panel != null && sa.panel.IsWindow ? "window" : "monitor");
                 gi.raycastTarget = false;
+                Ar6dofTheme.Attach(g, Ar6dofRole.Text);
+                var num = Ar6dofVrUi.Label(rt, sa.number.ToString(), new Vector2(0f, sa.panel != null && sa.panel.IsWindow ? 2f : 8f), new Vector2(size * 0.6f, 44f), 36);
+                num.fontStyle = FontStyle.Bold;
             }
             else
             {
@@ -491,7 +588,10 @@ namespace AR6DoF
 
         void SetIndicator(Ar6dofDockApp a)
         {
-            if (a.indicator != null) a.indicator.color = a.open ? Ar6dofSettings.StyleFor(Ar6dofElem.Dock).accent : new Color(1f, 1f, 1f, 0f);
+            if (a.indicator == null) return;
+            var acc = Ar6dofSettings.StyleFor(Ar6dofElem.Dock).accent;
+            Color on = a == settingsApp ? Ar6dofTheme.OnColor(acc) : acc;   // la roue est déjà en accent : son trait est noir ou blanc
+            a.indicator.color = a.open ? on : new Color(1f, 1f, 1f, 0f);
         }
 
         // ------------------------------------------------------------------ afficher / ranger

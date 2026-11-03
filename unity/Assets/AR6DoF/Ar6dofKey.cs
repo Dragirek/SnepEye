@@ -9,6 +9,7 @@ namespace AR6DoF
         public Ar6dofKeyboard.KeyDef def;
         public TextMesh label;
         public Renderer quad;
+        public Renderer icon;   // roue (touche réglages) : dessin à la place du texte
         public bool active;   // Maj / Ctrl / Alt enfoncées
 
         // animation lumineuse (posée par Ar6dofKeyboard)
@@ -33,6 +34,7 @@ namespace AR6DoF
             c.a = Mathf.Lerp(1f, st.alpha, 0.5f);
             quad.sharedMaterial.color = c;
             if (label != null) label.color = st.text;
+            if (icon != null) icon.sharedMaterial.color = st.text;
         }
 
         public void OnPointerEnter() { hover = true; Refresh(); }

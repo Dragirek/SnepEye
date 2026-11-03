@@ -29,7 +29,7 @@ namespace AR6DoF
             var t = Ar6dofVrUi.Rect(parent, "Champ", pos, size);
             var img = t.gameObject.AddComponent<Image>();
             img.color = NormalColor;
-            Ar6dofTheme.SetRounded(img, Mathf.Min(Ar6dofSettings.StyleFor(Ar6dofElem.Menus).corner, 16));
+            Ar6dofTheme.SetRounded(img, Ar6dofTheme.Radius(t, Ar6dofSettings.StyleFor(Ar6dofTheme.ElemOf(t)).corner, 18, 4));   // concentrique avec le cadre qui le contient
             var f = t.gameObject.AddComponent<Ar6dofVrTextField>();
             f.bg = img;
             f.text = value ?? "";

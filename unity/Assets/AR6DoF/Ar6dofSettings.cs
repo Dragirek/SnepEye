@@ -11,17 +11,44 @@ namespace AR6DoF
     [Serializable]
     public class Ar6dofStyle
     {
-        public Color bg = new Color(0.08f, 0.09f, 0.11f, 1f);       // fond des panneaux
-        public Color button = new Color(0.22f, 0.26f, 0.32f, 1f);   // boutons, touches, poignées
-        public Color accent = new Color(0.25f, 0.85f, 1f, 1f);      // survol, sélection, curseurs, rayon
+        // Style d'usine = Eclipse (noir, gris foncé, jaune)
+        public Color bg = new Color(0f, 0f, 0f, 1f);                  // fond des panneaux
+        public Color button = new Color(0.149f, 0.149f, 0.149f, 1f);  // boutons, touches, poignées
+        public Color accent = new Color(1f, 0.902f, 0f, 1f);          // survol, sélection, curseurs, rayon
         public Color text = new Color(1f, 1f, 1f, 1f);
-        public float alpha = 0.88f;        // opacité des fonds : 1 = opaque, plus bas = plus transparent
-        public int corner = 14;            // arrondi des coins, en pixels de menu
-        public string texture = "";        // "" = aucune ; grid, dots, carbon, stripes, gradient, noise ; ou file:nom d'un .png du dossier textures
-        public float texAlpha = 0.18f;     // intensité de la texture
+        public float alpha = 0.9f;         // opacité des fonds : 1 = opaque, plus bas = plus transparent
+        public int corner = 32;            // arrondi des coins du panneau, en pixels ; les cadres et boutons qu'il contient s'arrondissent en concentrique (voir Ar6dofTheme.Radius)
+        public string texture = "";        // "" = aucune ; grid, dots, carbon, stripes, gradient, noise ; ou file:nom d'une image du dossier d'images
+        public float texAlpha = 0.18f;     // opacité de l'image de fond
+        public int texMode = 1;            // 0 étirer, 1 répéter, 2 miroir, 3 centrée (sans répétition), 4 remplir (recadrée)
+        public float texScale = 1f;        // échelle de l'image (répétition, miroir, centrée)
         public float lineWidth = 0.004f;   // épaisseur du rayon (m)
 
         public Ar6dofStyle Clone() { return (Ar6dofStyle)MemberwiseClone(); }
+
+        /// <summary>Copie l'apparence (couleurs, transparence, arrondi, image de fond) ; l'épaisseur du rayon reste celle de la cible.</summary>
+        public void CopyLookFrom(Ar6dofStyle o)
+        {
+            bg = o.bg; button = o.button; accent = o.accent; text = o.text;
+            alpha = o.alpha; corner = o.corner;
+            texture = o.texture; texAlpha = o.texAlpha; texMode = o.texMode; texScale = o.texScale;
+        }
+
+        /// <summary>Mêmes quatre couleurs (fond, boutons, accent, texte) ?</summary>
+        public bool SameColors(Color b, Color bt, Color a, Color t)
+        {
+            return Near(bg, b) && Near(button, bt) && Near(accent, a) && Near(text, t);
+        }
+
+        static bool Near(Color x, Color y) { return Mathf.Abs(x.r - y.r) < 0.006f && Mathf.Abs(x.g - y.g) < 0.006f && Mathf.Abs(x.b - y.b) < 0.006f; }
+    }
+
+    /// <summary>Un style nommé par l'utilisateur (menu Style > Couleurs > Mes styles).</summary>
+    [Serializable]
+    public class Ar6dofCustomStyle
+    {
+        public string name = "";
+        public Ar6dofStyle style = new Ar6dofStyle();
     }
 
     /// <summary>Style d'un élément. Tant que 'separate' est faux, l'élément utilise le style commun.</summary>
@@ -36,7 +63,7 @@ namespace AR6DoF
     [Serializable]
     public class Ar6dofSettingsData
     {
-        public int version = 1;
+        public int version = 2;
         public string language = "";       // "" = automatique (langue de Windows)
         public Ar6dofStyle global = new Ar6dofStyle();
         public Ar6dofElemStyle dock = new Ar6dofElemStyle();
@@ -44,6 +71,7 @@ namespace AR6DoF
         public Ar6dofElemStyle keyboard = new Ar6dofElemStyle();
         public Ar6dofElemStyle screens = new Ar6dofElemStyle();
         public Ar6dofElemStyle laser = new Ar6dofElemStyle();
+        public System.Collections.Generic.List<Ar6dofCustomStyle> customStyles = new System.Collections.Generic.List<Ar6dofCustomStyle>();
 
         // Dock
         public bool dockAtFeet = true;     // vrai : accroché à tes pieds, invisible tant que tu ne baisses pas la tête
@@ -60,7 +88,8 @@ namespace AR6DoF
         public int chromeCorner = 1;       // 0 haut gauche, 1 haut droite, 2 bas gauche, 3 bas droite
         public float chromeScale = 1f;     // taille des boutons réduire / fermer / redimensionner (1 = normal)
 
-        // Clavier virtuel : pavé numérique, animation lumineuse
+        // Clavier virtuel : disposition, pavé numérique, animation lumineuse
+        public bool kbAzerty = true;       // vrai : AZERTY, faux : QWERTY
         public bool kbNumpad = false;
         public int kbAnim = 0;             // 0 aucune, 1 vague, 2 cycle, 3 respiration, 4 réactif, 5 scintillement, 6 onde
         public int kbAnimDir = 0;          // sens de la vague : 0 droite, 1 gauche, 2 bas, 3 haut, 4 depuis le centre
@@ -133,6 +162,15 @@ namespace AR6DoF
             if (d.keyboard.style == null) d.keyboard.style = new Ar6dofStyle();
             if (d.screens.style == null) d.screens.style = new Ar6dofStyle();
             if (d.laser.style == null) d.laser.style = new Ar6dofStyle();
+            if (d.customStyles == null) d.customStyles = new System.Collections.Generic.List<Ar6dofCustomStyle>();
+            d.customStyles.RemoveAll(x => x == null || x.style == null);
+            if (d.version < 2)
+            {   // anciens fichiers : si le style n'a jamais été changé (cyan d'origine), on passe au nouveau style d'usine Eclipse
+                var g = d.global;
+                if (Mathf.Abs(g.accent.r - 0.25f) < 0.01f && Mathf.Abs(g.accent.g - 0.85f) < 0.01f && Mathf.Abs(g.bg.r - 0.08f) < 0.01f && Mathf.Abs(g.button.b - 0.32f) < 0.01f)
+                    d.global = new Ar6dofStyle();
+                d.version = 2;
+            }
         }
 
         /// <summary>Vrai si des changements n'ont pas été enregistrés.</summary>

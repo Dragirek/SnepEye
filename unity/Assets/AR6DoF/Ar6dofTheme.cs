@@ -28,6 +28,8 @@ namespace AR6DoF
         Button btn;
         Color last;
         bool hasLast;
+        public bool concentric;   // rôle Accent : suit les arrondis concentriques (bouton plein) au lieu de garder sa forme
+        public int radius;   // rayon réellement appliqué (le cadre de survol s'y accorde)
 
         public void Init(Ar6dofRole r, int cap)
         {
@@ -59,7 +61,8 @@ namespace AR6DoF
                 {
                     Color c = st.bg; c.a = st.alpha;
                     g.color = c;
-                    Ar6dofTheme.SetRounded(img, st.corner);
+                    radius = Ar6dofTheme.Radius(transform, st.corner, 999, 0);
+                    Ar6dofTheme.SetRounded(img, radius);
                     ApplyTexture(img, st);
                     break;
                 }
@@ -68,7 +71,8 @@ namespace AR6DoF
                     Color c = selected ? Color.Lerp(st.button, st.accent, 0.65f) : st.button;
                     c.a = Mathf.Lerp(1f, st.alpha, 0.5f);
                     g.color = c;
-                    Ar6dofTheme.SetRounded(img, Mathf.Min(st.corner, radiusCap));
+                    radius = Ar6dofTheme.Radius(transform, st.corner, radiusCap, 4);
+                    Ar6dofTheme.SetRounded(img, radius);
                     if (btn == null) btn = GetComponent<Button>();
                     if (btn != null)
                     {
@@ -87,18 +91,21 @@ namespace AR6DoF
                 }
                 case Ar6dofRole.Accent:
                     g.color = st.accent;
-                    Ar6dofTheme.SetRounded(img, Mathf.Min(st.corner, radiusCap));
+                    radius = concentric ? Ar6dofTheme.Radius(transform, st.corner, radiusCap, 4) : Mathf.Min(st.corner, radiusCap);   // pastilles et traits gardent leur forme ; un bouton plein suit les arrondis concentriques
+                    Ar6dofTheme.SetRounded(img, radius);
                     break;
                 case Ar6dofRole.Track:
                 {
                     Color c = Color.Lerp(st.button, Color.black, 0.45f); c.a = 1f;
                     g.color = c;
-                    Ar6dofTheme.SetRounded(img, Mathf.Min(st.corner, radiusCap));
+                    radius = Mathf.Min(st.corner, radiusCap);
+                    Ar6dofTheme.SetRounded(img, radius);
                     break;
                 }
                 case Ar6dofRole.Handle:
                     g.color = st.text;
-                    Ar6dofTheme.SetRounded(img, Mathf.Min(st.corner, radiusCap));
+                    radius = Mathf.Min(st.corner, radiusCap);
+                    Ar6dofTheme.SetRounded(img, radius);
                     break;
                 case Ar6dofRole.Dim:
                 {
@@ -112,7 +119,8 @@ namespace AR6DoF
                     Color c = Color.Lerp(st.bg, st.text, 0.07f);
                     c.a = Mathf.Max(0.6f, st.alpha);
                     g.color = c;
-                    Ar6dofTheme.SetRounded(img, Mathf.Min(st.corner, radiusCap));
+                    radius = Ar6dofTheme.Radius(transform, st.corner, radiusCap, 4);
+                    Ar6dofTheme.SetRounded(img, radius);
                     break;
                 }
                 case Ar6dofRole.Text:
@@ -132,11 +140,12 @@ namespace AR6DoF
         {
             if (img == null) return;
             Transform layer = transform.Find("Texture");
-            Sprite sp = null;
-            bool tiled = true, custom = false;
+            Texture2D tex = null;
+            bool custom = false;
+            int mode = Mathf.Clamp(st.texMode, 0, 4);
             bool want = !string.IsNullOrEmpty(st.texture) && st.texAlpha > 0.005f;
-            if (want) Ar6dofTheme.GetTextureSprite(st.texture, out sp, out tiled, out custom);
-            if (sp == null)
+            if (want) Ar6dofTheme.GetTexture(st.texture, mode == 2, out tex, out custom);
+            if (tex == null)
             {
                 if (layer != null) layer.gameObject.SetActive(false);
                 return;
@@ -145,21 +154,47 @@ namespace AR6DoF
             {
                 var go = new GameObject("Texture", typeof(RectTransform));
                 go.transform.SetParent(transform, false);
-                var rt0 = (RectTransform)go.transform;
-                rt0.anchorMin = Vector2.zero;
-                rt0.anchorMax = Vector2.one;
-                var ti0 = go.AddComponent<Image>();
-                ti0.raycastTarget = false;
+                go.AddComponent<RawImage>().raycastTarget = false;
                 layer = go.transform;
             }
             layer.gameObject.SetActive(true);
-            float inset = st.corner * 0.3f;   // le carré de texture reste à l'intérieur des coins arrondis
             var rt = (RectTransform)layer;
-            rt.offsetMin = new Vector2(inset, inset);
-            rt.offsetMax = new Vector2(-inset, -inset);
-            var ti = layer.GetComponent<Image>();
-            ti.sprite = sp;
-            ti.type = tiled ? Image.Type.Tiled : Image.Type.Simple;
+            var prt = (RectTransform)transform;
+            float inset = Mathf.Max(2f, radius * 0.3f);   // l'image reste à l'intérieur des coins arrondis
+            float pw = Mathf.Max(8f, prt.rect.width - 2f * inset), ph = Mathf.Max(8f, prt.rect.height - 2f * inset);
+            float tw = tex.width, th = tex.height;
+            float sc = Mathf.Clamp(st.texScale, 0.1f, 8f);
+            Rect uv = new Rect(0f, 0f, 1f, 1f);
+            Vector2 size = new Vector2(pw, ph);
+            switch (mode)
+            {
+                case 1:
+                case 2:   // répéter / miroir : le motif se répète sur toute la surface
+                    uv = new Rect(0f, 0f, pw / (tw * sc), ph / (th * sc));
+                    break;
+                case 3:   // centrée, sans répétition : taille d'origine x échelle, rognée si elle dépasse
+                {
+                    float dw = tw * sc, dh = th * sc;
+                    float sw = Mathf.Min(pw, dw), sh = Mathf.Min(ph, dh);
+                    size = new Vector2(sw, sh);
+                    uv = new Rect((1f - sw / dw) * 0.5f, (1f - sh / dh) * 0.5f, sw / dw, sh / dh);
+                    break;
+                }
+                case 4:   // remplir : toute la surface, proportions gardées, bords rognés
+                {
+                    float ia = tw / th, ra = pw / ph;
+                    if (ia > ra) { float f = ra / ia; uv = new Rect((1f - f) * 0.5f, 0f, f, 1f); }
+                    else { float f = ia / ra; uv = new Rect(0f, (1f - f) * 0.5f, 1f, f); }
+                    break;
+                }
+            }
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = size;
+            var ti = layer.GetComponent<RawImage>();
+            ti.texture = tex;
+            ti.uvRect = uv;
             Color tc = custom ? Color.white : st.text;
             tc.a = st.texAlpha;
             ti.color = tc;
@@ -170,16 +205,19 @@ namespace AR6DoF
     public static class Ar6dofTheme
     {
         static readonly Dictionary<int, Sprite> rounded = new Dictionary<int, Sprite>();
-        static readonly Dictionary<string, Sprite> texSprites = new Dictionary<string, Sprite>();
+        static readonly Dictionary<string, Texture2D> texCache = new Dictionary<string, Texture2D>();
         static readonly string[] BuiltinTex = { "", "grid", "dots", "carbon", "stripes", "gradient", "noise" };
         static readonly string[] BuiltinTexNames = { "Aucune", "Grille", "Points", "Carbone", "Rayures", "Degrade", "Bruit" };
 
-        /// <summary>Dossier où poser tes images (png / jpg) pour les utiliser comme fonds de menus. Créé automatiquement.</summary>
+        /// <summary>Dossier facile d'accès où poser tes images de fond (png / jpg) : Images\AR6DoF. Créé automatiquement.</summary>
         public static string PicturesFolder
         {
             get
             {
-                string p = Path.Combine(Ar6dofSettings.FolderPath, "pictures");
+                string p;
+                try { p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "AR6DoF"); }
+                catch (Exception) { p = Path.Combine(Ar6dofSettings.FolderPath, "pictures"); }
+                if (string.IsNullOrEmpty(p) || p == "AR6DoF") p = Path.Combine(Ar6dofSettings.FolderPath, "pictures");
                 try
                 {
                     if (!Directory.Exists(p))
@@ -187,9 +225,8 @@ namespace AR6DoF
                         Directory.CreateDirectory(p);
                         File.WriteAllText(Path.Combine(p, "LISEZMOI.txt"),
                             "Dossier d'images AR6DoF\r\n\r\n" +
-                            "Depose ici tes images .png ou .jpg : elles apparaissent dans le menu Style > Forme > Fond (en VR).\r\n" +
-                            "Petite image (256 px ou moins) = motif repete. Grande image = etiree sur tout le menu.\r\n" +
-                            "Pas besoin de redemarrer : rouvre simplement la liste des fonds.\r\n");
+                            "Glisse ici tes images .png ou .jpg : elles apparaissent dans Reglages > Style > Forme > Image de fond.\r\n" +
+                            "La liste se relit quand tu ouvres l'onglet Style (pas besoin de redemarrer).\r\n");
                     }
                 }
                 catch (Exception) { }
@@ -197,9 +234,11 @@ namespace AR6DoF
             }
         }
 
+        // anciens dossiers, toujours lus : %APPDATA%\AR6DoF\pictures et \textures
+        static string AppDataPictures { get { return Path.Combine(Ar6dofSettings.FolderPath, "pictures"); } }
         static string LegacyFolder { get { return Path.Combine(Ar6dofSettings.FolderPath, "textures"); } }
 
-        /// <summary>Ouvre le dossier d'images dans l'explorateur de Windows.</summary>
+        /// <summary>Ouvre le dossier d'images dans l'explorateur de Windows (sur l'écran principal du PC).</summary>
         public static void OpenPicturesFolder()
         {
             try { System.Diagnostics.Process.Start("explorer.exe", "\"" + PicturesFolder + "\""); }
@@ -211,10 +250,38 @@ namespace AR6DoF
 
         static string FindPicture(string name)
         {
-            string a = Path.Combine(PicturesFolder, name);
-            if (File.Exists(a)) return a;
-            string b = Path.Combine(LegacyFolder, name);   // ancien dossier "textures" toujours lu
-            return File.Exists(b) ? b : null;
+            foreach (string dir in new[] { PicturesFolder, AppDataPictures, LegacyFolder })
+            {
+                string a = Path.Combine(dir, name);
+                if (File.Exists(a)) return a;
+            }
+            return null;
+        }
+
+        /// <summary>Rayon concentrique : chaque cadre ou panneau parent retire 'Pad' pixels au rayon du panneau. Un bouton dans un cadre dans un panneau a donc le rayon du panneau - 2 x Pad.</summary>
+        const int Pad = 12;
+
+        public static int Radius(Transform t, int corner, int cap, int minRadius)
+        {
+            if (corner <= 0) return 0;
+            int depth = 0;
+            if (t != null)
+            {
+                // le fond du menu (« Fond », Surface) compte comme un parent de tout ce que contient le menu
+                var cv = t.GetComponentInParent<Canvas>(true);
+                if (cv != null)
+                {
+                    var fond = cv.rootCanvas.transform.Find("Fond");
+                    if (fond != null && fond != t && fond.GetComponent<Ar6dofThemed>() != null) depth = 1;
+                }
+                for (Transform p = t.parent; p != null; p = p.parent)
+                {
+                    var th = p.GetComponent<Ar6dofThemed>();
+                    if (th != null && (th.role == Ar6dofRole.Surface || th.role == Ar6dofRole.Band)) depth++;
+                }
+            }
+            int r = Mathf.Max(minRadius, corner - Pad * depth);
+            return Mathf.Clamp(Mathf.Min(r, cap), 0, 48);
         }
 
         public static Ar6dofElem ElemOf(Transform t)
@@ -333,6 +400,13 @@ namespace AR6DoF
             return (la + 0.05f) / (lb + 0.05f);
         }
 
+        /// <summary>Noir ou blanc, selon ce qui se lit le mieux sur cette couleur de fond.</summary>
+        public static Color OnColor(Color bg)
+        {
+            bg.a = 1f;
+            return Contrast(Color.white, bg) >= Contrast(new Color(0.02f, 0.02f, 0.02f, 1f), bg) ? Color.white : new Color(0.02f, 0.02f, 0.02f, 1f);
+        }
+
         /// <summary>Couleur du cadre de survol : l'accent s'il se voit nettement, sinon blanc ou noir, selon ce qui contraste le plus avec le bouton ET avec le fond du menu.</summary>
         public static Color HoverColor(Color button, Ar6dofStyle st)
         {
@@ -348,15 +422,20 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ textures de fond
-        public static List<string> TextureIds()
+        static List<string> textureIds;
+
+        /// <summary>Relit le dossier d'images. Appelé seulement en entrant dans l'onglet Style : jamais en continu.</summary>
+        public static void RescanPictures()
         {
             var l = new List<string>(BuiltinTex);
             try
             {
-                foreach (string dir in new[] { PicturesFolder, LegacyFolder })
+                foreach (string dir in new[] { PicturesFolder, AppDataPictures, LegacyFolder })
                 {
                     if (!Directory.Exists(dir)) continue;
-                    foreach (string f in Directory.GetFiles(dir))
+                    var files = Directory.GetFiles(dir);
+                    Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                    foreach (string f in files)
                     {
                         string ext = Path.GetExtension(f).ToLowerInvariant();
                         string id = "file:" + Path.GetFileName(f);
@@ -365,7 +444,14 @@ namespace AR6DoF
                 }
             }
             catch (Exception) { }
-            return l;
+            textureIds = l;
+        }
+
+        /// <summary>Liste des fonds (motifs d'usine puis tes images). Lue une fois, puis seulement sur demande (RescanPictures).</summary>
+        public static List<string> TextureIds()
+        {
+            if (textureIds == null) RescanPictures();
+            return textureIds;
         }
 
         /// <summary>Nom à afficher (déjà traduit) d'une texture.</summary>
@@ -375,41 +461,48 @@ namespace AR6DoF
             return id.StartsWith("file:") ? id.Substring(5) : id;
         }
 
-        public static void GetTextureSprite(string id, out Sprite sprite, out bool tiled, out bool custom)
+        /// <summary>Image de fond : motif d'usine ou fichier. Le mode "miroir" utilise sa propre copie (le mode d'adressage appartient à la texture).</summary>
+        public static void GetTexture(string id, bool mirror, out Texture2D tex, out bool custom)
         {
-            sprite = null;
-            tiled = true;
+            tex = null;
             custom = id != null && id.StartsWith("file:");
             if (string.IsNullOrEmpty(id)) return;
-            if (!texSprites.TryGetValue(id, out sprite) || sprite == null)
+            string key = mirror ? id + "|m" : id;
+            if (!texCache.TryGetValue(key, out tex) || tex == null)
             {
-                sprite = custom ? LoadFile(id.Substring(5)) : MakeBuiltin(id);
-                if (sprite != null) texSprites[id] = sprite;
+                tex = custom ? LoadFile(id.Substring(5), mirror) : MakeBuiltin(id, mirror);
+                if (tex != null) texCache[key] = tex;
             }
-            if (sprite == null) return;
-            tiled = id != "gradient" && sprite.rect.width <= 256f && sprite.rect.height <= 256f;
         }
 
-        static Sprite LoadFile(string name)
+        /// <summary>Taille en pixels de l'image (0 si introuvable) : sert à choisir un mode de départ logique.</summary>
+        public static Vector2Int TextureSize(string id)
+        {
+            Texture2D t; bool c;
+            GetTexture(id, false, out t, out c);
+            return t != null ? new Vector2Int(t.width, t.height) : Vector2Int.zero;
+        }
+
+        static Texture2D LoadFile(string name, bool mirror)
         {
             try
             {
                 string path = FindPicture(name);
                 if (path == null) return null;
-                var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                var tex = new Texture2D(2, 2, TextureFormat.RGBA32, true);
                 if (!ImageConversion.LoadImage(tex, File.ReadAllBytes(path))) return null;
-                tex.wrapMode = TextureWrapMode.Repeat;
+                tex.wrapMode = mirror ? TextureWrapMode.Mirror : TextureWrapMode.Repeat;
                 tex.filterMode = FilterMode.Bilinear;
-                return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+                return tex;
             }
             catch (Exception) { return null; }
         }
 
-        static Sprite MakeBuiltin(string id)
+        static Texture2D MakeBuiltin(string id, bool mirror)
         {
             const int N = 64;
             var tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
-            tex.wrapMode = id == "gradient" ? TextureWrapMode.Clamp : TextureWrapMode.Repeat;
+            tex.wrapMode = mirror ? TextureWrapMode.Mirror : TextureWrapMode.Repeat;
             tex.filterMode = FilterMode.Bilinear;
             var px = new Color32[N * N];
             var rnd = new System.Random(1234);
@@ -436,7 +529,7 @@ namespace AR6DoF
                 }
             tex.SetPixels32(px);
             tex.Apply(false, true);
-            return Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+            return tex;
         }
 
         // ------------------------------------------------------------------ objets 3D (touches, poignées) : matériau à coins arrondis
@@ -481,8 +574,7 @@ namespace AR6DoF
             if (g == null) return;
             var th = GetComponent<Ar6dofThemed>();
             var st = Ar6dofSettings.StyleFor(Ar6dofTheme.ElemOf(transform));
-            int cap = th != null ? th.radiusCap : 999;
-            int r = Mathf.Clamp(Mathf.Min(st.corner, cap) + 4, 4, 40);
+            int r = Mathf.Clamp((th != null && th.radius > 0 ? th.radius : Mathf.Min(st.corner, 12)) + 4, 4, 48);   // le cadre épouse le bouton, 4 px autour
             if (ring == null)
             {
                 var go = new GameObject("Survol", typeof(RectTransform));

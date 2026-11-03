@@ -23,6 +23,17 @@ namespace AR6DoF
         [DllImport(Dll)] static extern int A6S_GetStatus(int slot);
         [DllImport(Dll)] static extern long A6S_GetFrames(int slot);
         [DllImport(Dll)] static extern IntPtr A6S_GetRenderEventFunc();
+        [DllImport(Dll)] static extern int A6S_SlotCount();
+
+        static int slotCount;
+        /// <summary>Nombre d'écrans que la DLL sait capturer en même temps (12 ; une ancienne DLL en gère 4).</summary>
+        public static int SlotCount()
+        {
+            if (slotCount > 0) return slotCount;
+            try { slotCount = Math.Max(1, A6S_SlotCount()); }
+            catch (Exception) { slotCount = 4; }
+            return slotCount;
+        }
 
         static bool? available;
         /// <summary>Vrai si la DLL est présente et chargeable.</summary>
@@ -80,6 +91,7 @@ namespace AR6DoF
         public static int Status(int slot) { return 0; }
         public static long Frames(int slot) { return 0; }
         public static IntPtr RenderEventFunc() { return IntPtr.Zero; }
+        public static int SlotCount() { return 4; }
 #endif
     }
 }

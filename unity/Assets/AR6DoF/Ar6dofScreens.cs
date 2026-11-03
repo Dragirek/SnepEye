@@ -8,7 +8,7 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Écrans virtuels (1 à 3) autour de toi, plats mais disposés en arc, fixes dans la pièce. Chaque écran affiche un moniteur
+    /// Écrans virtuels (1 à 12, en clusters de 3 au maximum) autour de toi, plats mais disposés en arc, fixes dans la pièce. Chaque écran affiche un moniteur
     /// Windows capturé directement par le GPU (ar6dof_screen.dll) et se pilote à la télécommande (voir Ar6dofScreenPanel).
     /// Conseil : installer un pilote d'écran virtuel Windows (Virtual Display Driver) à 1920x1080 / 60 Hz : tu glisses tes
     /// fenêtres dessus, et le casque ne se capture jamais lui-même.
@@ -22,7 +22,8 @@ namespace AR6DoF
         public Ar6dofHeadRig rig;
         public Ar6dofPointer pointer;
         public Shader screenShader;
-        public int maxScreens = 3;
+        public int maxScreens = 12;                // 12 écrans au maximum (la DLL doit en gérer autant : voir SlotCount)
+        public int maxCluster = 3;                 // un cluster = 3 écrans collés au maximum (gauche, centre, droite)
         public float startDistance = 1.6f;
         public float startWidth = 1.6f;
         [Tooltip("Hauteur du centre de l'écran par rapport aux yeux (m)")]
@@ -50,7 +51,7 @@ namespace AR6DoF
         public bool Built { get { return built; } }
 
         // ---- données sauvegardées ----
-        [Serializable] class Item { public int monitor, fps, parent, side; public bool closed; public Vector3 pos, euler; public float width; }
+        [Serializable] class Item { public int monitor, fps, parent, side; public bool closed; public Vector3 pos, euler; public float width; public float hinge = -1f; }
         [Serializable] class Cfg { public List<Item> items = new List<Item>(); public float hinge = 25f; public bool snap = true; }
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
@@ -70,6 +71,7 @@ namespace AR6DoF
 
         void Update()
         {
+            if (saveAt > 0f && Time.unscaledTime > saveAt) { saveAt = 0f; Save(); }
             if (!built)
             {
                 if (Head == null) return;
@@ -106,7 +108,7 @@ namespace AR6DoF
                 snapEnabled = cfg.snap;
                 foreach (var it in cfg.items)
                 {
-                    if (panels.Count >= maxScreens) break;
+                    if (panels.Count >= MaxAllowed) break;
                     var p = NewPanel(Mathf.Clamp(it.monitor, 0, Mathf.Max(0, Ar6dofScreenNative.MonitorCount() - 1)), it.fps > 0 ? it.fps : defaultFps, Mathf.Clamp(it.width, 0.3f, 8f));
                     p.transform.SetPositionAndRotation(it.pos, Quaternion.Euler(it.euler));
                     if (it.closed) p.SetContentActive(false);   // rangé dans la barre de tâches
@@ -115,13 +117,14 @@ namespace AR6DoF
                 {
                     int pi = cfg.items[i].parent;
                     if (pi >= 0 && pi < panels.Count && pi != i) { panels[i].parent = panels[pi]; panels[i].side = cfg.items[i].side >= 0 ? 1 : -1; }
+                    panels[i].hinge = cfg.items[i].hinge >= 0f ? cfg.items[i].hinge : cfg.hinge;
                 }
                 RelayoutAttached();
             }
             else
             {
                 var p = NewPanel(PickMonitor(), defaultFps, startWidth);
-                PlaceInFront(p);
+                PlaceNewCluster(p);
                 Save();
             }
             BuildSettings();
@@ -134,11 +137,34 @@ namespace AR6DoF
             var go = new GameObject("Ecran virtuel " + (panels.Count + 1));
             var p = go.AddComponent<Ar6dofScreenPanel>();
             int slot = 0;
-            while (slot < 8 && panels.Exists(x => x.slot == slot)) slot++;   // 4 emplacements natifs au maximum
+            while (slot < 64 && panels.Exists(x => x.slot == slot)) slot++;   // emplacement natif libre (la DLL en a SlotCount)
             if (windowHandle != 0) { p.hwnd = windowHandle; p.windowTitle = Ar6dofWindows.Title(windowHandle); monitor = -1; }
             p.Init(this, slot, monitor, fps, width);
             panels.Add(p);
             return p;
+        }
+
+        /// <summary>Nombre d'écrans possibles : 12, ou moins si la DLL de capture installée en gère moins.</summary>
+        public int MaxAllowed { get { return Mathf.Min(12, Ar6dofScreenNative.SlotCount()); } }
+
+        /// <summary>Un nouveau cluster se pose sur un arc autour de toi : devant, puis à droite, à gauche... (4 par étage).</summary>
+        void PlaceNewCluster(Ar6dofScreenPanel p)
+        {
+            int n = 0;
+            foreach (var q in panels) if (q != p && q.parent == null) n++;
+            PlaceClusterAt(p, n);
+        }
+
+        void PlaceClusterAt(Ar6dofScreenPanel p, int index)
+        {
+            Transform h = Head;
+            if (h == null) return;
+            int row = index / 4, k = index % 4;
+            float yaw = k == 0 ? 0f : ((k % 2 == 1) ? 1f : -1f) * 80f * ((k + 1) / 2);
+            Vector3 d = Quaternion.Euler(0f, yaw, 0f) * FlatForward(h);
+            Vector3 pos = h.position + d * startDistance;
+            pos.y = Mathf.Max(h.position.y + heightOffset, 0.9f) + row * (p.Height + 0.12f);
+            p.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(d));
         }
 
         void PlaceInFront(Ar6dofScreenPanel p)
@@ -192,19 +218,20 @@ namespace AR6DoF
 
         void AddScreenCore(int monitor, long windowHandle)
         {
-            if (panels.Count >= maxScreens || panels.Count >= 4) return;
+            if (panels.Count >= MaxAllowed) return;
             var p = NewPanel(monitor, defaultFps, startWidth, windowHandle);
-            // le premier côté libre d'un écran existant, sinon devant toi
+            // le premier côté libre d'un cluster qui n'est pas complet (3 écrans), sinon un nouveau cluster
             bool placed = false;
             foreach (var q in panels)
             {
-                if (q == p) continue;
+                if (q == p || GroupOf(q).Count >= maxCluster) continue;
                 for (int s = 1; s >= -1 && !placed; s -= 2)
-                    if (!Occupied(q, s)) { p.parent = q; p.side = s; ApplyAttach(p); placed = true; }
+                    if (!Occupied(q, s)) { p.parent = q; p.side = s; p.hinge = LinkHinge(q); ApplyAttach(p); placed = true; }
                 if (placed) break;
             }
-            if (!placed) PlaceInFront(p);
+            if (!placed) PlaceNewCluster(p);
             Save();
+            RefreshIfOpen();
         }
 
         public void RemoveScreen(Ar6dofScreenPanel p)
@@ -215,6 +242,7 @@ namespace AR6DoF
             if (settingsFor == p) CloseSettings();
             Destroy(p.gameObject);
             Save();
+            RefreshIfOpen();
         }
 
         public void Detach(Ar6dofScreenPanel p)
@@ -222,6 +250,7 @@ namespace AR6DoF
             foreach (var q in panels) if (q.parent == p) q.parent = null;   // les voisins accrochés à lui restent où ils sont
             p.parent = null;
             Save();
+            RefreshIfOpen();
         }
 
         // ------------------------------------------------------------------ collage
@@ -238,12 +267,81 @@ namespace AR6DoF
             var p = c.parent;
             if (p == null) return;
             float s = c.side;
-            Quaternion rot = p.transform.rotation * Quaternion.Euler(0f, s * hingeDegrees, 0f);
+            Quaternion rot = p.transform.rotation * Quaternion.Euler(0f, s * c.hinge, 0f);
             Vector3 edge = p.transform.position + p.transform.right * (s * p.Width * 0.5f);
             Vector3 pos = edge + rot * Vector3.right * (s * c.Width * 0.5f);
             pos.y = p.transform.position.y;
             c.transform.SetPositionAndRotation(pos, rot);
         }
+
+        /// <summary>Numéro affiché d'un écran (barre de tâches, titre du panneau) : l'ordre de la barre, cluster par cluster, de gauche à droite.</summary>
+        public int DisplayNumber(Ar6dofScreenPanel p)
+        {
+            int n = 0;
+            foreach (var cl in Clusters())
+                foreach (var q in cl) { n++; if (q == p) return n; }
+            return panels.IndexOf(p) + 1;
+        }
+
+        public bool IsAttached(Ar6dofScreenPanel p)
+        {
+            return p != null && (p.parent != null || panels.Exists(x => x.parent == p));
+        }
+
+        /// <summary>Angle du cluster auquel appartient p (ou l'angle par défaut s'il est seul).</summary>
+        public float LinkHinge(Ar6dofScreenPanel p)
+        {
+            if (p.parent != null) return p.hinge;
+            var child = panels.Find(x => x.parent == p);
+            return child != null ? child.hinge : hingeDegrees;
+        }
+
+        public float ClusterHinge(Ar6dofScreenPanel p) { return LinkHinge(p); }
+
+        /// <summary>Règle l'angle entre les écrans du cluster de p (0 = à plat).</summary>
+        public void SetClusterHinge(Ar6dofScreenPanel p, float deg)
+        {
+            deg = Mathf.Clamp(deg, 0f, 60f);
+            foreach (var q in GroupOf(p)) if (q.parent != null) q.hinge = deg;
+            RelayoutAttached();
+            RequestSave();
+        }
+
+        /// <summary>Même angle pour tous les clusters ; sert aussi de valeur de départ aux nouveaux.</summary>
+        public void SetAllHinge(float deg)
+        {
+            hingeDegrees = Mathf.Clamp(deg, 0f, 60f);
+            foreach (var q in panels) q.hinge = hingeDegrees;
+            RelayoutAttached();
+            RequestSave();
+        }
+
+        /// <summary>Les clusters, chacun de gauche à droite (pour la barre de tâches).</summary>
+        public List<List<Ar6dofScreenPanel>> Clusters()
+        {
+            var res = new List<List<Ar6dofScreenPanel>>();
+            var seen = new HashSet<Ar6dofScreenPanel>();
+            foreach (var p in panels)
+            {
+                if (seen.Contains(p)) continue;
+                var g = GroupOf(p);
+                foreach (var q in g) seen.Add(q);
+                g.Sort((a, b) => HOrder(a).CompareTo(HOrder(b)));
+                res.Add(g);
+            }
+            return res;
+        }
+
+        static int HOrder(Ar6dofScreenPanel p)
+        {
+            int k = 0, guard = 0;
+            for (var q = p; q.parent != null && guard++ < 16; q = q.parent) k += q.side;
+            return k;
+        }
+
+        float saveAt;
+        /// <summary>Enregistre peu après le dernier changement (un curseur qui glisse ne réécrit pas le disque à chaque image).</summary>
+        public void RequestSave() { saveAt = Time.unscaledTime + 0.6f; }
 
         public void RelayoutAttached()
         {
@@ -283,7 +381,7 @@ namespace AR6DoF
             int bs = 0;
             foreach (var q in panels)
             {
-                if (mine.Contains(q)) continue;
+                if (mine.Contains(q) || mine.Count + GroupOf(q).Count > maxCluster) continue;   // un cluster ne dépasse jamais 3 écrans
                 for (int s = -1; s <= 1; s += 2)
                 {
                     if (Occupied(q, s)) continue;
@@ -297,7 +395,9 @@ namespace AR6DoF
             if (bq == null) return;
             p.parent = bq;
             p.side = bs;
+            p.hinge = LinkHinge(bq);
             RelayoutAttached();
+            RefreshIfOpen();
         }
 
         // ------------------------------------------------------------------ clavier
@@ -336,7 +436,7 @@ namespace AR6DoF
                     {
                         monitor = p.monitor, fps = p.fps, width = p.width,
                         pos = p.transform.position, euler = p.transform.rotation.eulerAngles,
-                        parent = p.parent != null ? saved.IndexOf(p.parent) : -1, side = p.side, closed = !p.open
+                        parent = p.parent != null ? saved.IndexOf(p.parent) : -1, side = p.side, closed = !p.open, hinge = p.hinge
                     });
                 PlayerPrefs.SetString(PrefKey, JsonUtility.ToJson(cfg));
                 PlayerPrefs.Save();
@@ -345,19 +445,25 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ menu de paramètres (Canvas dans la pièce)
+        // Chaque écran a son panneau (roue sous l'écran). Les lignes qui n'ont pas de sens ne sont pas affichées :
+        // pas d'angle ni de « dissocier » pour un écran seul, pas de « retirer » pour le dernier écran, pas de « coller aux bords » s'il n'y en a qu'un.
         Canvas settings;
         Ar6dofScreenPanel settingsFor;
         Text titleText, sourceText, fpsText, snapText, hingeText, addText;
+        Slider angleSlider;
+        class Row { public RectTransform rt; public float h; public Func<bool> vis; }
+        readonly List<Row> setRows = new List<Row>();
 
         Text MakeText(Transform parent, string label, Vector2 pos, Vector2 size, int fontSize, TextAnchor anchor)
         {
             return Ar6dofVrUi.Label(parent, label, pos, size, fontSize, anchor);
         }
 
-        Text MakeButton(string label, Vector2 pos, Vector2 size, UnityAction onClick)
+        Text MakeRowButton(string label, float h, Func<bool> vis, UnityAction onClick)
         {
             Text t;
-            Ar6dofVrUi.MakeButton(settings.transform, label, pos, size, onClick, out t, 26);
+            Ar6dofVrUi.MakeButton(settings.transform, label, Vector2.zero, new Vector2(400f, h), onClick, out t, 24);
+            setRows.Add(new Row { rt = (RectTransform)t.transform.parent, h = h, vis = vis });
             return t;
         }
 
@@ -365,24 +471,61 @@ namespace AR6DoF
         {
             settings = Ar6dofVrUi.NewCanvas("Parametres ecrans", new Vector2(440, 580));
             var go = settings.gameObject;
+            setRows.Clear();
 
-            Vector2 W = new Vector2(400, 46);
-            float y = 255;
-            titleText = MakeText(go.transform, "", new Vector2(0, y), W, 28, TextAnchor.MiddleCenter); y -= 54;
-            sourceText = MakeButton("", new Vector2(0, y), W, () => CycleSource()); y -= 52;
-            fpsText = MakeButton("", new Vector2(0, y), W, () => CycleFps()); y -= 52;
-            snapText = MakeButton("", new Vector2(0, y), W, () => { snapEnabled = !snapEnabled; Refresh(); Save(); }); y -= 52;
-            hingeText = MakeButton("", new Vector2(0, y), W, () => CycleHinge()); y -= 52;
-            addText = MakeButton("+ Ajouter un ecran", new Vector2(0, y), W, () => RequestAddScreen()); y -= 52;
-            MakeButton("Retirer cet ecran", new Vector2(0, y), W, () => { if (settingsFor != null) RemoveScreen(settingsFor); }); y -= 52;
-            MakeButton("Dissocier cet ecran", new Vector2(0, y), W, () => { if (settingsFor != null) Detach(settingsFor); }); y -= 52;
-            MakeButton("Recentrer devant moi", new Vector2(0, y), W, () => RecenterAll()); y -= 52;
-            MakeButton("Fermer", new Vector2(0, y), W, () => CloseSettings());
+            titleText = MakeText(go.transform, "", Vector2.zero, new Vector2(400f, 40f), 28, TextAnchor.MiddleCenter);
+            setRows.Add(new Row { rt = titleText.rectTransform, h = 40f });
+            sourceText = MakeRowButton("", 46f, null, () => CycleSource());
+            fpsText = MakeRowButton("", 46f, null, () => CycleFps());
+
+            // angle entre les écrans du cluster : seulement si cet écran est collé à un autre
+            var box = Ar6dofVrUi.Rect(go.transform, "Angle", Vector2.zero, new Vector2(400f, 76f));
+            hingeText = Ar6dofVrUi.Label(box, "", new Vector2(0f, 20f), new Vector2(400f, 28f), 21, TextAnchor.MiddleLeft);
+            angleSlider = Ar6dofVrUi.MakeSlider(box, new Vector2(0f, -16f), new Vector2(400f, 38f), 0f, 60f, hingeDegrees, v =>
+            {
+                if (settingsFor == null) return;
+                SetClusterHinge(settingsFor, v);
+                hingeText.text = Ar6dofLoc.F("Angle avec les voisins : {0} deg", Mathf.RoundToInt(v));
+            });
+            setRows.Add(new Row { rt = box, h = 76f, vis = () => settingsFor != null && IsAttached(settingsFor) });
+
+            snapText = MakeRowButton("", 46f, () => panels.Count >= 2, () => { snapEnabled = !snapEnabled; Refresh(); Save(); });
+            MakeRowButton("Dissocier cet ecran", 46f, () => settingsFor != null && IsAttached(settingsFor), () => { if (settingsFor != null) Detach(settingsFor); });
+            addText = MakeRowButton("+ Ajouter un ecran", 46f, null, () => RequestAddScreen());
+            MakeRowButton("Retirer cet ecran", 46f, () => panels.Count > 1, () => { if (settingsFor != null) RemoveScreen(settingsFor); });
+            MakeRowButton("Recentrer devant moi", 46f, null, () => RecenterAll());
+            MakeRowButton("Fermer", 46f, null, () => CloseSettings());
             go.SetActive(false);
             if (pointer != null) pointer.AddCanvas(settings);
             // réduire / fermer : ferment tous les deux le panneau ; coin bas droit : agrandit / réduit le panneau
             Ar6dofWindowChrome.Create("Parametres ecrans", settings.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(settings), CloseSettings, CloseSettings).canMove = true;
         }
+
+        /// <summary>Empile les lignes utiles de haut en bas et ajuste la hauteur du panneau (le fond suit).</summary>
+        void LayoutSettingsRows()
+        {
+            const float margin = 24f, gap = 10f;
+            float total = margin * 2f;
+            int n = 0;
+            foreach (var r in setRows)
+            {
+                bool on = r.vis == null || r.vis();
+                r.rt.gameObject.SetActive(on);
+                if (!on) continue;
+                total += r.h + (n > 0 ? gap : 0f);
+                n++;
+            }
+            Ar6dofVrUi.FitHeight(settings, total);
+            float y = total * 0.5f - margin;
+            foreach (var r in setRows)
+            {
+                if (!r.rt.gameObject.activeSelf) continue;
+                r.rt.anchoredPosition = new Vector2(0f, y - r.h * 0.5f);
+                y -= r.h + gap;
+            }
+        }
+
+        void RefreshIfOpen() { if (settingsFor != null && settings != null && settings.gameObject.activeSelf) Refresh(); }
 
         /// <summary>Roue d'un écran : ouvre son panneau, ou le referme s'il est déjà ouvert pour cet écran.</summary>
         public void ToggleSettings(Ar6dofScreenPanel p)
@@ -444,7 +587,7 @@ namespace AR6DoF
         /// <summary>Demande quel écran ajouter : un moniteur réel (avec sa résolution) ou un écran virtuel logiciel (fenêtre d'application).</summary>
         public void RequestAddScreen()
         {
-            if (panels.Count >= maxScreens || panels.Count >= 4) return;
+            if (panels.Count >= MaxAllowed) return;
             if (addDlg == null) BuildAddDialog();
             addWinMode = false;
             FillAddDialog();
@@ -496,8 +639,7 @@ namespace AR6DoF
                     addWinTexts[i].text = t + "  (" + addWins[i].width + "x" + addWins[i].height + ")" + (used ? Ar6dofLoc.T("  (deja affichee)") : "");
                 }
                 addModeText.text = Ar6dofLoc.T("Taille de la zone utile : ") + Ar6dofLoc.T(Ar6dofWindows.PresetName(addSizeIdx)) + Ar6dofLoc.T("  (clic = autre)");
-                addInfo.text = addWins.Count == 0 ? Ar6dofLoc.T("Aucune fenetre ouverte a afficher. Ouvre une application sur ton PC, puis reviens ici.")
-                                                  : Ar6dofLoc.T("La fenetre est capturee meme si elle est cachee derriere d'autres. Elle se redimensionne a la taille choisie (ex. 1920 x 1080).");
+                addInfo.text = addWins.Count == 0 ? Ar6dofLoc.T("Aucune fenetre ouverte. Ouvre une application sur ton PC.") : "";
                 addBackText.text = Ar6dofLoc.T("Retour");
             }
             else
@@ -505,7 +647,7 @@ namespace AR6DoF
                 addHeader.text = Ar6dofLoc.T("Ecrans reels (a leur resolution)");
                 addModeText.text = Ar6dofLoc.T("Ecran virtuel : une fenetre d'application");
                 for (int i = 0; i < DlgWinMax; i++) addWinBtns[i].gameObject.SetActive(false);
-                addInfo.text = n == 0 ? Ar6dofLoc.T("Aucun moniteur capturable.") : Ar6dofLoc.T("Ecran virtuel logiciel : une fenetre d'application (navigateur, editeur, jeu...) affichee comme un ecran, a la resolution choisie, sans rien installer. Pour un vrai ecran Windows en plus, il faut un pilote d'affichage virtuel (voir le README).");
+                addInfo.text = n == 0 ? Ar6dofLoc.T("Aucun moniteur capturable.") : "";
                 addBackText.text = Ar6dofLoc.T("Annuler");
             }
         }
@@ -555,13 +697,15 @@ namespace AR6DoF
         void Refresh()
         {
             if (settingsFor == null) return;
-            titleText.text = Ar6dofLoc.F("Ecran {0} / {1}", panels.IndexOf(settingsFor) + 1, panels.Count);
-            sourceText.text = Ar6dofLoc.T("Source : ") + settingsFor.SourceText();
-            if (settingsFor.hwnd != 0) sourceText.text = settingsFor.SourceText() + Ar6dofLoc.T("  (clic = autre taille)");
+            titleText.text = Ar6dofLoc.F("Ecran {0} / {1}", DisplayNumber(settingsFor), panels.Count);
+            sourceText.text = settingsFor.hwnd != 0 ? settingsFor.SourceText() + Ar6dofLoc.T("  (clic = autre taille)") : Ar6dofLoc.T("Source : ") + settingsFor.SourceText();
             fpsText.text = Ar6dofLoc.F("Images / s : {0}", settingsFor.fps);
             snapText.text = Ar6dofLoc.T("Coller aux bords : ") + Ar6dofLoc.T(snapEnabled ? "OUI" : "NON");
-            hingeText.text = Ar6dofLoc.F("Courbure : {0} deg", Mathf.RoundToInt(hingeDegrees));
-            addText.text = Ar6dofLoc.T(panels.Count >= maxScreens ? "(3 ecrans maximum)" : "+ Ajouter un ecran");
+            float hg = ClusterHinge(settingsFor);
+            hingeText.text = Ar6dofLoc.F("Angle avec les voisins : {0} deg", Mathf.RoundToInt(hg));
+            if (angleSlider != null) angleSlider.SetValueWithoutNotify(Mathf.Clamp(hg, 0f, 60f));
+            addText.text = panels.Count >= MaxAllowed ? Ar6dofLoc.F("{0} ecrans maximum", MaxAllowed) : Ar6dofLoc.F("+ Ajouter un ecran ({0}/{1})", panels.Count, MaxAllowed);
+            LayoutSettingsRows();
         }
 
         /// <summary>Moniteur : passe au moniteur suivant. Fenêtre (écran virtuel logiciel) : change la taille de la zone utile de la fenêtre.</summary>
@@ -598,17 +742,6 @@ namespace AR6DoF
             Save();
         }
 
-        public void CycleHinge()
-        {
-            float[] opts = { 0f, 15f, 25f, 35f, 45f };
-            int idx = 0;
-            for (int i = 0; i < opts.Length; i++) if (Mathf.Abs(opts[i] - hingeDegrees) < 1f) idx = i;
-            hingeDegrees = opts[(idx + 1) % opts.Length];
-            RelayoutAttached();
-            Refresh();
-            Save();
-        }
-
         public void SetAllFps(int f)
         {
             defaultFps = f;
@@ -619,16 +752,14 @@ namespace AR6DoF
         public void RecenterAll()
         {
             if (panels.Count == 0 || Head == null) return;
-            foreach (var p in panels) p.parent = null;
-            PlaceInFront(panels[0]);
-            for (int i = 1; i < panels.Count; i++)
+            // les clusters gardent leur forme : seul le premier écran de chacun est replacé, sur l'arc devant toi
+            int idx = 0;
+            foreach (var p in panels)
             {
-                var c = panels[i];
-                bool ok = false;
-                for (int k = 0; k < i && !ok; k++)
-                    for (int s = 1; s >= -1 && !ok; s -= 2)
-                        if (!Occupied(panels[k], s)) { c.parent = panels[k]; c.side = s; ApplyAttach(c); ok = true; }
+                if (p.parent != null) continue;
+                PlaceClusterAt(p, idx++);
             }
+            RelayoutAttached();
             var kb = FindFirstObjectByType<Ar6dofKeyboard>();
             if (kb != null) { var fm = kb.GetComponent<Ar6dofFloatingMenu>(); if (fm != null) fm.Summon(); }
             Save();

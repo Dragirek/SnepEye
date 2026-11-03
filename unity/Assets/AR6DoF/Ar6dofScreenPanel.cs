@@ -23,6 +23,7 @@ namespace AR6DoF
         public float width = 1.6f;
         [NonSerialized] public Ar6dofScreenPanel parent;   // écran auquel celui-ci est collé (null = libre)
         public int side;                                    // +1 : à droite du parent, -1 : à gauche
+        public float hinge = 25f;                           // angle avec le parent (degrés) ; tous les liens d'un cluster ont le même
         public bool open = true;                            // fermé = rangé dans la barre de tâches : objet désactivé, capture arrêtée, aucun calcul
 
         public float Width { get { return width; } }
@@ -82,7 +83,6 @@ namespace AR6DoF
             cursorT = MakeCursor();
             barRoot = new GameObject("Chrome").transform;
             barRoot.SetParent(transform, false);
-            moveT = MakeHandle("Deplacer", Ar6dofScreenHandle.Kind.Move, "");
             gearT = MakeHandle("Parametres", Ar6dofScreenHandle.Kind.Settings, "");
             gearH = gearT.GetComponent<Ar6dofScreenHandle>();
             Layout();
@@ -99,6 +99,11 @@ namespace AR6DoF
             chrome.resizeBegin = hit => BeginDrag(Ar6dofScreenHandle.Kind.Resize, hit, 0);
             chrome.resizeDrag = ray => Drag(ray);
             chrome.resizeEnd = EndDrag;
+            // barre de déplacement commune à tous les menus : bouton gauche = déplace le cluster, bouton droit = cet écran seul (il se décolle)
+            chrome.canMove = true;
+            chrome.moveBegin = (hit, btn) => BeginDrag(Ar6dofScreenHandle.Kind.Move, hit, btn);
+            chrome.moveDrag = ray => Drag(ray);
+            chrome.moveEnd = EndDrag;
             StartNative();
         }
 
@@ -119,11 +124,12 @@ namespace AR6DoF
         /// <summary>Poignées et curseur : couleurs, arrondi et transparence du style "Ecrans" ; curseur = couleur du rayon.</summary>
         void ApplyStyle()
         {
-            if (moveT == null) return;
+            if (gearT == null) return;
+            Layout();   // la taille des poignées suit « Taille des boutons de fenêtre »
             var st = Ar6dofSettings.StyleFor(Ar6dofElem.Screens);
             Color baseC = st.button; baseC.a = Mathf.Lerp(1f, st.alpha, 0.5f);
             Color hoverC = st.accent; hoverC.a = 1f;
-            var all = new List<Transform> { moveT, gearT };
+            var all = new List<Transform> { gearT };
             foreach (var t in all)
             {
                 var h = t.GetComponent<Ar6dofScreenHandle>();
@@ -228,22 +234,19 @@ namespace AR6DoF
             return g.transform;
         }
 
-        /// <summary>Dimensions des poignées en mètres (indépendantes de la taille de l'écran).</summary>
+        /// <summary>Taille de l'écran et de la roue des paramètres (même taille de boutons que le reste de l'interface).</summary>
         public void Layout()
         {
             float w = width, h = Height;
             quad.localScale = new Vector3(w, h, 1f);
-            float barW = Mathf.Clamp(w * 0.35f, 0.3f, 0.8f), barH = 0.045f;
-            float y = -h * 0.5f - 0.05f;
-            moveT.localPosition = new Vector3(0f, y, 0f);
-            moveT.localScale = new Vector3(barW, barH, 1f);
-            gearT.localPosition = new Vector3(barW * 0.5f + barH * 0.5f + 0.02f, y, 0f);
-            gearT.localScale = new Vector3(barH, barH, 1f);
-            if (handleShader != null)
-            {
-                int corner = Ar6dofSettings.StyleFor(Ar6dofElem.Screens).corner;
-                SetRounded(moveT, corner); SetRounded(gearT, corner);
-            }
+            if (gearT == null) return;
+            float gs = Ar6dofWindowChrome.ButtonSize * 0.9f;
+            // la roue est à gauche de la barre de déplacement, à la même hauteur ; le redimensionnement est à l'autre bout
+            float x = -(Ar6dofWindowChrome.MoveBarLength * 0.5f + Ar6dofWindowChrome.EdgeGap + gs * 0.5f);
+            float y = -h * 0.5f - Ar6dofWindowChrome.EdgeGap - Ar6dofWindowChrome.MoveBarThickness * 0.5f;
+            gearT.localPosition = new Vector3(x, y, 0f);
+            gearT.localScale = new Vector3(gs, gs, 1f);
+            if (handleShader != null) SetRounded(gearT, Mathf.Min(Ar6dofSettings.StyleFor(Ar6dofElem.Screens).corner, 10));
         }
 
         static void SetRounded(Transform t, int corner)
@@ -398,8 +401,9 @@ namespace AR6DoF
         public void OnPointerDown(Vector3 world, int button)
         {
             int x, y;
+            if (hwnd != 0) RefreshRect();   // la fenêtre a pu bouger depuis la dernière lecture : position exacte au moment du clic
             if (!Map(world, out x, out y)) return;
-            if (hwnd != 0) Ar6dofWindows.Raise(hwnd);   // la fenêtre passe au-dessus des autres pour que le clic tombe sur elle
+            if (hwnd != 0) Ar6dofWindows.Activate(hwnd, x, y);   // la fenêtre passe devant (et active) pour que le clic tombe sur elle
             Ar6dofWinInput.SetCursor(x, y);
             Ar6dofWinInput.Nudge();
             Ar6dofWinInput.MouseButton(button, true);

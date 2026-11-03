@@ -11,7 +11,7 @@ namespace AR6DoF
     /// </summary>
     public class Ar6dofKeyboard : MonoBehaviour
     {
-        public enum Kind { Char, Vk, Shift, Ctrl, Alt, Layout }
+        public enum Kind { Char, Vk, Shift, Ctrl, Alt, Settings, SetAzerty, SetQwerty, Numpad }
 
         public class KeyDef
         {
@@ -26,7 +26,8 @@ namespace AR6DoF
         public static System.Action<char> CharSink;
         public static System.Action<ushort> VkSink;
         public Ar6dofPassthrough passthrough;
-        public bool azerty = true;
+        /// <summary>AZERTY ou QWERTY : réglage enregistré (roue du clavier, ou Réglages > Style > Clavier).</summary>
+        bool Azerty { get { return Ar6dofSettings.Current.kbAzerty; } }
         public float keySize = 0.045f, gap = 0.006f;
         [Tooltip("Inclinaison du clavier vers toi (degrés)")]
         public float tiltDegrees = 25f;
@@ -51,8 +52,10 @@ namespace AR6DoF
         Font font;
         Shader shader;
         readonly List<Ar6dofKey> keys = new List<Ar6dofKey>();
-        readonly List<Ar6dofKeyboardHandle> handles = new List<Ar6dofKeyboardHandle>();
         bool roundedShader;
+        bool settingsOpen, builtAzerty;     // rangée de réglages au-dessus du clavier (roue)
+        Vector2 kbHalf = new Vector2(0.4f, 0.12f);   // demi-taille du clavier en mètres (pour les boutons de fenêtre)
+        Ar6dofWindowChrome chrome;
         // déplacer / redimensionner
         Ar6dofKeyboardHandle.Kind dragKind;
         float grabDist, startRadius, startScale;
@@ -122,7 +125,9 @@ namespace AR6DoF
         {
             var rows = new List<List<KeyDef>>();
             List<KeyDef> r;
-            if (azerty)
+            if (settingsOpen)
+                rows.Add(new List<KeyDef> { Mod("AZERTY", Kind.SetAzerty, 2.4f), Mod("QWERTY", Kind.SetQwerty, 2.4f), Mod(Ar6dofLoc.T("Pave num."), Kind.Numpad, 2.8f) });
+            if (Azerty)
             {
                 r = CharRow("²&é\"'(-è_çà)=", "³1234567890°+"); r.Add(Vk(Ar6dofLoc.T("Retour"), 0x08, 2f)); rows.Add(r);
                 r = new List<KeyDef> { Vk("Tab", 0x09, 1.5f) }; r.AddRange(CharRow("azertyuiop^$", "AZERTYUIOP¨£")); rows.Add(r);
@@ -142,7 +147,7 @@ namespace AR6DoF
                 new KeyDef { label = Ar6dofLoc.T("Espace"), ch = ' ', shiftCh = ' ', width = 5f, kind = Kind.Char },
                 Vk(Ar6dofLoc.T("Echap"), 0x1B, 1.3f), Vk(Ar6dofLoc.T("Suppr"), 0x2E, 1.3f), Vk("<", 0x25), Vk("^", 0x26), Vk("v", 0x28), Vk(">", 0x27),
                 Vk(Ar6dofLoc.T("PgPr"), 0x21, 1.2f), Vk(Ar6dofLoc.T("PgSv"), 0x22, 1.2f),
-                Mod(azerty ? "QWERTY" : "AZERTY", Kind.Layout, 1.8f)
+                Mod("", Kind.Settings, 1.4f)   // roue : disposition AZERTY / QWERTY, pavé numérique
             });
             return rows;
         }
@@ -172,7 +177,6 @@ namespace AR6DoF
         {
             if (keysRoot != null) Destroy(keysRoot.gameObject);
             keys.Clear();
-            handles.Clear();
             keysRoot = new GameObject("Keys").transform;
             keysRoot.SetParent(transform, false);
             keysRoot.localRotation = Quaternion.Euler(tiltDegrees, 0f, 0f);   // penché vers le haut, face à toi
@@ -180,6 +184,7 @@ namespace AR6DoF
 
             var rows = Layout();
             builtNumpad = Ar6dofSettings.Current.kbNumpad;
+            builtAzerty = Azerty;
             var pad = builtNumpad ? NumpadRows() : null;
             float pitch = keySize + gap;
             float top = (rows.Count - 1) * pitch * 0.5f;
@@ -206,7 +211,7 @@ namespace AR6DoF
                 for (int ri = 0; ri < pad.Count; ri++)
                 {
                     float x = originX + mainW + padGap;
-                    float y = top - ri * pitch;
+                    float y = top - (ri + rows.Count - pad.Count) * pitch;   // aligné sur les 5 dernières rangées (la rangée de réglages est au-dessus)
                     foreach (var d in pad[ri])
                     {
                         float w = d.width * keySize + (d.width - 1f) * gap;
@@ -215,52 +220,39 @@ namespace AR6DoF
                     }
                 }
             foreach (var k in keys) k.Refresh();
-            // poignées sous le clavier : barre = déplacer, coin = taille
-            float barY = -top - keySize * 0.5f - 0.032f;
-            AddHandle(Ar6dofKeyboardHandle.Kind.Move, 0f, barY, 0.30f, 0.024f);
-            AddHandle(Ar6dofKeyboardHandle.Kind.Resize, maxW * 0.5f - 0.032f, barY, 0.064f, 0.024f);
+            RefreshAll();
             keysRoot.gameObject.SetActive(visible);
+            // boutons de fenêtre communs à tous les menus : réduire, fermer, redimensionner (coin bas droit) et barre de déplacement
+            kbHalf = new Vector2(maxW * 0.5f, ((rows.Count - 1) * pitch + keySize) * 0.5f);
+            if (chrome != null) Destroy(chrome.gameObject);
+            var kr = keysRoot;
+            chrome = Ar6dofWindowChrome.Create("Clavier", kr, Ar6dofElem.Keyboard, () => kbHalf * kr.lossyScale.x, Stow, Stow);
+            chrome.canMove = true;
+            chrome.moveBegin = (hit, btn) => BeginDrag(Ar6dofKeyboardHandle.Kind.Move, hit);
+            chrome.moveDrag = ray => Drag(ray);
+            chrome.moveEnd = EndDrag;
+            chrome.resizeBegin = hit => BeginDrag(Ar6dofKeyboardHandle.Kind.Resize, hit);
+            chrome.resizeDrag = ray => Drag(ray);
+            chrome.resizeEnd = EndDrag;
         }
 
-        void AddHandle(Ar6dofKeyboardHandle.Kind kind, float cx, float cy, float w, float h)
+        /// <summary>Réduire / fermer : le clavier rentre dans la barre de tâches.</summary>
+        void Stow()
         {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            go.name = kind == Ar6dofKeyboardHandle.Kind.Move ? "Deplacer" : "Taille";
-            Destroy(go.GetComponent<MeshCollider>());
-            go.transform.SetParent(keysRoot, false);
-            go.transform.localPosition = new Vector3(cx, cy, 0f);
-            go.transform.localScale = new Vector3(w, h, 1f);
-            var bc = go.AddComponent<BoxCollider>();
-            bc.size = new Vector3(1f, 1.6f, 0.2f);   // zone de visée un peu plus haute que la barre
-            var rend = go.GetComponent<Renderer>();
-            rend.sharedMaterial = new Material(shader);
-            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            rend.receiveShadows = false;
-            if (roundedShader) Ar6dofTheme.SetRoundedSize(rend.sharedMaterial, w, h, Ar6dofSettings.StyleFor(Ar6dofElem.Keyboard).corner);
-            var hd = go.AddComponent<Ar6dofKeyboardHandle>();
-            hd.kind = kind;
-            hd.keyboard = this;
-            hd.rend = rend;
-            hd.Refresh();
-            handles.Add(hd);
+            if (Ar6dofDock.Instance != null) Ar6dofDock.Instance.StowKeyboard(); else SetVisible(false);
         }
 
         // ------------------------------------------------------------------ style
         void OnStyleChanged()
         {
             if (keysRoot == null) return;
-            if (Ar6dofSettings.Current.kbNumpad != builtNumpad) { Build(); return; }   // pavé numérique ajouté ou retiré
+            if (Ar6dofSettings.Current.kbNumpad != builtNumpad || Azerty != builtAzerty) { Build(); return; }   // pavé numérique ajouté ou retiré, ou disposition changée
             keysRoot.localScale = Vector3.one * Mathf.Clamp(Ar6dofSettings.Current.keyboardScale, 0.4f, 3f);
             int corner = Ar6dofSettings.StyleFor(Ar6dofElem.Keyboard).corner;
             foreach (var k in keys)
             {
                 if (roundedShader && k.quad != null) Ar6dofTheme.SetRoundedSize(k.quad.sharedMaterial, k.quad.transform.localScale.x, k.quad.transform.localScale.y, corner);
                 k.Refresh();
-            }
-            foreach (var h in handles)
-            {
-                if (roundedShader && h.rend != null) Ar6dofTheme.SetRoundedSize(h.rend.sharedMaterial, h.rend.transform.localScale.x, h.rend.transform.localScale.y, corner);
-                h.Refresh();
             }
         }
 
@@ -346,6 +338,25 @@ namespace AR6DoF
             key.quad = rend;
             key.pos = new Vector2(cx, cy);
             key.seed = UnityEngine.Random.value;
+            if (d.kind == Kind.Settings)
+            {   // roue crantée dessinée à la place du texte
+                var ig = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                ig.name = "Roue";
+                var imc = ig.GetComponent<MeshCollider>();
+                if (imc != null) Destroy(imc);
+                ig.transform.SetParent(keysRoot, false);
+                ig.transform.localPosition = new Vector3(cx, cy, -0.004f);
+                float isz = Mathf.Min(w, h) * 0.62f;
+                ig.transform.localScale = new Vector3(isz, isz, 1f);
+                var ish = Shader.Find("Sprites/Default");
+                var im = new Material(ish != null ? ish : shader);
+                im.mainTexture = Ar6dofIcons.Get("gear");
+                var ir = ig.GetComponent<Renderer>();
+                ir.sharedMaterial = im;
+                ir.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                ir.receiveShadows = false;
+                key.icon = ir;
+            }
             kbMinX = Mathf.Min(kbMinX, cx); kbMaxX = Mathf.Max(kbMaxX, cx);
             kbMinY = Mathf.Min(kbMinY, cy); kbMaxY = Mathf.Max(kbMaxY, cy);
             key.Refresh();
@@ -488,6 +499,10 @@ namespace AR6DoF
                 if (k.def.kind == Kind.Shift) k.active = shift;
                 else if (k.def.kind == Kind.Ctrl) k.active = ctrl;
                 else if (k.def.kind == Kind.Alt) k.active = alt;
+                else if (k.def.kind == Kind.Settings) k.active = settingsOpen;
+                else if (k.def.kind == Kind.SetAzerty) k.active = Azerty;
+                else if (k.def.kind == Kind.SetQwerty) k.active = !Azerty;
+                else if (k.def.kind == Kind.Numpad) k.active = Ar6dofSettings.Current.kbNumpad;
                 if (k.def.kind == Kind.Char && k.label != null) k.label.text = shift && !string.IsNullOrEmpty(k.def.shiftLabel) ? k.def.shiftLabel : k.def.label;
                 k.Refresh();
             }
@@ -507,6 +522,13 @@ namespace AR6DoF
             if (ctrl) Ar6dofWinInput.Key(0x11, false);
         }
 
+        void SetLayout(bool azerty)
+        {
+            Ar6dofSettings.Current.kbAzerty = azerty;
+            Ar6dofSettings.Save();      // le choix de disposition est gardé tout de suite
+            Ar6dofSettings.Notify();
+        }
+
         public void Press(KeyDef d)
         {
             NoteKeyPress(d);
@@ -515,7 +537,14 @@ namespace AR6DoF
                 case Kind.Shift: shift = !shift; RefreshAll(); return;
                 case Kind.Ctrl: ctrl = !ctrl; RefreshAll(); return;
                 case Kind.Alt: alt = !alt; RefreshAll(); return;
-                case Kind.Layout: azerty = !azerty; Build(); return;
+                case Kind.Settings: settingsOpen = !settingsOpen; Build(); return;
+                case Kind.SetAzerty: SetLayout(true); return;
+                case Kind.SetQwerty: SetLayout(false); return;
+                case Kind.Numpad:
+                    Ar6dofSettings.Current.kbNumpad = !Ar6dofSettings.Current.kbNumpad;
+                    Ar6dofSettings.Save();
+                    Ar6dofSettings.Notify();
+                    return;
                 case Kind.Vk:
                     if (VkSink != null) { VkSink(d.vk); shift = ctrl = alt = false; RefreshAll(); return; }
                     ModsDown();

@@ -54,12 +54,20 @@ namespace AR6DoF
         readonly List<Button> chromeCornerButtons = new List<Button>();
         readonly List<Button> fpsBtns = new List<Button>();
         RectTransform separateBox;
+        readonly List<Button> kbLayoutBtns = new List<Button>();
         readonly List<Button> kbModeBtns = new List<Button>();
         readonly List<Button> kbDirBtns = new List<Button>();
         readonly List<Button> kbPalBtns = new List<Button>();
         readonly List<Texture2D> kbPalTex = new List<Texture2D>();
         readonly bool[] kbPalDrawn = new bool[16];
-        Text scopeLbl, texNameLbl;
+        Text scopeLbl, texNameLbl, palCurLbl;
+        readonly List<Button> palBtns = new List<Button>();
+        readonly List<Button> texModeBtns = new List<Button>();
+        static readonly int[] TexModeOrder = { 0, 4, 3, 1, 2 };                       // ordre d'affichage -> valeur de texMode
+        static readonly string[] TexModeNames = { "Etirer", "Remplir", "Centree", "Repeter", "Miroir" };
+        Sec customSec;
+        bool styleBuilt;
+        string newStyleName = "";
 
         /// <summary>Un groupe de réglages de l'onglet Style : posé sous le précédent, visible selon la catégorie et l'élément choisis.</summary>
         class Sec
@@ -123,9 +131,9 @@ namespace AR6DoF
             dock = d;
             canvas = Ar6dofVrUi.NewCanvas("Reglages VR", new Vector2(W, H));
             // bandeaux fixes (haut et bas) : posés en premier, donc dessinés derrière tout le reste
-            Band(new Vector2(0f, 408f), new Vector2(W - 24f, 116f));
-            Band(new Vector2(0f, -408f), new Vector2(W - 24f, 116f));
-            Ar6dofVrUi.Label(canvas.transform, "Reglages", new Vector2(0f, 436f), new Vector2(CW, 50f), 34);
+            Band(new Vector2(0f, 400f), new Vector2(W - 24f, 116f));   // 12 px de marge partout : le rayon du bandeau = celui du panneau - 12 (concentrique)
+            Band(new Vector2(0f, -400f), new Vector2(W - 24f, 116f));
+            Ar6dofVrUi.Label(canvas.transform, "Reglages", new Vector2(0f, 433f), new Vector2(CW, 50f), 34);
             for (int i = 0; i < TabNames.Length; i++)
             {
                 int idx = i;
@@ -302,6 +310,7 @@ namespace AR6DoF
         public void ShowTab(int i)
         {
             curTab = i;
+            if (i == TabStyle && styleSub == 1) Ar6dofTheme.RescanPictures();   // la liste d'images n'est relue qu'en entrant ici
             for (int k = 0; k < pages.Count; k++)
             {
                 views[k].SetActive(k == i);
@@ -446,9 +455,9 @@ namespace AR6DoF
         // ---- bas du panneau : Enregistrer / Annuler / Par defaut ----
         void BuildBottom()
         {
-            float by = -425f;
+            float by = -420f;
             Text t;
-            statusLbl = Ar6dofVrUi.Label(canvas.transform, "", new Vector2(0f, -372f), new Vector2(CW, 28f), 19);
+            statusLbl = Ar6dofVrUi.Label(canvas.transform, "", new Vector2(0f, -364f), new Vector2(CW, 28f), 19);
             saveBtn = Ar6dofVrUi.MakeButton(canvas.transform, "Enregistrer", new Vector2(-224f, by), new Vector2(208f, 56f), OnSave, out t, 22);
             Ar6dofVrUi.MakeButton(canvas.transform, "Annuler", new Vector2(0f, by), new Vector2(208f, 56f), OnCancel, out t, 22);
             Ar6dofVrUi.MakeButton(canvas.transform, "Par defaut", new Vector2(224f, by), new Vector2(208f, 56f), OnReset, out resetLbl, 22);
@@ -637,17 +646,16 @@ namespace AR6DoF
             y = Next(ref c, 48f, 12f);
             Toggle(page, -164f, y, "Coller les ecrans aux bords", () => Ar6dofScreens.Instance != null && Ar6dofScreens.Instance.snapEnabled,
                    v => { if (Ar6dofScreens.Instance != null) { Ar6dofScreens.Instance.snapEnabled = v; Ar6dofScreens.Instance.Save(); } });
-            Text hinge = ButtonText(page, 164f, y, 320f, "", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.CycleHinge(); }, 20);
-            refreshers.Add(() => hinge.text = Ar6dofLoc.F("Courbure : {0} deg", Ar6dofScreens.Instance != null ? Mathf.RoundToInt(Ar6dofScreens.Instance.hingeDegrees) : 0));
-            y = Next(ref c, 48f, 12f);
-            Btn(page, 0f, y, 440f, "Recentrer les ecrans devant moi", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.RecenterAll(); }, 22);
+            Btn(page, 164f, y, 320f, "Recentrer les ecrans", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.RecenterAll(); }, 20);
+            SliderRow(page, ref c, "Angle de tous les clusters (deg)", 0f, 60f,
+                      () => Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.hingeDegrees : 25f,
+                      v => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.SetAllHinge(v); }, "0");
             CloseCard(page, top, ref c);
 
-            top = OpenCard(page, ref c, "Ecrans actifs");
-            InfoLine(page, Next(ref c, 28f, 10f), TabScreens, () => Ar6dofLoc.F("Ecrans actifs : {0}", Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.panels.Count : 0), 20);
+            top = OpenCard(page, ref c, "Ecrans");
+            InfoLine(page, Next(ref c, 28f, 10f), TabScreens, () => Ar6dofLoc.F("Ecrans : {0} / {1}  (clusters de 3 max)", Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.panels.Count : 0, Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.MaxAllowed : 12), 20);
             y = Next(ref c, 48f, 12f);
             Btn(page, 0f, y, 440f, "+ Ajouter un ecran", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.RequestAddScreen(); }, 22);
-            Para(page, ref c, "La roue sous un ecran ouvre ses reglages (source, images/s...) ; clique-la encore pour les fermer. Le coin bas droit redimensionne, les boutons du coin reduisent ou ferment. La resolution est celle du moniteur Windows capture.", 140f);
             CloseCard(page, top, ref c);
             Finish(TabScreens, c);
         }
@@ -885,6 +893,7 @@ namespace AR6DoF
         void SelectSub(int k)
         {
             styleSub = k;
+            if (k == 1) Ar6dofTheme.RescanPictures();
             scrolls[TabStyle].SetOffset(0f);
             RefreshAll();
         }
@@ -938,6 +947,7 @@ namespace AR6DoF
             BuildWindowSecs(page);
             BuildKeyboardSecs(page);
             refreshers.Add(RefreshStyleUi);
+            styleBuilt = true;
         }
 
         // ---- Couleurs : d'abord les palettes toutes faites (le plus simple), puis la personnalisation fine en dessous
@@ -947,9 +957,11 @@ namespace AR6DoF
             {
                 float c = 0f;
                 float top = OpenCard(sp.rt, ref c, null);
-                float hy = Next(ref c, 40f, 14f);
+                float hy = Next(ref c, 40f, 6f);
                 Heading(sp.rt, hy, "Palettes");
                 Btn(sp.rt, 204f, hy, 240f, "Palette aleatoire", RandomPalette, 19, 40f);
+                float ly = Next(ref c, 30f, 10f);
+                palCurLbl = Ar6dofVrUi.Label(sp.rt, "", new Vector2(0f, ly), new Vector2(CW, 28f), 20, TextAnchor.MiddleLeft).MakeAccent();
                 float y = 0f;
                 for (int i = 0; i < PalNames.Length; i++)
                 {
@@ -957,6 +969,7 @@ namespace AR6DoF
                     if (i % 3 == 0) y = Next(ref c, 64f, 10f);
                     float x = Col3(i % 3);
                     var b = Btn(sp.rt, x, y, 208f, PalNames[i], () => ApplyPalette(pi), 20, 64f);
+                    palBtns.Add(b);
                     // nom en haut à gauche, bande des 4 couleurs (fond, boutons, accent, texte) dessous : jamais l'un sur l'autre
                     var lbl = b.GetComponentInChildren<Text>();
                     Ar6dofVrUi.PlaceLabel(lbl, new Vector2(0f, 14f), new Vector2(176f, 28f), TextAnchor.MiddleLeft);
@@ -972,6 +985,10 @@ namespace AR6DoF
                 CloseCard(sp.rt, top, ref c);
                 sp.h = -c;
             }
+
+            // ---- Mes styles : juste sous les palettes ; créer, nommer, réappliquer, supprimer
+            customSec = NewSec(page, "MesStyles", 0, null);
+            RebuildCustomSec();
 
             var cs = NewSec(page, "Personnaliser", 0, null);
             {
@@ -1022,18 +1039,44 @@ namespace AR6DoF
                 CloseCard(sh.rt, top, ref c);
                 sh.h = -c;
             }
-            var st = NewSec(page, "Texture", 1, () => selElem == Ar6dofElem.Global || selElem == Ar6dofElem.Dock || selElem == Ar6dofElem.Menus);
+            Func<bool> texElem = () => selElem == Ar6dofElem.Global || selElem == Ar6dofElem.Dock || selElem == Ar6dofElem.Menus;
+            var st = NewSec(page, "Texture", 1, texElem);
             {
                 float c = 0f;
-                float top = OpenCard(st.rt, ref c, "Texture de fond");
+                float top = OpenCard(st.rt, ref c, "Image de fond");
                 float y = Next(ref c, 48f, 10f);
                 Btn(st.rt, -289f, y, 70f, "<", () => CycleTexture(-1));
                 Btn(st.rt, 289f, y, 70f, ">", () => CycleTexture(1));
                 texNameLbl = Ar6dofVrUi.Label(st.rt, "", new Vector2(0f, y), new Vector2(440f, 40f), 24);
-                SliderRow(st.rt, ref c, "Intensite de la texture", 0f, 0.6f, () => CurStyle(selElem).texAlpha, v => { CurStyle(selElem).texAlpha = v; Touch(); }, "0.00");
-                Btn(st.rt, 0f, Next(ref c, 48f, 12f), 440f, "Ouvrir le dossier pictures (tes images)", () => Ar6dofTheme.OpenPicturesFolder(), 20);
+                y = Next(ref c, 48f, 12f);
+                Btn(st.rt, -164f, y, 320f, "Ouvrir le dossier d'images", () => Ar6dofTheme.OpenPicturesFolder(), 20);
+                Btn(st.rt, 164f, y, 320f, "Actualiser la liste", () => { Ar6dofTheme.RescanPictures(); Touch(); }, 20);
                 CloseCard(st.rt, top, ref c);
                 st.h = -c;
+            }
+            Func<bool> hasTex = () => texElem() && !string.IsNullOrEmpty(CurStyle(selElem).texture);
+            var sm = NewSec(page, "TexReglages", 1, hasTex);
+            {
+                float c = 0f;
+                float top = OpenCard(sm.rt, ref c, null);
+                SliderRow(sm.rt, ref c, "Opacite de l'image", 0.02f, 1f, () => CurStyle(selElem).texAlpha, v => { CurStyle(selElem).texAlpha = v; Touch(); }, "0.00");
+                float y = 0f;
+                for (int i = 0; i < TexModeOrder.Length; i++)
+                {
+                    int mode = TexModeOrder[i];
+                    if (i % 3 == 0) y = Next(ref c, 48f, 10f);
+                    texModeBtns.Add(Btn(sm.rt, Col3(i % 3), y, 208f, TexModeNames[i], () => { CurStyle(selElem).texMode = mode; Touch(); }, 20));
+                }
+                CloseCard(sm.rt, top, ref c);
+                sm.h = -c;
+            }
+            var ss = NewSec(page, "TexEchelle", 1, () => hasTex() && CurStyle(selElem).texMode >= 1 && CurStyle(selElem).texMode <= 3);
+            {
+                float c = 0f;
+                float top = OpenCard(ss.rt, ref c, null);
+                SliderRow(ss.rt, ref c, "Echelle de l'image", 0.25f, 4f, () => CurStyle(selElem).texScale, v => { CurStyle(selElem).texScale = v; Touch(); }, "0.00");
+                CloseCard(ss.rt, top, ref c);
+                ss.h = -c;
             }
             var sl = NewSec(page, "Rayon", 1, () => selElem == Ar6dofElem.Laser);
             {
@@ -1092,13 +1135,23 @@ namespace AR6DoF
             i = (i + dir + ids.Count) % ids.Count;
             st.texture = ids[i];
             if (st.texture.Length > 0 && st.texAlpha < 0.05f) st.texAlpha = 0.18f;
+            // mode de départ logique : motif d'usine répété, dégradé étiré, petite image répétée, grande image recadrée
+            st.texScale = 1f;
+            if (st.texture == "gradient") st.texMode = 0;
+            else if (st.texture.StartsWith("file:"))
+            {
+                var sz = Ar6dofTheme.TextureSize(st.texture);
+                st.texMode = (sz.x > 0 && sz.x <= 256 && sz.y <= 256) ? 1 : 4;
+            }
+            else st.texMode = 1;
             Touch();
         }
 
         // 12 palettes : nom, fond, boutons, accent, texte
-        static readonly string[] PalNames = { "Minuit", "Rubis", "Emeraude", "Amethyste", "Porcelaine", "Abysse", "Ambre", "Sakura", "Lagon", "Imperial", "Graphite", "Eclipse" };
+        static readonly string[] PalNames = { "Eclipse", "Minuit", "Rubis", "Emeraude", "Amethyste", "Porcelaine", "Abysse", "Ambre", "Sakura", "Lagon", "Imperial", "Graphite" };
         static readonly string[,] PalCols =
         {
+            { "#000000", "#262626", "#FFE600", "#FFFFFF" },
             { "#14171C", "#384252", "#40D9FF", "#FFFFFF" },
             { "#240D0F", "#5C2429", "#FF4D4D", "#FFFFFF" },
             { "#0D1F12", "#245233", "#59FF73", "#FFFFFF" },
@@ -1110,7 +1163,6 @@ namespace AR6DoF
             { "#0A211F", "#1D5C55", "#4DFFD2", "#FFFFFF" },
             { "#1C1608", "#524215", "#FFD23F", "#FFFFFF" },
             { "#1B1B1B", "#4A4A4A", "#B0B0B0", "#FFFFFF" },
-            { "#000000", "#262626", "#FFE600", "#FFFFFF" },
         };
 
         static Color Hex(string h)
@@ -1119,6 +1171,96 @@ namespace AR6DoF
             if (!ColorUtility.TryParseHtmlString(h, out c)) c = Color.magenta;
             c.a = 1f;
             return c;
+        }
+
+        /// <summary>Le nom du style actuel : une palette d'usine ou un de tes styles s'il a exactement les mêmes quatre couleurs, sinon null.</summary>
+        string CurrentStyleName()
+        {
+            var st = CurStyle(selElem);
+            for (int i = 0; i < PalNames.Length; i++)
+                if (st.SameColors(Hex(PalCols[i, 0]), Hex(PalCols[i, 1]), Hex(PalCols[i, 2]), Hex(PalCols[i, 3]))) return PalNames[i];
+            foreach (var cs in D.customStyles)
+                if (st.SameColors(cs.style.bg, cs.style.button, cs.style.accent, cs.style.text)) return cs.name;
+            return null;
+        }
+
+        /// <summary>(Re)construit le cadre « Mes styles » : un bouton par style enregistré (avec sa croix), puis le nom et le bouton d'enregistrement.</summary>
+        void RebuildCustomSec()
+        {
+            var rt = customSec.rt;
+            for (int i = rt.childCount - 1; i >= 0; i--) UnityEngine.Object.Destroy(rt.GetChild(i).gameObject);
+            customBtns.Clear();
+            var list = D.customStyles;
+            float c = 0f;
+            float top = OpenCard(rt, ref c, "Mes styles");
+            if (list.Count == 0) Para(rt, ref c, "Regle tes couleurs, donne un nom, puis enregistre ton style ici.", 30f, 19);
+            float y = 0f;
+            for (int i = 0; i < list.Count; i++)
+            {
+                int si = i;
+                var cst = list[i];
+                if (i % 2 == 0) y = Next(ref c, 64f, 10f);
+                float xc = (i % 2 == 0) ? -164f : 164f;
+                var b = Btn(rt, xc - 34f, y, 252f, cst.name, () => ApplyCustom(si), 20, 64f);
+                customBtns.Add(b);
+                Ar6dofVrUi.PlaceLabel(b.GetComponentInChildren<Text>(), new Vector2(0f, 14f), new Vector2(222f, 28f), TextAnchor.MiddleLeft);
+                Color[] cols = { cst.style.bg, cst.style.button, cst.style.accent, cst.style.text };
+                for (int k = 0; k < 4; k++)
+                {
+                    var sw = Ar6dofVrUi.Rect(b.transform, "Couleur" + k, new Vector2(-84f + 56f * k, -17f), new Vector2(50f, 14f));
+                    var im = sw.gameObject.AddComponent<Image>();
+                    Color cc = cols[k]; cc.a = 1f;
+                    im.color = cc;
+                    im.raycastTarget = false;
+                    Ar6dofTheme.SetRounded(im, 5);
+                }
+                var del = Btn(rt, xc + 130f, y, 60f, "X", () => DeleteCustom(si), 20, 64f);
+                var dt = del.gameObject.AddComponent<Ar6dofVrTooltip>();
+                dt.text = () => Ar6dofLoc.T("Supprimer ce style");
+            }
+            float ry = Next(ref c, 50f, 12f);
+            Ar6dofVrTextField.Make(rt, new Vector2(-124f, ry), new Vector2(400f, 50f), newStyleName, Ar6dofLoc.T("Nom de ton style"),
+                t => newStyleName = t, t => newStyleName = t, 22);
+            Btn(rt, 206f, ry, 236f, "Enregistrer ce style", SaveCustom, 20, 50f);
+            CloseCard(rt, top, ref c);
+            customSec.h = -c;
+            if (styleBuilt) RefreshStyleUi();
+        }
+
+        readonly List<Button> customBtns = new List<Button>();
+
+        void SaveCustom()
+        {
+            string n = (newStyleName ?? "").Trim();
+            if (n.Length == 0) n = Ar6dofLoc.F("Mon style {0}", D.customStyles.Count + 1);
+            if (n.Length > 22) n = n.Substring(0, 22);
+            int ex = D.customStyles.FindIndex(x => x.name == n);
+            var cs = new Ar6dofCustomStyle { name = n, style = CurStyle(selElem).Clone() };
+            if (ex >= 0) D.customStyles[ex] = cs;
+            else
+            {
+                if (D.customStyles.Count >= 12) { Say("12 styles maximum : supprime-en un"); return; }
+                D.customStyles.Add(cs);
+            }
+            newStyleName = "";
+            Touch();
+            RebuildCustomSec();
+            Say("Style enregistre dans Mes styles (pense a Enregistrer)");
+        }
+
+        void ApplyCustom(int i)
+        {
+            if (i < 0 || i >= D.customStyles.Count) return;
+            CurStyle(selElem).CopyLookFrom(D.customStyles[i].style);
+            Touch();
+        }
+
+        void DeleteCustom(int i)
+        {
+            if (i < 0 || i >= D.customStyles.Count) return;
+            D.customStyles.RemoveAt(i);
+            Touch();
+            RebuildCustomSec();
         }
 
         void ApplyPalette(int p)
@@ -1180,6 +1322,9 @@ namespace AR6DoF
             {
                 float c = 0f;
                 float top = OpenCard(a.rt, ref c, null);
+                float ly = Next(ref c, 48f, 12f);
+                kbLayoutBtns.Add(Btn(a.rt, -164f, ly, 320f, "AZERTY", () => { D.kbAzerty = true; Touch(); }, 22));
+                kbLayoutBtns.Add(Btn(a.rt, 164f, ly, 320f, "QWERTY", () => { D.kbAzerty = false; Touch(); }, 22));
                 Toggle(a.rt, 0f, Next(ref c, 48f, 12f), "Pave numerique", () => D.kbNumpad, v => { D.kbNumpad = v; Touch(); }, 340f);
                 CloseCard(a.rt, top, ref c);
                 a.h = -c;
@@ -1368,7 +1513,28 @@ namespace AR6DoF
             separateBox.gameObject.SetActive(selElem != Ar6dofElem.Global);
             for (int i = 0; i < chromeStyleButtons.Count; i++) Ar6dofTheme.SetSelected(chromeStyleButtons[i], Ar6dofSettings.Current.chromeStyle == i);
             for (int i = 0; i < chromeCornerButtons.Count; i++) Ar6dofTheme.SetSelected(chromeCornerButtons[i], Ar6dofSettings.Current.chromeCorner == i);
-            if (texNameLbl != null) texNameLbl.text = Ar6dofTheme.TextureLabel(CurStyle(selElem).texture ?? "");
+            if (texNameLbl != null)
+            {
+                var ids = Ar6dofTheme.TextureIds();
+                string cur = CurStyle(selElem).texture ?? "";
+                texNameLbl.text = Ar6dofTheme.TextureLabel(cur) + "   (" + (Mathf.Max(0, ids.IndexOf(cur)) + 1) + "/" + ids.Count + ")";
+            }
+            for (int i = 0; i < kbLayoutBtns.Count; i++) Ar6dofTheme.SetSelected(kbLayoutBtns[i], D.kbAzerty == (i == 0));
+            for (int i = 0; i < texModeBtns.Count; i++) Ar6dofTheme.SetSelected(texModeBtns[i], CurStyle(selElem).texMode == TexModeOrder[i]);
+            // style actuel : la palette ou ton style qui a les mêmes couleurs est marqué, son nom est écrit au-dessus
+            var cst = CurStyle(selElem);
+            string curName = CurrentStyleName();
+            if (palCurLbl != null)
+            {
+                palCurLbl.text = curName != null ? Ar6dofLoc.F("Style actuel : {0}", curName) : Ar6dofLoc.T("Style actuel : personnalise");
+            }
+            for (int i = 0; i < palBtns.Count; i++)
+                Ar6dofTheme.SetSelected(palBtns[i], cst.SameColors(Hex(PalCols[i, 0]), Hex(PalCols[i, 1]), Hex(PalCols[i, 2]), Hex(PalCols[i, 3])));
+            for (int i = 0; i < customBtns.Count && i < D.customStyles.Count; i++)
+            {
+                var ss0 = D.customStyles[i].style;
+                Ar6dofTheme.SetSelected(customBtns[i], cst.SameColors(ss0.bg, ss0.button, ss0.accent, ss0.text));
+            }
             LayoutStyle();
         }
 

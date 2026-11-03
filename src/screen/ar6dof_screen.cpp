@@ -45,7 +45,7 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
-constexpr int kSlots = 4;
+constexpr int kSlots = 12;   // 12 écrans virtuels au maximum (4 clusters de 3)
 
 struct MonInfo {
   UINT adapter, output;
@@ -370,4 +370,5 @@ A6S_API int A6S_GetWidth(int slot) { return (slot >= 0 && slot < kSlots) ? g_slo
 A6S_API int A6S_GetHeight(int slot) { return (slot >= 0 && slot < kSlots) ? g_slots[slot].h.load() : 0; }
 A6S_API int A6S_GetStatus(int slot) { return (slot >= 0 && slot < kSlots) ? g_slots[slot].status.load() : 0; }
 A6S_API long long A6S_GetFrames(int slot) { return (slot >= 0 && slot < kSlots) ? (long long)g_slots[slot].frames.load() : 0; }
+A6S_API int A6S_SlotCount() { return kSlots; }
 A6S_API void* A6S_GetRenderEventFunc() { return reinterpret_cast<void*>(&OnRender); }

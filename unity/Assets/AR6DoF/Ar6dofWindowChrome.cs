@@ -31,6 +31,14 @@ namespace AR6DoF
             return Mathf.Sqrt(dx * dx + dy * dy);
         }
 
+        /// <summary>Distance signée à un rectangle arrondi (négative dedans).</summary>
+        static float RRect(float px, float py, float cx, float cy, float hw, float hh, float r)
+        {
+            float qx = Mathf.Abs(px - cx) - (hw - r), qy = Mathf.Abs(py - cy) - (hh - r);
+            float ox = Mathf.Max(qx, 0f), oy = Mathf.Max(qy, 0f);
+            return Mathf.Sqrt(ox * ox + oy * oy) + Mathf.Min(Mathf.Max(qx, qy), 0f) - r;
+        }
+
         static Texture2D Draw(string name)
         {
             const int N = 64;
@@ -52,13 +60,22 @@ namespace AR6DoF
                             break;
                         case "grip":
                         {
-                            // trois points alignés : la poignée « prends-moi ici pour déplacer »
-                            float[] gx = { 14f, 32f, 50f };
-                            for (int k = 0; k < gx.Length; k++)
-                            {
-                                float dx = fx - gx[k], dy = fy - 32f;
-                                a = Mathf.Max(a, Mathf.Clamp01(5.5f - Mathf.Sqrt(dx * dx + dy * dy)));
-                            }
+                            // une simple ligne arrondie : la poignée « prends-moi ici pour déplacer »
+                            a = Mathf.Clamp01(5f - SegDist(fx, fy, 10f, 32f, 54f, 32f));
+                            break;
+                        }
+                        case "monitor":
+                        {
+                            // écran (contour) sur son pied : le chiffre de l'écran se pose à l'intérieur
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 38f, 27f, 19f, 7f)));
+                            if (fx > 28f && fx < 36f && fy > 12f && fy < 20f) a = 1f;
+                            if (fx > 18f && fx < 46f && fy > 8f && fy < 12.5f) a = 1f;
+                            break;
+                        }
+                        case "window":
+                        {
+                            // fenêtre d'application : contour avec sa barre de titre
+                            a = Mathf.Max(Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 32f, 27f, 24f, 7f))), Mathf.Clamp01(2.6f - SegDist(fx, fy, 6f, 45f, 58f, 45f)));
                             break;
                         }
                         case "resize":
@@ -124,7 +141,7 @@ namespace AR6DoF
             pressed = true;
             Refresh();
             if (kind == Kind.Resize) chrome.ResizeBegin(world);
-            else if (kind == Kind.Move) chrome.MoveBegin(world);
+            else if (kind == Kind.Move) chrome.MoveBegin(world, button);
         }
 
         public void OnPointerUp(Vector3 world, int button)
@@ -133,7 +150,7 @@ namespace AR6DoF
             pressed = false;
             Refresh();
             if (kind == Kind.Resize) { if (was) chrome.ResizeEnd(); return; }
-            if (kind == Kind.Move) return;
+            if (kind == Kind.Move) { if (was) chrome.MoveEnd(); return; }
             if (was && hover) chrome.Click(kind);   // clic = appuyé ET relâché sur le bouton
         }
 
@@ -159,6 +176,9 @@ namespace AR6DoF
         public Action<Vector3> resizeBegin;            // vides : redimensionnement par défaut = échelle de 'target' (menus)
         public Action<Ray> resizeDrag;
         public Action resizeEnd;
+        public Action<Vector3, int> moveBegin;         // vides : déplacement par défaut = le menu suit le laser
+        public Action<Ray> moveDrag;
+        public Action moveEnd;
 
         /// <summary>Vrai pour les menus (Canvas) : une barre de déplacement apparaît sous la fenêtre. Les écrans virtuels ont déjà la leur.</summary>
         public bool canMove;
@@ -167,6 +187,11 @@ namespace AR6DoF
         const float MoveLen = 4.2f, MoveThick = 0.7f;   // barre de déplacement : en multiples de S
         /// <summary>Taille d'un bouton en mètres : 4,5 cm x le réglage global "Taille des boutons de fenêtre".</summary>
         static float S { get { return 0.045f * Mathf.Clamp(Ar6dofSettings.Current.chromeScale, 0.5f, 3f); } }
+        /// <summary>Taille d'un bouton de fenêtre en mètres, et dimensions de la barre de déplacement (pour aligner d'autres poignées).</summary>
+        public static float ButtonSize { get { return S; } }
+        public static float MoveBarLength { get { return S * MoveLen; } }
+        public static float MoveBarThickness { get { return S * MoveThick; } }
+        public static float EdgeGap { get { return Gap; } }
         float lastS = -1f;
         Ar6dofChromeButton bMin, bClose, bResize, bMove;
         Ar6dofPassthrough pt;
@@ -285,7 +310,7 @@ namespace AR6DoF
                 foreach (var b in new[] { bMin, bClose, bResize }) b.transform.localScale = new Vector3(sc, sc, 1f);
                 bMove.transform.localScale = new Vector3(sc * MoveLen, sc * MoveThick, 1f);
                 var ic = bMove.icon != null ? bMove.icon.transform : null;
-                if (ic != null) ic.localScale = new Vector3(0.62f * MoveThick / MoveLen, 0.62f, 1f);   // l'icône reste carrée malgré l'étirement de la barre
+                if (ic != null) ic.localScale = new Vector3(0.8f, 0.62f, 1f);   // une simple ligne qui occupe presque toute la barre
                 dirty = true;
             }
             if (dirty) { dirty = false; ApplyShape(); }
@@ -351,14 +376,18 @@ namespace AR6DoF
         public void ResizeEnd() { if (resizeEnd != null) resizeEnd(); }
 
         // ---- déplacement du menu : le menu suit le laser en gardant la distance et en restant de face, à la verticale
-        public void MoveBegin(Vector3 hit)
+        public void MoveEnd() { if (moveEnd != null) moveEnd(); }
+
+        public void MoveBegin(Vector3 hit, int button = 0)
         {
+            if (moveBegin != null) { moveBegin(hit, button); return; }
             grabDist = Vector3.Distance(Ar6dofPointer.LastRay.origin, hit);
             grabOffset = target.position - hit;
         }
 
         public void MoveDrag(Ray ray)
         {
+            if (moveDrag != null) { moveDrag(ray); return; }
             if (target == null) return;
             if (pt == null) pt = FindFirstObjectByType<Ar6dofPassthrough>();
             Transform head = pt != null ? pt.HeadView : null;
