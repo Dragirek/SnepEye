@@ -146,8 +146,7 @@ namespace AR6DoF
                 Mod("Ctrl", Kind.Ctrl, 1.4f), Mod("Alt", Kind.Alt, 1.2f),
                 new KeyDef { label = Ar6dofLoc.T("Espace"), ch = ' ', shiftCh = ' ', width = 5f, kind = Kind.Char },
                 Vk(Ar6dofLoc.T("Echap"), 0x1B, 1.3f), Vk(Ar6dofLoc.T("Suppr"), 0x2E, 1.3f), Vk("<", 0x25), Vk("^", 0x26), Vk("v", 0x28), Vk(">", 0x27),
-                Vk(Ar6dofLoc.T("PgPr"), 0x21, 1.2f), Vk(Ar6dofLoc.T("PgSv"), 0x22, 1.2f),
-                Mod("", Kind.Settings, 1.4f)   // roue : disposition AZERTY / QWERTY, pavé numérique
+                Vk(Ar6dofLoc.T("PgPr"), 0x21, 1.2f), Vk(Ar6dofLoc.T("PgSv"), 0x22, 1.2f)
             });
             return rows;
         }
@@ -228,6 +227,8 @@ namespace AR6DoF
             var kr = keysRoot;
             chrome = Ar6dofWindowChrome.Create("Clavier", kr, Ar6dofElem.Keyboard, () => kbHalf * kr.lossyScale.x, Stow, Stow);
             chrome.canMove = true;
+            chrome.onSettings = () => { settingsOpen = !settingsOpen; Build(); };   // roue à droite de la barre de déplacement, comme sur toutes les fenêtres : disposition, pavé numérique
+            chrome.settingsOn = () => settingsOpen;
             chrome.moveBegin = (hit, btn) => BeginDrag(Ar6dofKeyboardHandle.Kind.Move, hit);
             chrome.moveDrag = ray => Drag(ray);
             chrome.moveEnd = EndDrag;
@@ -425,6 +426,7 @@ namespace AR6DoF
             else rippleCount = 0;
             foreach (var k in keys)
             {
+                if (k.IsSetting) { if (k.animAmount > 0f) { k.animAmount = 0f; k.flash = 0f; k.Refresh(); } continue; }   // touches de réglages : jamais animées
                 float u = (k.pos.x - kbMinX) / w, v = (k.pos.y - kbMinY) / h;   // 0..1 sur le clavier
                 float amount = 1f;
                 Color col;

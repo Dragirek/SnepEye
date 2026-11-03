@@ -34,8 +34,7 @@ namespace AR6DoF
         Material screenMat;
         Transform quad;
         Renderer quadRenderer;
-        Transform barRoot;
-        Transform moveT, gearT;
+        Transform moveT;
         Font font;
         int rectL, rectT, rectR, rectB;
         bool haveRect;
@@ -81,10 +80,6 @@ namespace AR6DoF
             quadRenderer.receiveShadows = false;
 
             cursorT = MakeCursor();
-            barRoot = new GameObject("Chrome").transform;
-            barRoot.SetParent(transform, false);
-            gearT = MakeHandle("Parametres", Ar6dofScreenHandle.Kind.Settings, "");
-            gearH = gearT.GetComponent<Ar6dofScreenHandle>();
             Layout();
             ApplyStyle();
             Ar6dofSettings.Changed += ApplyStyle;
@@ -101,6 +96,8 @@ namespace AR6DoF
             chrome.resizeEnd = EndDrag;
             // barre de déplacement commune à tous les menus : bouton gauche = déplace le cluster, bouton droit = cet écran seul (il se décolle)
             chrome.canMove = true;
+            chrome.onSettings = ToggleSettings;                          // roue à droite de la barre de déplacement, comme sur toutes les fenêtres
+            chrome.settingsOn = () => owner != null && owner.SettingsOpenFor(this);
             chrome.moveBegin = (hit, btn) => BeginDrag(Ar6dofScreenHandle.Kind.Move, hit, btn);
             chrome.moveDrag = ray => Drag(ray);
             chrome.moveEnd = EndDrag;
@@ -115,32 +112,13 @@ namespace AR6DoF
         }
 
         Material cursorCenterMat;
-        Ar6dofScreenHandle gearH;
-        Renderer gearIcon;
-        bool gearOn;
         Ar6dofWindowChrome chrome;
-        Shader handleShader;
 
         /// <summary>Poignées et curseur : couleurs, arrondi et transparence du style "Ecrans" ; curseur = couleur du rayon.</summary>
         void ApplyStyle()
         {
-            if (gearT == null) return;
-            Layout();   // la taille des poignées suit « Taille des boutons de fenêtre »
-            var st = Ar6dofSettings.StyleFor(Ar6dofElem.Screens);
-            Color baseC = st.button; baseC.a = Mathf.Lerp(1f, st.alpha, 0.5f);
-            Color hoverC = st.accent; hoverC.a = 1f;
-            var all = new List<Transform> { gearT };
-            foreach (var t in all)
-            {
-                var h = t.GetComponent<Ar6dofScreenHandle>();
-                if (h == null) continue;
-                h.baseColor = baseC;
-                h.hoverColor = hoverC;
-                h.Refresh();
-                var rend = t.GetComponent<Renderer>();
-                if (handleShader != null && rend != null) Ar6dofTheme.SetRoundedSize(rend.sharedMaterial, t.localScale.x, t.localScale.y, st.corner);
-            }
-            if (gearIcon != null) gearIcon.sharedMaterial.color = st.text;
+            if (quad == null) return;
+            Layout();
             if (cursorCenterMat != null)
             {
                 Color lc = Ar6dofSettings.StyleFor(Ar6dofElem.Laser).accent; lc.a = 1f;
@@ -174,79 +152,10 @@ namespace AR6DoF
             return root;
         }
 
-        Transform MakeHandle(string n, Ar6dofScreenHandle.Kind kind, string label)
-        {
-            var g = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            g.name = n;
-            g.transform.SetParent(barRoot, false);
-            Destroy(g.GetComponent<Collider>());
-            var bc = g.AddComponent<BoxCollider>();
-            bc.size = new Vector3(1f, 1f, 0.05f);
-            var r = g.GetComponent<Renderer>();
-            if (handleShader == null) handleShader = Ar6dofTheme.RoundedShader;   // coins arrondis ; sinon l'ancien aplat
-            Material m;
-            if (handleShader != null) m = new Material(handleShader);
-            else
-            {
-                m = new Material(owner.ScreenShader);
-                m.SetFloat("_UseTex", 0f);
-            }
-            m.SetColor("_Color", new Color(0.22f, 0.24f, 0.28f, 1f));
-            r.sharedMaterial = m;
-            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            var h = g.AddComponent<Ar6dofScreenHandle>();
-            h.kind = kind;
-            h.panel = this;
-            h.rend = r;
-            if (label.Length > 0 && font != null)
-            {
-                var t = new GameObject("Texte");
-                t.transform.SetParent(g.transform, false);
-                t.transform.localPosition = new Vector3(0f, 0f, -0.02f);
-                var tm = t.AddComponent<TextMesh>();
-                tm.text = Ar6dofLoc.T(label);
-                tm.font = font;
-                tm.anchor = TextAnchor.MiddleCenter;
-                tm.alignment = TextAlignment.Center;
-                tm.characterSize = 0.1f;
-                tm.fontSize = 24;
-                tm.color = Color.white;
-                t.GetComponent<MeshRenderer>().sharedMaterial = font.material;
-            }
-            if (kind == Ar6dofScreenHandle.Kind.Settings)
-            {
-                // icône "roue" (au lieu d'un texte) : elle s'allume quand le panneau de cet écran est ouvert
-                var ig = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                ig.name = "Icone";
-                var imc = ig.GetComponent<MeshCollider>();
-                if (imc != null) Destroy(imc);
-                ig.transform.SetParent(g.transform, false);
-                ig.transform.localPosition = new Vector3(0f, 0f, -0.02f);
-                ig.transform.localScale = new Vector3(0.7f, 0.7f, 1f);
-                var ish = Shader.Find("Sprites/Default");
-                var im = new Material(ish != null ? ish : m.shader);
-                im.mainTexture = Ar6dofIcons.Get("gear");
-                gearIcon = ig.GetComponent<Renderer>();
-                gearIcon.sharedMaterial = im;
-                gearIcon.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                gearIcon.receiveShadows = false;
-            }
-            return g.transform;
-        }
-
-        /// <summary>Taille de l'écran et de la roue des paramètres (même taille de boutons que le reste de l'interface).</summary>
+        /// <summary>Taille de l'écran (la roue, comme les autres boutons, est gérée par Ar6dofWindowChrome).</summary>
         public void Layout()
         {
-            float w = width, h = Height;
-            quad.localScale = new Vector3(w, h, 1f);
-            if (gearT == null) return;
-            float gs = Ar6dofWindowChrome.ButtonSize * 0.9f;
-            // la roue est à gauche de la barre de déplacement, à la même hauteur ; le redimensionnement est à l'autre bout
-            float x = -(Ar6dofWindowChrome.MoveBarLength * 0.5f + Ar6dofWindowChrome.EdgeGap + gs * 0.5f);
-            float y = -h * 0.5f - Ar6dofWindowChrome.EdgeGap - Ar6dofWindowChrome.MoveBarThickness * 0.5f;
-            gearT.localPosition = new Vector3(x, y, 0f);
-            gearT.localScale = new Vector3(gs, gs, 1f);
-            if (handleShader != null) SetRounded(gearT, Mathf.Min(Ar6dofSettings.StyleFor(Ar6dofElem.Screens).corner, 10));
+            quad.localScale = new Vector3(width, Height, 1f);
         }
 
         static void SetRounded(Transform t, int corner)
@@ -295,8 +204,6 @@ namespace AR6DoF
                 long fr = Ar6dofScreenNative.Frames(slot);
                 if (fr != lastFrames) { lastFrames = fr; rt.GenerateMips(); }
             }
-            bool so = owner != null && owner.SettingsOpenFor(this);
-            if (so != gearOn && gearH != null) { gearOn = so; gearH.toggled = so; gearH.Refresh(); }
             hoverAmount = Mathf.MoveTowards(hoverAmount, hoverTarget, Time.unscaledDeltaTime * 8f);
             screenMat.SetFloat("_Hover", hoverAmount);
         }

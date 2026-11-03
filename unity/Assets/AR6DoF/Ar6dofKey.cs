@@ -21,12 +21,18 @@ namespace AR6DoF
 
         bool hover, down;
 
+        /// <summary>Touche de la rangée de réglages (AZERTY, QWERTY, pavé num.) : pas d'animation lumineuse, elle prend les couleurs des fenêtres (style Menus) pour que l'état choisi reste lisible.</summary>
+        public bool IsSetting
+        {
+            get { return def != null && (def.kind == Ar6dofKeyboard.Kind.SetAzerty || def.kind == Ar6dofKeyboard.Kind.SetQwerty || def.kind == Ar6dofKeyboard.Kind.Numpad); }
+        }
+
         public void Refresh()
         {
             if (quad == null) return;
-            var st = Ar6dofSettings.StyleFor(Ar6dofElem.Keyboard);
+            var st = Ar6dofSettings.StyleFor(IsSetting ? Ar6dofElem.Menus : Ar6dofElem.Keyboard);
             Color baseC = st.button;
-            if (animAmount > 0.001f) baseC = Color.Lerp(baseC, animColor, animAmount);
+            if (!IsSetting && animAmount > 0.001f) baseC = Color.Lerp(baseC, animColor, animAmount);
             Color c = down ? Color.Lerp(st.accent, Color.white, 0.25f)
                     : active ? Color.Lerp(baseC, st.accent, 0.85f)
                     : hover ? Color.Lerp(baseC, st.accent, 0.5f)

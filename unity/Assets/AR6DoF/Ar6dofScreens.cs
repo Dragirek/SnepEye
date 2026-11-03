@@ -492,9 +492,7 @@ namespace AR6DoF
             snapText = MakeRowButton("", 46f, () => panels.Count >= 2, () => { snapEnabled = !snapEnabled; Refresh(); Save(); });
             MakeRowButton("Dissocier cet ecran", 46f, () => settingsFor != null && IsAttached(settingsFor), () => { if (settingsFor != null) Detach(settingsFor); });
             addText = MakeRowButton("+ Ajouter un ecran", 46f, null, () => RequestAddScreen());
-            MakeRowButton("Retirer cet ecran", 46f, () => panels.Count > 1, () => { if (settingsFor != null) RemoveScreen(settingsFor); });
             MakeRowButton("Recentrer devant moi", 46f, null, () => RecenterAll());
-            MakeRowButton("Fermer", 46f, null, () => CloseSettings());
             go.SetActive(false);
             if (pointer != null) pointer.AddCanvas(settings);
             // réduire / fermer : ferment tous les deux le panneau ; coin bas droit : agrandit / réduit le panneau

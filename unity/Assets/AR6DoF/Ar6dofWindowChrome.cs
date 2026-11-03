@@ -102,11 +102,12 @@ namespace AR6DoF
     /// <summary>Un bouton de fenêtre (réduire, fermer, redimensionner) : petit carré ou rond 3D que le laser peut viser.</summary>
     public class Ar6dofChromeButton : MonoBehaviour, IAr6dofPointerTarget, IAr6dofPointerDrag
     {
-        public enum Kind { Minimize, Close, Resize, Move }
+        public enum Kind { Minimize, Close, Resize, Move, Settings }
         public Kind kind;
         public Ar6dofWindowChrome chrome;
         public Renderer bg, icon;
         public bool armed;      // fermeture en attente de confirmation
+        public bool toggled;    // réglages : le panneau de cette fenêtre est ouvert
         bool hover, pressed;
 
         public void Refresh()
@@ -124,9 +125,10 @@ namespace AR6DoF
             else if (kind == Kind.Close && active) { c = new Color(0.88f, 0.2f, 0.2f); ic = Color.white; }
             else
             {
-                c = active ? st.accent : st.button;
+                c = (active || (kind == Kind.Settings && toggled)) ? st.accent : st.button;
                 c.a = Mathf.Lerp(1f, st.alpha, 0.5f);
             }
+            if (kind == Kind.Settings && toggled && !active) ic = Ar6dofTheme.OnColor(c);   // roue allumée : contraste avec l'accent
             ic.a = iconAlpha;
             bg.sharedMaterial.color = c;
             if (icon != null) icon.sharedMaterial.color = ic;
@@ -176,6 +178,8 @@ namespace AR6DoF
         public Action<Vector3> resizeBegin;            // vides : redimensionnement par défaut = échelle de 'target' (menus)
         public Action<Ray> resizeDrag;
         public Action resizeEnd;
+        public Action onSettings;                      // roue à droite de la barre de déplacement (même place pour toutes les fenêtres) ; vide = pas de roue
+        public Func<bool> settingsOn;                  // vrai : le panneau de réglages de cette fenêtre est ouvert (la roue s'allume)
         public Action<Vector3, int> moveBegin;         // vides : déplacement par défaut = le menu suit le laser
         public Action<Ray> moveDrag;
         public Action moveEnd;
@@ -193,7 +197,8 @@ namespace AR6DoF
         public static float MoveBarThickness { get { return S * MoveThick; } }
         public static float EdgeGap { get { return Gap; } }
         float lastS = -1f;
-        Ar6dofChromeButton bMin, bClose, bResize, bMove;
+        Ar6dofChromeButton bMin, bClose, bResize, bMove, bSet;
+        bool lastSetOn;
         Ar6dofPassthrough pt;
         float grabDist;
         Vector3 grabOffset;
@@ -238,6 +243,7 @@ namespace AR6DoF
             bClose = MakeBtn(Ar6dofChromeButton.Kind.Close, "close");
             bResize = MakeBtn(Ar6dofChromeButton.Kind.Resize, "resize");
             bMove = MakeBtn(Ar6dofChromeButton.Kind.Move, "grip");
+            bSet = MakeBtn(Ar6dofChromeButton.Kind.Settings, "gear");
             group.SetActive(false);
         }
 
@@ -287,7 +293,7 @@ namespace AR6DoF
             var d = Ar6dofSettings.Current;
             bool mac = d.chromeStyle == 1;
             int corner = mac ? 999 : Mathf.Min(Ar6dofSettings.StyleFor(elem).corner, 10);
-            foreach (var b in new[] { bMin, bClose, bResize })
+            foreach (var b in new[] { bMin, bClose, bResize, bSet })
             {
                 Ar6dofTheme.SetRoundedSize(b.bg.sharedMaterial, S, S, corner);
                 b.Refresh();
@@ -307,7 +313,7 @@ namespace AR6DoF
             if (Mathf.Abs(sc - lastS) > 1e-4f)
             {
                 lastS = sc;
-                foreach (var b in new[] { bMin, bClose, bResize }) b.transform.localScale = new Vector3(sc, sc, 1f);
+                foreach (var b in new[] { bMin, bClose, bResize, bSet }) b.transform.localScale = new Vector3(sc, sc, 1f);
                 bMove.transform.localScale = new Vector3(sc * MoveLen, sc * MoveThick, 1f);
                 var ic = bMove.icon != null ? bMove.icon.transform : null;
                 if (ic != null) ic.localScale = new Vector3(0.8f, 0.62f, 1f);   // une simple ligne qui occupe presque toute la barre
@@ -336,13 +342,23 @@ namespace AR6DoF
             bResize.transform.localPosition = new Vector3(hs.x - S * 0.5f, -hs.y - Gap - S * 0.5f, 0f);
             // barre de déplacement : sous la fenêtre, au milieu
             bMove.gameObject.SetActive(canMove);
-            bMove.transform.localPosition = new Vector3(0f, -hs.y - Gap - S * MoveThick * 0.5f, 0f);
+            float barY = -hs.y - Gap - S * MoveThick * 0.5f;
+            bMove.transform.localPosition = new Vector3(0f, barY, 0f);
+            // roue des réglages : juste à droite de la barre de déplacement, à sa hauteur (identique pour toutes les fenêtres)
+            bSet.gameObject.SetActive(onSettings != null);
+            bSet.transform.localPosition = new Vector3(S * MoveLen * 0.5f + Gap + S * 0.5f, barY, 0f);
+            if (onSettings != null)
+            {
+                bool on = settingsOn != null && settingsOn();
+                if (on != lastSetOn) { lastSetOn = on; bSet.toggled = on; bSet.Refresh(); }
+            }
         }
 
         // ---- actions
         public void Click(Ar6dofChromeButton.Kind kind)
         {
             if (kind == Ar6dofChromeButton.Kind.Minimize) { if (onMinimize != null) onMinimize(); return; }
+            if (kind == Ar6dofChromeButton.Kind.Settings) { if (onSettings != null) onSettings(); return; }
             if (kind != Ar6dofChromeButton.Kind.Close) return;
             if (confirmClose != null && confirmClose() && !bClose.armed)
             {
