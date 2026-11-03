@@ -2,14 +2,14 @@ using UnityEngine;
 
 namespace AR6DoF
 {
-    /// <summary>Palettes de couleurs pour l'animation lumineuse du clavier virtuel, et couleurs prédéfinies des touches de jeu.</summary>
+    /// <summary>Palettes de couleurs pour l'animation lumineuse du clavier virtuel.</summary>
     public static class Ar6dofKbFx
     {
         public static readonly string[] AnimNames = { "Aucune", "Vague", "Cycle", "Respiration", "Reactif", "Scintillement", "Onde" };
         public static readonly string[] DirNames = { "Vers la droite", "Vers la gauche", "Vers le bas", "Vers le haut", "Depuis le centre" };
-        public static readonly string[] PaletteNames = { "Arc-en-ciel", "Ocean", "Feu", "Neon", "Foret", "Aurore", "Bonbon", "Glace", "Crepuscule", "Matrix", "Style du clavier" };
+        public static readonly string[] PaletteNames = { "Spectre", "Marine", "Brasier", "Synthwave", "Sylve", "Aurore", "Dragee", "Glacier", "Crepuscule", "Matrix", "Theme du clavier" };
 
-        // arrêts de couleur de chaque palette (la dernière se raccorde à la première : la boucle est continue)
+        // arrêts de couleur de chaque palette (indices = PaletteNames) (la dernière se raccorde à la première : la boucle est continue)
         static readonly string[][] Stops =
         {
             null,                                                         // arc-en-ciel : calculé
@@ -59,13 +59,6 @@ namespace AR6DoF
             int i0 = Mathf.FloorToInt(f) % cols.Length;
             int i1 = (i0 + 1) % cols.Length;
             return Color.Lerp(cols[i0], cols[i1], f - Mathf.Floor(f));
-        }
-
-        // couleurs proposées pour marquer les touches ZQSD / WASD
-        public static readonly string[] TintHex = { "#FF9A1F", "#FF4D4D", "#59FF73", "#40D9FF", "#BF73FF", "#FFE600", "#FF6EB4", "#FFFFFF" };
-        public static Color Tint(int index)
-        {
-            return Parse(TintHex[Mathf.Clamp(index, 0, TintHex.Length - 1)]);
         }
     }
 }

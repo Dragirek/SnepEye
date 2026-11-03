@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -41,6 +42,7 @@
 #include "eye_tracker.h"
 #include "floor.h"
 #include "frame_clock.h"
+#include "mf_camera.h"
 #include "frame_share_win.h"
 #include "fusion.h"
 #include "imu_parser.h"
@@ -309,9 +311,10 @@ struct Mailbox {
   double tSmooth = 0;   // instant d'arrivée lissé (sans gigue de décodage)
   bool failed = false;
 };
-static std::atomic<double> g_camFps{0.0}, g_shareMs{0.0};
+static std::atomic<double> g_camFps{0.0}, g_shareMs{0.0}, g_decodeMs{0.0};
 
-static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share, bool shareOn) {
+// 'grab' lit la prochaine image (OpenCV, ou le lecteur Media Foundation direct) ; elle bloque jusqu'à l'arrivée d'une image.
+static void CaptureThread(std::function<bool(cv::Mat&)> grab, Mailbox* mb, FrameShare* share, bool shareOn) {
   SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);   // la lecture de la caméra ne doit jamais attendre le reste
   bool shareFailed = false;
   int fails = 0;
@@ -320,7 +323,7 @@ static void CaptureThread(cv::VideoCapture* cap, Mailbox* mb, FrameShare* share,
   auto t0 = std::chrono::steady_clock::now();
   while (g_run) {
     cv::Mat f;
-    if (!cap->read(f) || f.empty()) {
+    if (!grab(f) || f.empty()) {
       if (++fails > 100) {
         std::lock_guard<std::mutex> l(mb->m);
         mb->failed = true;
@@ -713,10 +716,12 @@ int main(int argc, char** argv) {
   // Ouverture de la caméra avec la cadence demandée. On MESURE la cadence reçue ;
   // si elle est trop basse avec un backend, on essaie l'autre (MSMF / DirectShow).
   cv::VideoCapture cap;
+  int camApi = cv::CAP_MSMF, mfDirect = 0;
   {
     const int apis[2] = {cv::CAP_MSMF, cv::CAP_DSHOW};
     const char* names[2] = {"MSMF", "DSHOW"};
     int first = AskInt("backend", "Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
+    mfDirect = AskInt("mfdirect", "Lecteur camera direct Media Foundation (1 = oui : moins de latence et de CPU, JPEG decode par libjpeg-turbo ; 0 = OpenCV)", 0, 0, 1);
     // La télécommande Bluetooth démarre APRÈS toutes les questions (ses messages ne se mélangent plus aux réponses)
     if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
     if (!noBle) ar6hub::Start([](const std::string& m) { std::cout << m << std::endl; });   // appareils Bluetooth des menus Unity
@@ -746,6 +751,7 @@ int main(int argc, char** argv) {
       std::cout << "Impossible de rouvrir la camera.\n";
       return 1;
     }
+    camApi = apis[bestIdx];
     std::cout << "Backend retenu : " << names[bestIdx] << " (" << best << " fps)\n";
     if (best < 0.85 * FPS)
       std::cout << "ATTENTION : cadence inferieure a la demande. Verifie le mode (resolution/fps), le port USB 3,\n"
@@ -754,6 +760,22 @@ int main(int argc, char** argv) {
   std::cout << "Resolution negociee : " << cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
             << cap.get(cv::CAP_PROP_FRAME_HEIGHT)
             << "  (si differente de ce que tu as demande, ce mode n'existe pas)\n";
+
+  // Lecteur direct (option) : il faut libérer la caméra pour OpenCV avant de l'ouvrir ; en cas d'échec on rouvre avec OpenCV.
+  ar6mf::Camera mfcam;
+  bool useMf = false;
+  if (mfDirect) {
+    cap.release();
+    std::string err;
+    if (mfcam.Open(ci, W, H, FPS, &err) && mfcam.SelfTest(40, 5, &err)) {
+      useMf = true;
+      std::cout << "Lecteur camera DIRECT (Media Foundation + libjpeg-turbo) actif : MJPEG " << W << "x" << H << " a " << mfcam.ModeFps() << " fps.\n";
+    } else {
+      std::cout << "Lecteur direct indisponible (" << err << ") : retour a OpenCV.\n";
+      mfcam.Close();
+      if (!OpenCam(cap, ci, camApi, W, H, FPS)) { std::cout << "Impossible de rouvrir la camera.\n"; return 1; }
+    }
+  }
 
   ImuState imu;
   imu.mount = LoadMount();
@@ -816,7 +838,17 @@ int main(int argc, char** argv) {
   int injectKey = (autoTrack && haveCalib) ? 't' : -1;   // démarre le tracking dès la première image
   Mailbox mb;
   uint64_t lastId = 0;
-  std::thread capThread(CaptureThread, &cap, &mb, &share, shareFrames != 0);
+  std::function<bool(cv::Mat&)> grab;
+  if (useMf)
+    grab = [&mfcam](cv::Mat& f) {
+      double ms = 0;
+      bool ok = mfcam.Read(f, &ms);
+      if (ok && !f.empty()) g_decodeMs = 0.95 * g_decodeMs.load() + 0.05 * ms;
+      return ok;
+    };
+  else
+    grab = [&cap](cv::Mat& f) { return cap.read(f); };
+  std::thread capThread(CaptureThread, grab, &mb, &share, shareFrames != 0);
   std::cout << (windowsOn ? "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n"
                           : "\nMode sans fenetres : commandes par UDP 9877 (T recentrer, V sol, Z yaw, Q quitter).\n");
 
@@ -845,9 +877,9 @@ int main(int argc, char** argv) {
     if (dt >= 1.0) {
       fps = frames / dt; frames = 0; tf = now;
       if (!windowsOn) {  // sans fenêtre : un résumé par seconde dans la console et le journal
-        char sb[256];
-        std::snprintf(sb, sizeof(sb), "camera %.1f fps | suivi %.1f fps | partage %.1f ms | tracking %s | %d points | delai camera %.1f ms (%s) | cpu %.0f%%\n",
-                      g_camFps.load(), fps, g_shareMs.load(),
+        char sb[360];
+        std::snprintf(sb, sizeof(sb), "camera %.1f fps | suivi %.1f fps | partage %.1f ms | decodage %.1f ms | tracking %s | %d points | delai camera %.1f ms (%s) | cpu %.0f%%\n",
+                      g_camFps.load(), fps, g_shareMs.load(), g_decodeMs.load(),
                       tracking ? (vo && vo->state == StereoVO::kOk ? "OK" : "perdu/init") : "arrete", vo ? vo->nPoints() : 0,
                       camDelay * 1000.0, autoDelay ? "auto" : "manuel", ProcCpuPercent());
         std::cout << sb;

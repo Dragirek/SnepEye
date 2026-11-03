@@ -14,7 +14,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui c
 
 add_executable(ar6dof_probe src/main.cpp src/ble_remote.cpp src/ble_hub.cpp src/eye_tracker.cpp)
 target_include_directories(ar6dof_probe PRIVATE src)
-target_link_libraries(ar6dof_probe PRIVATE ${OpenCV_LIBS} mfplat mf mfuuid ole32 ws2_32 windowsapp)
+target_link_libraries(ar6dof_probe PRIVATE ${OpenCV_LIBS} mfplat mf mfuuid mfreadwrite ole32 ws2_32 windowsapp)
 if(MSVC)
   target_compile_options(ar6dof_probe PRIVATE /W3 /utf-8)
   target_compile_definitions(ar6dof_probe PRIVATE NOMINMAX)
@@ -24,8 +24,8 @@ endif()
 
 # Capture d'ecran GPU pour Unity (a copier dans Assets/AR6DoF/Plugins/x86_64/ ; remplace uWindowCapture)
 add_library(ar6dof_screen SHARED src/screen/ar6dof_screen.cpp)
-target_link_libraries(ar6dof_screen PRIVATE d3d11 dxgi)
-target_compile_definitions(ar6dof_screen PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(ar6dof_screen PRIVATE d3d11 dxgi windowsapp)   # windowsapp : capture de fenetre (Windows.Graphics.Capture, C++/WinRT)
+target_compile_definitions(ar6dof_screen PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS=1)
 if(MSVC)
-  target_compile_options(ar6dof_screen PRIVATE /W3 /utf-8)
+  target_compile_options(ar6dof_screen PRIVATE /W3 /utf-8 /permissive-)   # /permissive- : mode conforme demande par C++/WinRT
 endif()

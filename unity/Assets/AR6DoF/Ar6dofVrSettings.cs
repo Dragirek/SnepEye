@@ -47,6 +47,7 @@ namespace AR6DoF
         readonly List<Button> subButtons = new List<Button>();
         readonly List<Button> chromeStyleButtons = new List<Button>();
         readonly List<Button> chromeCornerButtons = new List<Button>();
+        readonly List<Button> fpsBtns = new List<Button>();
         RectTransform colorsBox, formBox, shapeBox, texBox, laserBox, separateBox, windowsBox, kbBox, kbDirBox;
         readonly List<Button> kbModeBtns = new List<Button>();
         readonly List<Button> kbDirBtns = new List<Button>();
@@ -164,8 +165,9 @@ namespace AR6DoF
         /// <summary>Hauteur à découvrir en plus pour un onglet (0 = tout tient).</summary>
         float MaxScroll(int tab)
         {
-            if (tab == TabStyle && styleSub == 0) return 190f;
-            if (tab == TabStyle && styleSub == 3) return 360f;
+            if (tab == TabSystem) return 280f;
+            if (tab == TabStyle && styleSub == 0) return 300f;
+            if (tab == TabStyle && styleSub == 3) return 230f;
             return 0f;
         }
 
@@ -276,13 +278,15 @@ namespace AR6DoF
 
         void Slider(RectTransform page, ref float y, string label, float min, float max, Func<float> get, Action<float> set, string fmt = "0.##", float step = 78f)
         {
-            SliderAt(page, 0f, y, W - 90f, label, min, max, get, set, fmt);
+            SliderAt(page, 0f, y, W - 72f, label, min, max, get, set, fmt);
             y -= step;
         }
 
         /// <summary>Case à cocher : un petit carré SUR LE CÔTÉ, le texte à droite du carré (aligné à gauche, jamais dans le carré).</summary>
         void Toggle(RectTransform page, float x, float y, string label, Func<bool> get, Action<bool> set, float width = 290f)
         {
+            if (Mathf.Abs(x) > 100f) { width = 320f; x = Mathf.Sign(x) * 164f; }                          // deux colonnes : bords à -324 et +324
+            else { width = Mathf.Min(width, W - 72f); x = -(W - 72f) * 0.5f + width * 0.5f; }          // seul sur sa ligne : collé au bord gauche, comme les titres
             Text t = null;
             GameObject tick = null;
             Action upd = () =>
@@ -311,6 +315,7 @@ namespace AR6DoF
         Button Btn(RectTransform page, float x, float y, float w, string label, Action click, int fs = 24, float h = 48f)
         {
             Text t;
+            if (Mathf.Abs(x) > 170f && Mathf.Abs(x) < 190f && w > 330f && w < 350f) { x = Mathf.Sign(x) * 164f; w = 320f; }   // paires gauche / droite : mêmes bords que le reste
             return Ar6dofVrUi.MakeButton(page, label, new Vector2(x, y), new Vector2(w, h), () => click(), out t, fs);
         }
 
@@ -324,14 +329,14 @@ namespace AR6DoF
         /// <summary>Ligne d'information (texte aligné à gauche) qui se met à jour toute seule.</summary>
         Text InfoLine(RectTransform page, float y, int tab, Func<string> text, int fs = 19)
         {
-            Text l = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 70f, 28f), fs, TextAnchor.MiddleLeft);
+            Text l = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 72f, 28f), fs, TextAnchor.MiddleLeft);
             Live(tab, () => l.text = text());
             return l;
         }
 
         Text Heading(RectTransform page, float y, string text)
         {
-            return Ar6dofVrUi.Label(page, text, new Vector2(0f, y), new Vector2(W - 70f, 34f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            return Ar6dofVrUi.Label(page, text, new Vector2(0f, y), new Vector2(W - 72f, 34f), 24, TextAnchor.MiddleLeft).MakeAccent();
         }
 
         static void Touch() { Ar6dofSettings.Notify(); }
@@ -442,7 +447,7 @@ namespace AR6DoF
             eyeSelBox = NewBox(page, "Oeil");
             eyeButtons.Add(Btn(eyeSelBox, -cx, y, 340f, "Oeil gauche", () => { optEye = 0; RefreshAll(); }, 22));
             eyeButtons.Add(Btn(eyeSelBox, cx, y, 340f, "Oeil droit", () => { optEye = 1; RefreshAll(); }, 22));
-            eyeHint = Ar6dofVrUi.Label(page, "Les reglages ci-dessous s'appliquent aux deux yeux", new Vector2(0f, y), new Vector2(W - 70f, 30f), 19, TextAnchor.MiddleLeft);
+            eyeHint = Ar6dofVrUi.Label(page, "Les reglages ci-dessous s'appliquent aux deux yeux", new Vector2(0f, y), new Vector2(W - 72f, 30f), 19, TextAnchor.MiddleLeft);
             y -= 28f;
             refreshers.Add(() =>
             {
@@ -561,18 +566,33 @@ namespace AR6DoF
                 string b = (r.Left ? Ar6dofLoc.T("G") : "-") + " " + (r.Right ? Ar6dofLoc.T("D") : "-");
                 return Ar6dofLoc.F("Telecommande : connectee   -   {0} paquets/s   -   boutons {1}", r.PacketsPerSec, b);
             }); y -= 30f;
-            Ar6dofVrUi.Label(page, "Recentrer le rayon : maintenir les 2 boutons 0,6 s", new Vector2(0f, y), new Vector2(W - 70f, 26f), 17, TextAnchor.MiddleLeft); y -= 28f;
-            Ar6dofVrUi.Label(page, "Un compte a rebours de 3 s laisse le temps de poser la telecommande", new Vector2(0f, y), new Vector2(W - 70f, 26f), 17, TextAnchor.MiddleLeft); y -= 40f;
+            Ar6dofVrUi.Label(page, "Recentrer le rayon : maintenir les 2 boutons 0,6 s", new Vector2(0f, y), new Vector2(W - 72f, 26f), 17, TextAnchor.MiddleLeft); y -= 28f;
+            Ar6dofVrUi.Label(page, "Un compte a rebours de 3 s laisse le temps de poser la telecommande", new Vector2(0f, y), new Vector2(W - 72f, 26f), 17, TextAnchor.MiddleLeft); y -= 40f;
             Btn(page, -178f, y, 340f, "Calibrer 1/2 (a plat)", () => StartCal(1), 19);
             Btn(page, 178f, y, 340f, "Calibrer 2/2 (pointe relevee)", () => StartCal(2), 19);
             y -= 38f;
-            calMsg = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 70f, 28f), 17, TextAnchor.MiddleLeft);
+            calMsg = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(W - 72f, 28f), 17, TextAnchor.MiddleLeft);
             refreshers.Add(UpdateCalMsg);
             y -= 54f;
             Heading(page, y + 16f, "Telecommande : filtre du rayon"); y -= 40f;
             Slider(page, ref y, "Stabilite (plus bas = plus stable)", 0.5f, 8f, () => Ar6dofSettings.Current.remoteMinCutoff, v => { Ar6dofSettings.Current.remoteMinCutoff = v; Touch(); }, "0.0", 70f);
             Slider(page, ref y, "Reactivite en mouvement", 0f, 1f, () => Ar6dofSettings.Current.remoteBeta, v => { Ar6dofSettings.Current.remoteBeta = v; Touch(); }, "0.00", 70f);
             Slider(page, ref y, "Anticipation (ms)", 0f, 40f, () => Ar6dofSettings.Current.remotePredictMs, v => { Ar6dofSettings.Current.remotePredictMs = v; Touch(); }, "0", 70f);
+
+            // ---- Performances : limiter les images par seconde évite que le GPU tourne à fond pour rien
+            y -= 10f;
+            Heading(page, y, "Performances (GPU)"); y -= 40f;
+            Ar6dofVrUi.Label(page, "Images par seconde maximum", new Vector2(0f, y), new Vector2(W - 72f, 28f), 20, TextAnchor.MiddleLeft); y -= 46f;
+            for (int i = 0; i < Ar6dofPerf.FpsNames.Length; i++)
+            {
+                int fi = i;
+                fpsBtns.Add(Btn(page, -259f + 129.5f * i, y, 124f, Ar6dofPerf.FpsNames[i], () => { Ar6dofSettings.Current.perfFps = fi; Touch(); }, 17, 46f));
+            }
+            refreshers.Add(() => { for (int i = 0; i < fpsBtns.Count; i++) Ar6dofTheme.SetSelected(fpsBtns[i], Ar6dofSettings.Current.perfFps == i); });
+            y -= 36f;
+            InfoLine(page, y, TabSystem, () => Ar6dofLoc.F("Images par seconde actuelles : {0}", Ar6dofPerf.Fps)); y -= 44f;
+            Toggle(page, 0f, y, "Lissage des bords (MSAA x2) : plus beau, plus lourd", () => Ar6dofSettings.Current.perfMsaa > 1, v => { Ar6dofSettings.Current.perfMsaa = v ? 2 : 1; Touch(); }, 640f); y -= 58f;
+            SliderAt(page, 0f, y, W - 72f, "Resolution de l'interface (au prochain lancement)", 0.5f, 1f, () => Ar6dofSettings.Current.perfRenderScale, v => { Ar6dofSettings.Current.perfRenderScale = v; Touch(); }, "0.00");
         }
 
         static string CamTxt(int state, float fps)
@@ -695,18 +715,21 @@ namespace AR6DoF
             }, 470f);
 
             // 2) Couleurs / Forme
-            subButtons.Add(Btn(page, -264f, 140f, 168f, "Couleurs", () => { styleSub = 0; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
-            subButtons.Add(Btn(page, -88f, 140f, 168f, "Forme", () => { styleSub = 1; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
-            subButtons.Add(Btn(page, 88f, 140f, 168f, "Fenetres", () => { styleSub = 2; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
-            subButtons.Add(Btn(page, 264f, 140f, 168f, "Clavier", () => { styleSub = 3; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, -243f, 140f, 156f, "Couleurs", () => { styleSub = 0; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, -81f, 140f, 156f, "Forme", () => { styleSub = 1; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, 81f, 140f, 156f, "Fenetres", () => { styleSub = 2; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
+            subButtons.Add(Btn(page, 243f, 140f, 156f, "Clavier", () => { styleSub = 3; scrolls[TabStyle].SetOffset(0f); RefreshAll(); }, 22));
 
-            // ---- Couleurs
+            // ---- Couleurs : d'abord les palettes toutes faites (le plus simple), puis la personnalisation fine en dessous
             colorsBox = NewBox(page, "Couleurs");
+            BuildPaletteCards(colorsBox);
+            const float cy = -270f;   // début de la personnalisation
+            Ar6dofVrUi.Label(colorsBox, "Personnaliser", new Vector2(0f, cy + 44f), new Vector2(W - 72f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
             string[] chipNames = { "Fond", "Boutons", "Accent", "Texte" };
             for (int i = 0; i < 4; i++)
             {
                 int slot = i;
-                var b = Btn(colorsBox, -225f + 150f * i, 84f, 144f, chipNames[i], () => { colorSlot = slot; RefreshAll(); }, 18);
+                var b = Btn(colorsBox, -243f + 162f * i, cy, 156f, chipNames[i], () => { colorSlot = slot; RefreshAll(); }, 18);
                 var sw = new GameObject("Echantillon", typeof(RectTransform));
                 sw.transform.SetParent(b.transform, false);
                 var srt = (RectTransform)sw.transform;
@@ -721,7 +744,7 @@ namespace AR6DoF
                 if (lbl != null) lbl.rectTransform.offsetMin = new Vector2(26f, 0f);
             }
             refreshers.Add(SyncHsv);
-            BuildColorPicker(colorsBox);
+            BuildColorPicker(colorsBox, cy - 84f);   // les ordonnées du sélecteur sont celles d'avant, décalées de oy
 
             // ---- Forme
             formBox = NewBox(page, "Forme");
@@ -731,7 +754,7 @@ namespace AR6DoF
             Slider(shapeBox, ref fy, "Coins arrondis", 0f, 40f, () => CurStyle(selElem).corner, v => { CurStyle(selElem).corner = Mathf.RoundToInt(v); Touch(); }, "0");
             texBox = NewBox(formBox, "Texture");
             Slider(texBox, ref fy, "Intensite de la texture", 0f, 0.6f, () => CurStyle(selElem).texAlpha, v => { CurStyle(selElem).texAlpha = v; Touch(); }, "0.00");
-            Ar6dofVrUi.Label(texBox, "Texture de fond", new Vector2(-150f, -176f), new Vector2(300f, 28f), 22, TextAnchor.MiddleLeft);
+            Ar6dofVrUi.Label(texBox, "Texture de fond", new Vector2(-174f, -176f), new Vector2(300f, 28f), 22, TextAnchor.MiddleLeft);
             Btn(texBox, -250f, -224f, 70f, "<", () => CycleTexture(-1));
             Btn(texBox, 250f, -224f, 70f, ">", () => CycleTexture(1));
             texNameLbl = Ar6dofVrUi.Label(texBox, "", new Vector2(0f, -224f), new Vector2(380f, 40f), 24);
@@ -742,18 +765,18 @@ namespace AR6DoF
 
             // ---- Fenetres : boutons reduire / fermer de tous les ecrans et menus
             windowsBox = NewBox(page, "Fenetres");
-            Ar6dofVrUi.Label(windowsBox, "Style des boutons de fenetre", new Vector2(0f, 250f), new Vector2(W - 70f, 34f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            Ar6dofVrUi.Label(windowsBox, "Style des boutons de fenetre", new Vector2(0f, 250f), new Vector2(W - 72f, 34f), 24, TextAnchor.MiddleLeft).MakeAccent();
             chromeStyleButtons.Add(Btn(windowsBox, -178f, 196f, 340f, "Windows", () => { Ar6dofSettings.Current.chromeStyle = 0; Touch(); }, 24));
             chromeStyleButtons.Add(Btn(windowsBox, 178f, 196f, 340f, "Mac", () => { Ar6dofSettings.Current.chromeStyle = 1; Touch(); }, 24));
-            Ar6dofVrUi.Label(windowsBox, "Position de Reduire / Fermer", new Vector2(0f, 120f), new Vector2(W - 70f, 34f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            Ar6dofVrUi.Label(windowsBox, "Position de Reduire / Fermer", new Vector2(0f, 120f), new Vector2(W - 72f, 34f), 24, TextAnchor.MiddleLeft).MakeAccent();
             string[] corners = { "Haut gauche", "Haut droite", "Bas gauche", "Bas droite" };
             for (int i = 0; i < 4; i++)
             {
                 int ci = i;
                 chromeCornerButtons.Add(Btn(windowsBox, (i % 2 == 0) ? -178f : 178f, (i < 2) ? 66f : 8f, 340f, corners[i], () => { Ar6dofSettings.Current.chromeCorner = ci; Touch(); }, 22));
             }
-            SliderAt(windowsBox, 0f, -70f, W - 100f, "Taille des boutons de fenetre", 0.6f, 2.5f, () => Ar6dofSettings.Current.chromeScale, v => { Ar6dofSettings.Current.chromeScale = v; Touch(); }, "0.00");
-            Ar6dofVrUi.Label(windowsBox, "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre.", new Vector2(0f, -190f), new Vector2(W - 100f, 120f), 19, TextAnchor.UpperLeft).horizontalOverflow = HorizontalWrapMode.Wrap;
+            SliderAt(windowsBox, 0f, -70f, W - 72f, "Taille des boutons de fenetre", 0.6f, 2.5f, () => Ar6dofSettings.Current.chromeScale, v => { Ar6dofSettings.Current.chromeScale = v; Touch(); }, "0.00");
+            Ar6dofVrUi.Label(windowsBox, "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre.", new Vector2(0f, -190f), new Vector2(W - 72f, 120f), 19, TextAnchor.UpperLeft).horizontalOverflow = HorizontalWrapMode.Wrap;
             windowsBox.gameObject.SetActive(false);
             BuildKeyboardBox(page);
 
@@ -772,7 +795,7 @@ namespace AR6DoF
         }
 
         // 12 palettes : nom, fond, boutons, accent, texte
-        static readonly string[] PalNames = { "Nuit", "Rouge", "Vert", "Violet", "Clair", "Ocean", "Orange", "Rose", "Menthe", "Or", "Gris", "Contraste" };
+        static readonly string[] PalNames = { "Minuit", "Rubis", "Emeraude", "Amethyste", "Porcelaine", "Abysse", "Ambre", "Sakura", "Lagon", "Imperial", "Graphite", "Eclipse" };
         static readonly string[,] PalCols =
         {
             { "#14171C", "#384252", "#40D9FF", "#FFFFFF" },
@@ -847,53 +870,38 @@ namespace AR6DoF
             Touch();
         }
 
-        // ---- Clavier : pavé numérique, touches de jeu, animation lumineuse
+        // ---- Clavier : pavé numérique, animation lumineuse
         static Ar6dofSettingsData D { get { return Ar6dofSettings.Current; } }
-
-        void TintButton(RectTransform box, float x, float y, string label, Func<int> get, Action<int> set)
-        {
-            var b = Btn(box, x, y, 340f, label, () => { set((get() + 1) % Ar6dofKbFx.TintHex.Length); Touch(); }, 20);
-            var sw = Ar6dofVrUi.Rect(b.transform, "Echantillon", new Vector2(130f, 0f), new Vector2(60f, 28f));
-            var si = sw.gameObject.AddComponent<Image>();
-            si.raycastTarget = false;
-            Ar6dofTheme.SetRounded(si, 8);
-            refreshers.Add(() => si.color = Ar6dofKbFx.Tint(get()));
-        }
 
         void BuildKeyboardBox(RectTransform page)
         {
             kbBox = NewBox(page, "ClavierBox");
             const float cx = 178f;
             Toggle(kbBox, -cx, 80f, "Pave numerique", () => D.kbNumpad, v => { D.kbNumpad = v; Touch(); }, 340f);
-            Toggle(kbBox, -cx, 24f, "Touches W A S D en couleur", () => D.kbShowWasd, v => { D.kbShowWasd = v; Touch(); }, 340f);
-            TintButton(kbBox, cx, 24f, "Couleur W A S D", () => D.kbWasdColor, v => D.kbWasdColor = v);
-            Toggle(kbBox, -cx, -32f, "Touches Z Q S D en couleur", () => D.kbShowZqsd, v => { D.kbShowZqsd = v; Touch(); }, 340f);
-            TintButton(kbBox, cx, -32f, "Couleur Z Q S D", () => D.kbZqsdColor, v => D.kbZqsdColor = v);
-
-            Ar6dofVrUi.Label(kbBox, "Animation lumineuse", new Vector2(0f, -96f), new Vector2(W - 100f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            Ar6dofVrUi.Label(kbBox, "Animation lumineuse", new Vector2(0f, 14f), new Vector2(W - 72f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
             for (int i = 0; i < Ar6dofKbFx.AnimNames.Length; i++)
             {
                 int mi = i;
-                kbModeBtns.Add(Btn(kbBox, -264f + 176f * (i % 4), -144f - 52f * (i / 4), 168f, Ar6dofKbFx.AnimNames[i], () => { D.kbAnim = mi; Touch(); }, 19, 46f));
+                kbModeBtns.Add(Btn(kbBox, -243f + 162f * (i % 4), -34f - 52f * (i / 4), 156f, Ar6dofKbFx.AnimNames[i], () => { D.kbAnim = mi; Touch(); }, 19, 46f));
             }
             kbDirBox = NewBox(kbBox, "SensVague");
             for (int i = 0; i < Ar6dofKbFx.DirNames.Length; i++)
             {
                 int di = i;
-                kbDirBtns.Add(Btn(kbDirBox, -270f + 135f * i, -256f, 130f, Ar6dofKbFx.DirNames[i], () => { D.kbAnimDir = di; Touch(); }, 14, 44f));
+                kbDirBtns.Add(Btn(kbDirBox, -259f + 129.5f * i, -146f, 124f, Ar6dofKbFx.DirNames[i], () => { D.kbAnimDir = di; Touch(); }, 14, 44f));
             }
-            SliderAt(kbBox, 0f, -326f, W - 100f, "Vitesse de l'animation", 0.1f, 4f, () => D.kbAnimSpeed, v => { D.kbAnimSpeed = v; Touch(); }, "0.00");
-            SliderAt(kbBox, 0f, -402f, W - 100f, "Intensite", 0f, 1f, () => D.kbAnimStrength, v => { D.kbAnimStrength = v; Touch(); }, "0.00");
+            SliderAt(kbBox, 0f, -216f, W - 72f, "Vitesse de l'animation", 0.1f, 4f, () => D.kbAnimSpeed, v => { D.kbAnimSpeed = v; Touch(); }, "0.00");
+            SliderAt(kbBox, 0f, -292f, W - 72f, "Intensite", 0f, 1f, () => D.kbAnimStrength, v => { D.kbAnimStrength = v; Touch(); }, "0.00");
 
-            Ar6dofVrUi.Label(kbBox, "Couleurs de l'animation", new Vector2(0f, -462f), new Vector2(W - 100f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            Ar6dofVrUi.Label(kbBox, "Couleurs de l'animation", new Vector2(0f, -352f), new Vector2(W - 72f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
             for (int i = 0; i < Ar6dofKbFx.PaletteNames.Length; i++)
             {
                 int pi = i;
-                var b = Btn(kbBox, -264f + 176f * (i % 4), -512f - 52f * (i / 4), 168f, Ar6dofKbFx.PaletteNames[i], () => { D.kbAnimPalette = pi; Touch(); }, 14, 46f);
+                var b = Btn(kbBox, -243f + 162f * (i % 4), -402f - 52f * (i / 4), 156f, Ar6dofKbFx.PaletteNames[i], () => { D.kbAnimPalette = pi; Touch(); }, 15, 46f);
                 var tex = new Texture2D(32, 1, TextureFormat.RGBA32, false);
                 tex.wrapMode = TextureWrapMode.Clamp;
                 kbPalTex.Add(tex);
-                var gr = Ar6dofVrUi.Rect(b.transform, "Degrade", new Vector2(0f, -14f), new Vector2(140f, 8f));
+                var gr = Ar6dofVrUi.Rect(b.transform, "Degrade", new Vector2(0f, -14f), new Vector2(128f, 8f));
                 var raw = gr.gameObject.AddComponent<RawImage>();
                 raw.texture = tex;
                 raw.raycastTarget = false;
@@ -909,7 +917,7 @@ namespace AR6DoF
                 kbDirBox.gameObject.SetActive(D.kbAnim == 1);
                 for (int i = 0; i < kbPalTex.Count; i++)
                 {
-                    if (kbPalDrawn[i] && i != 10) continue;   // palettes fixes : dessinées une seule fois ; "Style du clavier" suit le style
+                    if (kbPalDrawn[i] && i != 10) continue;   // palettes fixes : dessinées une seule fois ; "Theme du clavier" suit le style
                     kbPalDrawn[i] = true;
                     var px = new Color[32];
                     for (int x = 0; x < 32; x++) px[x] = Ar6dofKbFx.Sample(i, x / 32f);
@@ -963,48 +971,50 @@ namespace AR6DoF
             return Ar6dofVrTextField.Make(box, new Vector2(gx + 65f, y), new Vector2(78f, 44f), "", "", t => onValue(t), t => { onValue(t); RefreshAll(); }, 21);
         }
 
-        void BuildColorPicker(RectTransform box)
+        /// <summary>Palettes toutes faites : cartes larges (nom + 4 couleurs) tout en haut de l'onglet, plus un bouton « Palette aleatoire ».</summary>
+        void BuildPaletteCards(RectTransform box)
         {
-            picker = Ar6dofVrColorPicker.Make(box, new Vector2(-175f, -95f), 300f, h => { hue = h; SetHsv(); }, (sa, va) => { sat = sa; val = va; SetHsv(); });
+            Ar6dofVrUi.Label(box, "Palettes", new Vector2(-170f, 88f), new Vector2(300f, 32f), 24, TextAnchor.MiddleLeft).MakeAccent();
+            Btn(box, 190f, 88f, 300f, "Palette aleatoire", RandomPalette, 18, 40f);
+            for (int i = 0; i < PalNames.Length; i++)
+            {
+                int pi = i;
+                var b = Btn(box, -216f + 216f * (i % 3), 28f - 66f * (i / 3), 210f, PalNames[i], () => ApplyPalette(pi), 20, 56f);
+                var lbl = b.GetComponentInChildren<Text>();
+                if (lbl != null) { lbl.alignment = TextAnchor.MiddleLeft; lbl.rectTransform.offsetMin = new Vector2(14f, 10f); lbl.rectTransform.offsetMax = new Vector2(-6f, 0f); }
+                // bande des 4 couleurs : fond, boutons, accent, texte
+                for (int c = 0; c < 4; c++)
+                {
+                    var sw = Ar6dofVrUi.Rect(b.transform, "Couleur" + c, new Vector2(-66f + 44f * c, -17f), new Vector2(40f, 9f));
+                    var si = sw.gameObject.AddComponent<Image>();
+                    si.color = Hex(PalCols[i, c]);
+                    si.raycastTarget = false;
+                    Ar6dofTheme.SetRounded(si, 4);
+                }
+            }
+        }
 
-            var pv = Ar6dofVrUi.Rect(box, "Apercu", new Vector2(160f, 22f), new Vector2(300f, 44f));
+        void BuildColorPicker(RectTransform box, float oy)
+        {
+            picker = Ar6dofVrColorPicker.Make(box, new Vector2(-175f, oy - 95f), 300f, h => { hue = h; SetHsv(); }, (sa, va) => { sat = sa; val = va; SetHsv(); });
+
+            var pv = Ar6dofVrUi.Rect(box, "Apercu", new Vector2(160f, oy + 22f), new Vector2(300f, 44f));
             preview = pv.gameObject.AddComponent<Image>();
             preview.raycastTarget = false;
             Ar6dofTheme.SetRounded(preview, 10);
 
-            Ar6dofVrUi.Label(box, "HEX", new Vector2(48f, -40f), new Vector2(70f, 30f), 20, TextAnchor.MiddleLeft);
-            fHex = Ar6dofVrTextField.Make(box, new Vector2(215f, -40f), new Vector2(190f, 44f), "", "#RRGGBB", t => ApplyHex(t), t => { ApplyHex(t); RefreshAll(); }, 22);
+            Ar6dofVrUi.Label(box, "HEX", new Vector2(48f, oy - 40f), new Vector2(70f, 30f), 20, TextAnchor.MiddleLeft);
+            fHex = Ar6dofVrTextField.Make(box, new Vector2(215f, oy - 40f), new Vector2(190f, 44f), "", "#RRGGBB", t => ApplyHex(t), t => { ApplyHex(t); RefreshAll(); }, 22);
 
             string[] rgbN = { "R", "G", "B" }, hsvN = { "H", "S", "V" };
             for (int k = 0; k < 3; k++)
             {
                 int kk = k;
                 float gx = 10f + 100f * k;
-                fRgb[k] = ColorField(box, gx, -100f, rgbN[k], t => ApplyRgb(kk, t));
-                fHsv[k] = ColorField(box, gx, -160f, hsvN[k], t => ApplyHsvField(kk, t));
+                fRgb[k] = ColorField(box, gx, oy - 100f, rgbN[k], t => ApplyRgb(kk, t));
+                fHsv[k] = ColorField(box, gx, oy - 160f, hsvN[k], t => ApplyHsvField(kk, t));
             }
-            Btn(box, 160f, -222f, 300f, "Couleur aleatoire", RandomColor, 20, 44f);
-
-            Ar6dofVrUi.Label(box, "Palettes", new Vector2(-250f, -300f), new Vector2(200f, 28f), 18, TextAnchor.MiddleLeft);
-            Btn(box, 150f, -300f, 320f, "Palette aleatoire", RandomPalette, 18, 40f);
-            for (int i = 0; i < PalNames.Length; i++)
-            {
-                int pi = i;
-                var b = Btn(box, -234f + 156f * (i % 4), -360f - 54f * (i / 4), 150f, PalNames[i], () => ApplyPalette(pi), 17, 46f);
-                // échantillon : carré de la couleur de fond avec un rond d'accent
-                var sw = Ar6dofVrUi.Rect(b.transform, "Echantillon", new Vector2(-52f, 0f), new Vector2(28f, 28f));
-                var si = sw.gameObject.AddComponent<Image>();
-                si.color = Hex(PalCols[i, 0]);
-                si.raycastTarget = false;
-                Ar6dofTheme.SetRounded(si, 6);
-                var ac = Ar6dofVrUi.Rect(sw, "Accent", Vector2.zero, new Vector2(14f, 14f));
-                var ai = ac.gameObject.AddComponent<Image>();
-                ai.color = Hex(PalCols[i, 2]);
-                ai.raycastTarget = false;
-                Ar6dofTheme.SetRounded(ai, 100);
-                var lbl = b.GetComponentInChildren<Text>();
-                if (lbl != null) lbl.rectTransform.offsetMin = new Vector2(24f, 0f);
-            }
+            Btn(box, 160f, oy - 222f, 300f, "Couleur aleatoire", RandomColor, 20, 44f);
             refreshers.Add(RefreshPicker);
         }
 

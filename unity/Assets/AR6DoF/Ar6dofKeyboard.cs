@@ -40,8 +40,13 @@ namespace AR6DoF
         float kbMinX, kbMaxX, kbMinY, kbMaxY;
         float nextFx, fxAnimEnd;
         bool fxWasOn;
-        Vector2 ripplePos;
-        float rippleT = -10f;
+        // ondes de l'animation "Onde" : une par touche appuyée, elles se cumulent et finissent leur course
+        const int MaxRipples = 10;
+        readonly Vector2[] rippleOrigin = new Vector2[MaxRipples];
+        readonly float[] rippleStart = new float[MaxRipples];
+        int rippleCount;
+        readonly Vector2[] rpPos = new Vector2[MaxRipples + 1];   // ondes en cours pour l'image dessinée (+1 : onde "de repos" au centre)
+        readonly float[] rpAge = new float[MaxRipples + 1];
         Transform keysRoot;
         Font font;
         Shader shader;
@@ -209,7 +214,6 @@ namespace AR6DoF
                         x += w + gap;
                     }
                 }
-            ApplyGameTints();
             foreach (var k in keys) k.Refresh();
             // poignées sous le clavier : barre = déplacer, coin = taille
             float barY = -top - keySize * 0.5f - 0.032f;
@@ -248,7 +252,6 @@ namespace AR6DoF
             if (Ar6dofSettings.Current.kbNumpad != builtNumpad) { Build(); return; }   // pavé numérique ajouté ou retiré
             keysRoot.localScale = Vector3.one * Mathf.Clamp(Ar6dofSettings.Current.keyboardScale, 0.4f, 3f);
             int corner = Ar6dofSettings.StyleFor(Ar6dofElem.Keyboard).corner;
-            ApplyGameTints();
             foreach (var k in keys)
             {
                 if (roundedShader && k.quad != null) Ar6dofTheme.SetRoundedSize(k.quad.sharedMaterial, k.quad.transform.localScale.x, k.quad.transform.localScale.y, corner);
@@ -349,30 +352,24 @@ namespace AR6DoF
             keys.Add(key);
         }
 
-        // ------------------------------------------------------------------ touches de jeu + animation lumineuse
-        /// <summary>Colore Z Q S D et / ou W A S D (couleurs au choix) ; une touche commune aux deux (S, D) prend le mélange.</summary>
-        void ApplyGameTints()
-        {
-            var d = Ar6dofSettings.Current;
-            Color cw = Ar6dofKbFx.Tint(d.kbWasdColor), cz = Ar6dofKbFx.Tint(d.kbZqsdColor);
-            foreach (var k in keys)
-            {
-                k.hasTint = false;
-                if (k.def.kind != Kind.Char || k.def.label == null || k.def.label.Length != 1) continue;
-                char ch = char.ToLowerInvariant(k.def.label[0]);
-                bool w = d.kbShowWasd && (ch == 'w' || ch == 'a' || ch == 's' || ch == 'd');
-                bool z = d.kbShowZqsd && (ch == 'z' || ch == 'q' || ch == 's' || ch == 'd');
-                if (w && z) { k.hasTint = true; k.tint = Color.Lerp(cw, cz, 0.5f); }
-                else if (w) { k.hasTint = true; k.tint = cw; }
-                else if (z) { k.hasTint = true; k.tint = cz; }
-            }
-        }
-
+        // ------------------------------------------------------------------ animation lumineuse
         /// <summary>Appelé à chaque touche : lance l'onde et le flash de l'animation "Reactif".</summary>
         void NoteKeyPress(KeyDef def)
         {
             foreach (var k in keys)
-                if (k.def == def) { ripplePos = k.pos; rippleT = Time.unscaledTime; k.flash = 1f; break; }
+                if (k.def == def)
+                {
+                    k.flash = 1f;
+                    if (rippleCount == MaxRipples)
+                    {   // trop d'ondes en même temps : la plus ancienne disparaît
+                        for (int i = 1; i < MaxRipples; i++) { rippleOrigin[i - 1] = rippleOrigin[i]; rippleStart[i - 1] = rippleStart[i]; }
+                        rippleCount--;
+                    }
+                    rippleOrigin[rippleCount] = k.pos;
+                    rippleStart[rippleCount] = Time.unscaledTime;
+                    rippleCount++;
+                    break;
+                }
         }
 
         void Update()
@@ -397,6 +394,24 @@ namespace AR6DoF
             float strength = Mathf.Clamp01(d.kbAnimStrength);
             float w = Mathf.Max(0.001f, kbMaxX - kbMinX), h = Mathf.Max(0.001f, kbMaxY - kbMinY);
             Vector2 center = new Vector2((kbMinX + kbMaxX) * 0.5f, (kbMinY + kbMaxY) * 0.5f);
+            // ondes : vitesse du front (m/s), distance maximale à parcourir, retrait de celles qui ont fini leur course
+            float rippleSpeed = 0.28f * Mathf.Max(0.3f, d.kbAnimSpeed);
+            float rippleMax = Mathf.Sqrt(w * w + h * h);
+            float rippleLife = (rippleMax + 0.15f) / rippleSpeed;
+            int rpN = 0;
+            if (d.kbAnim == 6)
+            {
+                int keep = 0;
+                for (int i = 0; i < rippleCount; i++)
+                {
+                    if (now - rippleStart[i] > rippleLife) continue;
+                    rippleOrigin[keep] = rippleOrigin[i]; rippleStart[keep] = rippleStart[i]; keep++;
+                }
+                rippleCount = keep;
+                for (int i = 0; i < rippleCount; i++) { rpPos[rpN] = rippleOrigin[i]; rpAge[rpN] = now - rippleStart[i]; rpN++; }
+                if (rpN == 0) { rpPos[0] = center; rpAge[0] = Mathf.Repeat(now, rippleLife + 0.6f); rpN = 1; }   // au repos : une onde part du centre en boucle
+            }
+            else rippleCount = 0;
             foreach (var k in keys)
             {
                 float u = (k.pos.x - kbMinX) / w, v = (k.pos.y - kbMinY) / h;   // 0..1 sur le clavier
@@ -437,15 +452,24 @@ namespace AR6DoF
                         col = Ar6dofKbFx.Sample(d.kbAnimPalette, k.seed + t * 0.05f);
                         break;
                     }
-                    default:  // 6 onde : un cercle part de la dernière touche appuyée (ou du centre au repos)
+                    default:  // 6 onde : un cercle part de chaque touche appuyée ; les ondes se cumulent et vont jusqu'au bout
                     {
-                        Vector2 o = rippleT > 0f && now - rippleT < 4f ? ripplePos : center;
-                        float age = rippleT > 0f && now - rippleT < 4f ? now - rippleT : Mathf.Repeat(t * 0.5f, 2.5f);
-                        float dist = (k.pos - o).magnitude;
-                        float front = age * 0.28f * Mathf.Max(0.3f, d.kbAnimSpeed);
-                        float ring = Mathf.Exp(-Mathf.Pow((dist - front) / 0.035f, 2f));
-                        amount = ring * Mathf.Clamp01(1.2f - age * 0.3f);
-                        col = Ar6dofKbFx.Sample(d.kbAnimPalette, dist * 3f - t * 0.1f);
+                        float keep = 1f, wsum = 0f;
+                        Color acc = Color.black;
+                        for (int i = 0; i < rpN; i++)
+                        {
+                            float dist = (k.pos - rpPos[i]).magnitude;
+                            float front = rpAge[i] * rippleSpeed;
+                            float e = (dist - front) / 0.035f;
+                            if (e > 3f || e < -3f) continue;
+                            float a = Mathf.Exp(-e * e) * (1f - 0.7f * Mathf.Clamp01(front / rippleMax));
+                            keep *= 1f - a;
+                            acc += Ar6dofKbFx.Sample(d.kbAnimPalette, dist * 3f - t * 0.1f) * a;
+                            wsum += a;
+                        }
+                        amount = 1f - keep;
+                        col = wsum > 0.0001f ? acc / wsum : Ar6dofKbFx.Sample(d.kbAnimPalette, t * 0.1f);
+                        col.a = 1f;
                         break;
                     }
                 }

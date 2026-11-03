@@ -60,17 +60,18 @@ namespace AR6DoF
         public int chromeCorner = 1;       // 0 haut gauche, 1 haut droite, 2 bas gauche, 3 bas droite
         public float chromeScale = 1f;     // taille des boutons réduire / fermer / redimensionner (1 = normal)
 
-        // Clavier virtuel : pavé numérique, touches de jeu en couleur, animation lumineuse
+        // Clavier virtuel : pavé numérique, animation lumineuse
         public bool kbNumpad = false;
-        public bool kbShowWasd = false;    // W A S D colorées
-        public bool kbShowZqsd = false;    // Z Q S D colorées
-        public int kbWasdColor = 0;        // index dans la liste de couleurs prédéfinies du clavier
-        public int kbZqsdColor = 3;
         public int kbAnim = 0;             // 0 aucune, 1 vague, 2 cycle, 3 respiration, 4 réactif, 5 scintillement, 6 onde
         public int kbAnimDir = 0;          // sens de la vague : 0 droite, 1 gauche, 2 bas, 3 haut, 4 depuis le centre
         public int kbAnimPalette = 0;      // 0 arc-en-ciel, 1.. autres palettes
         public float kbAnimSpeed = 1f;     // 0.1 .. 4
         public float kbAnimStrength = 0.7f;// 0 .. 1 : part de la couleur animée mélangée à la touche
+
+        // Performances
+        public int perfFps = 0;            // 0 suit l'écran, 1 = 60, 2 = 90, 3 = 120, 4 = illimité
+        public int perfMsaa = 1;           // 1 = pas de lissage des bords (inutile : textes et coins arrondis se lissent déjà), 2 = MSAA x2
+        public float perfRenderScale = 1f; // 0.5 .. 1 : résolution de l'interface des yeux (appliqué au lancement suivant)
 
         // Télécommande
         public float remoteMinCutoff = 2f;

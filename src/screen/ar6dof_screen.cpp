@@ -5,6 +5,8 @@
 //  - Côté Unity, un évènement de rendu (GL.IssuePluginEvent) copie cette texture partagée dans la RenderTexture de l'écran,
 //    sur le thread de rendu d'Unity. Aucun en-tête Unity n'est nécessaire : le périphérique D3D11 d'Unity est retrouvé à
 //    partir du pointeur de sa texture (GetNativeTexturePtr).
+//  - Écran virtuel LOGICIEL : A6S_StartWindow capture UNE FENÊTRE d'application (Windows.Graphics.Capture), même si elle est cachée
+//    derrière d'autres. Aucun pilote d'affichage à installer. Même chemin GPU -> GPU que pour un moniteur.
 //  - Limites : même carte graphique pour Unity et l'écran capturé ; bureau en SDR (B8G8R8A8) ; le curseur n'est pas dessiné.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -13,14 +15,27 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <unknwn.h>
 #include <d3d11.h>
+#include <d3d11_4.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
+
+#include <inspectable.h>
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <windows.graphics.capture.interop.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -58,6 +73,7 @@ struct Slot {
   std::thread th;
   std::atomic<bool> run{false};
   std::atomic<int> monitor{-1}, maxFps{60}, w{0}, h{0};
+  std::atomic<long long> hwnd{0};   // != 0 : on capture cette fenêtre au lieu d'un moniteur
   std::atomic<int> status{0};   // 0 arrêté, 1 démarrage, 2 capture en cours, 3 écran inaccessible, 4 format non géré (HDR ?)
   std::atomic<bool> active{true};
   std::atomic<uint64_t> frames{0};
@@ -149,12 +165,121 @@ void CaptureSession(Slot& s) {
   s.shared = nullptr;
 }
 
+// Accès au ID3D11Texture2D d'une surface Windows.Graphics.Capture (interface COM documentée par Microsoft, non exposée par les en-têtes C++/WinRT)
+struct __declspec(uuid("A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1")) IDirect3DDxgiInterfaceAccessLocal : ::IUnknown {
+  virtual HRESULT __stdcall GetInterface(GUID const& id, void** object) = 0;
+};
+
+// Session de capture d'UNE FENÊTRE (écran virtuel logiciel). Renvoie quand la fenêtre change de taille (on recrée tout à la bonne taille),
+// se ferme ou à l'arrêt.
+void WindowSession(Slot& s) {
+  using namespace winrt::Windows::Graphics::Capture;
+  using namespace winrt::Windows::Graphics::DirectX;
+  using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
+  HWND hw = reinterpret_cast<HWND>(static_cast<intptr_t>(s.hwnd.load()));
+  const long long hwKey = s.hwnd.load();
+  if (!hw || !IsWindow(hw)) { s.status = 3; SleepMs(500); return; }
+  try {
+    static thread_local bool apt = false;
+    if (!apt) { apt = true; try { winrt::init_apartment(winrt::apartment_type::multi_threaded); } catch (...) {} }
+    if (!GraphicsCaptureSession::IsSupported()) { s.status = 3; SleepMs(1000); return; }
+
+    ComPtr<ID3D11Device> dev;
+    ComPtr<ID3D11DeviceContext> ctx;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &dev, nullptr, &ctx))) {
+      s.status = 3; SleepMs(500); return;
+    }
+    ComPtr<ID3D11Multithread> mt;
+    if (SUCCEEDED(ctx.As(&mt))) mt->SetMultithreadProtected(TRUE);   // la capture Windows utilise ce périphérique depuis son propre thread
+
+    auto interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+    GraphicsCaptureItem item{nullptr};
+    if (FAILED(interop->CreateForWindow(hw, winrt::guid_of<GraphicsCaptureItem>(), winrt::put_abi(item))) || !item) { s.status = 3; SleepMs(700); return; }
+    auto size = item.Size();
+    if (size.Width <= 0 || size.Height <= 0) { s.status = 3; SleepMs(500); return; }
+
+    ComPtr<IDXGIDevice> dxgiDev;
+    if (FAILED(dev.As(&dxgiDev))) { s.status = 3; SleepMs(500); return; }
+    winrt::com_ptr<::IInspectable> insp;
+    if (FAILED(CreateDirect3D11DeviceFromDXGIDevice(dxgiDev.Get(), insp.put())) || !insp) { s.status = 3; SleepMs(500); return; }
+    IDirect3DDevice winrtDev = insp.as<IDirect3DDevice>();
+
+    // Texture partagée avec Unity (comme pour un moniteur)
+    D3D11_TEXTURE2D_DESC td = {};
+    td.Width = (UINT)size.Width; td.Height = (UINT)size.Height; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    td.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+    ComPtr<ID3D11Texture2D> shared;
+    if (FAILED(dev->CreateTexture2D(&td, nullptr, &shared))) { s.status = 3; SleepMs(500); return; }
+    ComPtr<IDXGIKeyedMutex> km;
+    ComPtr<IDXGIResource> res;
+    HANDLE hs = nullptr;
+    if (FAILED(shared.As(&km)) || FAILED(shared.As(&res)) || FAILED(res->GetSharedHandle(&hs)) || !hs) { s.status = 3; SleepMs(500); return; }
+
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    auto closedFlag = std::make_shared<std::atomic<bool>>(false);   // partagé avec le gestionnaire d'évènement (qui peut survivre à cette fonction en cas d'erreur)
+    auto pool = Direct3D11CaptureFramePool::CreateFreeThreaded(winrtDev, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size);
+    auto tokArrived = pool.FrameArrived([ev](auto&&, auto&&) { SetEvent(ev); });
+    auto tokClosed = item.Closed([closedFlag, ev](auto&&, auto&&) { *closedFlag = true; SetEvent(ev); });
+    auto session = pool.CreateCaptureSession(item);
+    try { session.IsCursorCaptureEnabled(false); } catch (...) {}   // le curseur est dessiné par Unity
+    session.StartCapture();
+
+    s.w = (int)size.Width; s.h = (int)size.Height;
+    s.shared = hs;
+    s.gen++;
+    s.status = 2;
+
+    auto lastCopy = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    while (s.run && s.hwnd.load() == hwKey && !closedFlag->load() && IsWindow(hw)) {
+      if (!s.active) { SleepMs(30); continue; }
+      WaitForSingleObject(ev, 100);
+      auto frame = pool.TryGetNextFrame();
+      if (!frame) continue;
+      while (auto newer = pool.TryGetNextFrame()) { frame.Close(); frame = newer; }   // seule la plus récente compte
+      auto cs = frame.ContentSize();
+      if (cs.Width != size.Width || cs.Height != size.Height) { frame.Close(); break; }   // fenêtre redimensionnée : on repart à la bonne taille
+      int fps = std::max(5, std::min(240, s.maxFps.load()));
+      auto due = lastCopy + std::chrono::microseconds(900000 / fps);
+      if (std::chrono::steady_clock::now() < due) std::this_thread::sleep_until(due);
+      auto access = frame.Surface().as<IDirect3DDxgiInterfaceAccessLocal>();
+      ComPtr<ID3D11Texture2D> tex;
+      if (SUCCEEDED(access->GetInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(tex.GetAddressOf()))) && km->AcquireSync(0, 8) == S_OK) {
+        D3D11_TEXTURE2D_DESC sd;
+        tex->GetDesc(&sd);
+        D3D11_BOX box = {0, 0, 0, std::min(sd.Width, td.Width), std::min(sd.Height, td.Height), 1};
+        ctx->CopySubresourceRegion(shared.Get(), 0, 0, 0, 0, tex.Get(), 0, &box);
+        km->ReleaseSync(0);
+        ctx->Flush();
+        s.frames++;
+        lastCopy = std::chrono::steady_clock::now();
+      }
+      frame.Close();
+    }
+    s.shared = nullptr;
+    pool.FrameArrived(tokArrived);   // retire le gestionnaire
+    item.Closed(tokClosed);
+    session.Close();
+    pool.Close();
+    CloseHandle(ev);
+    if (!IsWindow(hw) || closedFlag->load()) { s.status = 3; SleepMs(300); }
+  } catch (...) {
+    s.shared = nullptr;
+    s.status = 3;
+    SleepMs(700);
+  }
+}
+
 void CaptureThread(int si) {
   Slot& s = g_slots[si];
   SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);   // réveil rapide dès qu'une image est présentée
   while (s.run) {
     s.status = 1;
-    CaptureSession(s);
+    if (s.hwnd.load() != 0) WindowSession(s);
+    else CaptureSession(s);
   }
   s.status = 0;
 }
@@ -216,6 +341,20 @@ A6S_API void A6S_Start(int slot, int monitor, int maxFps) {
   Slot& s = g_slots[slot];
   StopSlot(s);
   s.monitor = monitor;
+  s.hwnd = 0;
+  s.maxFps = maxFps;
+  s.active = true;
+  s.run = true;
+  s.th = std::thread(CaptureThread, slot);
+}
+
+// Écran virtuel logiciel : capture la fenêtre 'hwnd' (poignée Windows) au lieu d'un moniteur.
+A6S_API void A6S_StartWindow(int slot, long long hwnd, int maxFps) {
+  if (slot < 0 || slot >= kSlots) return;
+  Slot& s = g_slots[slot];
+  StopSlot(s);
+  s.monitor = -1;
+  s.hwnd = hwnd;
   s.maxFps = maxFps;
   s.active = true;
   s.run = true;

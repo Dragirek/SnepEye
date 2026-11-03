@@ -1,9 +1,11 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
 namespace AR6DoF
@@ -47,6 +49,126 @@ namespace AR6DoF
             arr.InsertArrayElementAtIndex(arr.arraySize);
             arr.GetArrayElementAtIndex(arr.arraySize - 1).objectReferenceValue = s;
             so.ApplyModifiedProperties();
+        }
+
+        // ------------------------------------------------------------------ réglages graphiques URP adaptés au projet
+        static bool SetP(SerializedObject so, string name, object value, StringBuilder log)
+        {
+            var p = so.FindProperty(name);
+            if (p == null) return false;
+            bool changed = false;
+            try
+            {
+            switch (p.propertyType)
+            {
+                case SerializedPropertyType.Boolean:
+                {
+                    bool v = (bool)value;
+                    changed = p.boolValue != v; p.boolValue = v; break;
+                }
+                case SerializedPropertyType.Integer:
+                case SerializedPropertyType.Enum:
+                {
+                    int v = (int)value;
+                    changed = p.intValue != v; p.intValue = v; break;
+                }
+                case SerializedPropertyType.Float:
+                {
+                    float v = System.Convert.ToSingle(value);
+                    changed = !Mathf.Approximately(p.floatValue, v); p.floatValue = v; break;
+                }
+                default: return false;
+            }
+            }
+            catch (System.Exception) { return false; }   // propriété d'un autre type que prévu dans cette version d'URP : on la laisse
+            if (changed && log != null) log.AppendLine("  - " + name + " = " + value);
+            return changed;
+        }
+
+        /// <summary>
+        /// Le casque n'affiche que de l'interface : pas de lumière, pas d'ombre, pas de post-traitement. On coupe donc dans l'asset URP du projet
+        /// tout ce qui coûte du GPU sans rien apporter : lissage MSAA (les textes et les coins arrondis se lissent déjà), HDR, copie de l'image,
+        /// texture de profondeur, lumières et ombres, Forward+ ; et dans le moteur de rendu : l'occlusion ambiante (SSAO), les décalques, l'amorçage de profondeur.
+        /// </summary>
+        static string OptimizeGraphics()
+        {
+            var assets = new List<Object>();
+            System.Action<Object> add = a => { if (a != null && !assets.Contains(a)) assets.Add(a); };
+            add(GraphicsSettings.defaultRenderPipeline);
+            add(GraphicsSettings.currentRenderPipeline);
+            for (int i = 0; i < QualitySettings.names.Length; i++) add(QualitySettings.GetRenderPipelineAssetAt(i));
+            var log = new StringBuilder();
+            int nAssets = 0;
+            foreach (var a in assets)
+            {
+                if (a.GetType().Name != "UniversalRenderPipelineAsset") continue;
+                nAssets++;
+                log.AppendLine("Asset URP : " + a.name);
+                var so = new SerializedObject(a);
+                SetP(so, "m_MSAA", 1, log);
+                SetP(so, "m_SupportsHDR", false, log);
+                SetP(so, "m_RequireDepthTexture", false, log);
+                SetP(so, "m_RequireOpaqueTexture", false, log);
+                SetP(so, "m_MainLightRenderingMode", 0, log);
+                SetP(so, "m_MainLightShadowsSupported", false, log);
+                SetP(so, "m_AdditionalLightsRenderingMode", 0, log);
+                SetP(so, "m_AdditionalLightsShadowsSupported", false, log);
+                SetP(so, "m_SoftShadowsSupported", false, log);
+                SetP(so, "m_ShadowCascadeCount", 1, log);
+                SetP(so, "m_ShadowDistance", 1f, log);
+                SetP(so, "m_UseSRPBatcher", true, log);
+                SetP(so, "m_RenderScale", 1f, log);
+                SetP(so, "m_SupportsTerrainHoles", false, log);
+                SetP(so, "m_ColorGradingMode", 0, log);
+                SetP(so, "m_SupportsLightLayers", false, log);
+                SetP(so, "m_ReflectionProbeBlending", false, log);
+                SetP(so, "m_ReflectionProbeBoxProjection", false, log);
+                SetP(so, "m_UseAdaptivePerformance", false, log);
+                so.ApplyModifiedProperties();
+                EditorUtility.SetDirty(a);
+
+                var list = so.FindProperty("m_RendererDataList");
+                if (list == null) continue;
+                for (int r = 0; r < list.arraySize; r++)
+                {
+                    var rd = list.GetArrayElementAtIndex(r).objectReferenceValue;
+                    if (rd == null) continue;
+                    log.AppendLine(" Moteur de rendu : " + rd.name);
+                    var rso = new SerializedObject(rd);
+                    SetP(rso, "m_RenderingMode", 0, log);            // Forward (pas Forward+ ni Deferred)
+                    SetP(rso, "m_DepthPrimingMode", 0, log);         // désactivé
+                    SetP(rso, "m_IntermediateTextureMode", 0, log);  // Auto : pas de texture intermédiaire inutile
+                    var feats = rso.FindProperty("m_RendererFeatures");
+                    if (feats != null)
+                        for (int f = 0; f < feats.arraySize; f++)
+                        {
+                            var fo = feats.GetArrayElementAtIndex(f).objectReferenceValue;
+                            if (fo == null) continue;
+                            string tn = fo.GetType().Name;
+                            if (!(tn.Contains("ScreenSpaceAmbientOcclusion") || tn.Contains("Decal") || tn.Contains("ScreenSpaceShadows"))) continue;
+                            var fso = new SerializedObject(fo);
+                            if (SetP(fso, "m_Active", false, log)) log.AppendLine("    effet coupe : " + tn);
+                            fso.ApplyModifiedProperties();
+                            EditorUtility.SetDirty(fo);
+                        }
+                    rso.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(rd);
+                }
+            }
+            // lumières de la scène : inutiles (tout est sans éclairage), au moins plus d'ombres
+            foreach (var l in Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+                if (l.shadows != LightShadows.None) { Undo.RecordObject(l, "AR6DoF lumiere"); l.shadows = LightShadows.None; EditorUtility.SetDirty(l); }
+            AssetDatabase.SaveAssets();
+            if (nAssets == 0) return "Aucun asset URP trouve dans le projet (Edit > Project Settings > Graphics) : rien a optimiser.";
+            string text = log.ToString().Trim();
+            Debug.Log("AR6DoF : reglages graphiques optimises\n" + text);
+            return nAssets + " asset(s) URP optimise(s). Le detail est dans la Console.\nSi rien n'est liste, c'est que tout etait deja regle.";
+        }
+
+        [MenuItem("AR6DoF/Optimiser les reglages graphiques (GPU)")]
+        static void OptimizeGraphicsMenu()
+        {
+            EditorUtility.DisplayDialog("AR6DoF", OptimizeGraphics(), "OK");
         }
 
         /// <summary>ar6dof_screen.dll ne sait parler qu'à Direct3D 11 : avec Direct3D 12 (défaut des nouveaux projets Unity 6) ou Vulkan, Unity plante.</summary>
@@ -149,12 +271,14 @@ namespace AR6DoF
             AlwaysInclude(shFlat);
             if (shRounded != null) AlwaysInclude(shRounded);
             PlayerSettings.runInBackground = true;
+            OptimizeGraphics();
             if (ForceD3D11()) todo.Insert(0, "REDEMARRE UNITY : l'API graphique a ete reglee sur Direct3D11 (obligatoire, sinon les ecrans virtuels font planter Unity).");
 
             bool dll = false;
             foreach (string g in AssetDatabase.FindAssets("ar6dof_screen"))
                 if (AssetDatabase.GUIDToAssetPath(g).EndsWith("ar6dof_screen.dll")) dll = true;
             if (!dll) todo.Add("Copie ar6dof_screen.dll dans Assets/AR6DoF/Plugins/x86_64/ (sinon pas d'ecrans virtuels).");
+            todo.Add("Reglages graphiques optimises pour le casque (MSAA, SSAO, ombres... coupes ; detail dans la Console). A refaire a tout moment : menu AR6DoF > Optimiser les reglages graphiques (GPU).");
             todo.Add("Dans Launcher > Exe Path : chemin d'ar6dof_probe.exe (ou place le dossier ar6dof_probe-win64 a cote du dossier Assets).");
 
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());

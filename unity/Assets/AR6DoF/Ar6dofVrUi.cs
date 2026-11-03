@@ -69,6 +69,7 @@ namespace AR6DoF
             t.font = GetFont();
             t.fontSize = fontSize;
             t.alignment = anchor;
+            t.alignByGeometry = true;   // centré sur le dessin réel des lettres, pas sur leurs marges internes
             t.color = Color.white;
             t.text = text;
             t.horizontalOverflow = HorizontalWrapMode.Overflow;
@@ -88,6 +89,7 @@ namespace AR6DoF
             Ar6dofTheme.Attach(rt.gameObject, Ar6dofRole.Button, 24);
             if (onClick != null) b.onClick.AddListener(onClick);
             label = Label(rt, text, Vector2.zero, size, fontSize, TextAnchor.MiddleCenter);
+            label.gameObject.AddComponent<Ar6dofFitText>().Init(label, fontSize);   // un texte trop long rétrécit au lieu de dépasser du bouton
             return b;
         }
 
@@ -162,6 +164,38 @@ namespace AR6DoF
             tex.Apply(true);
             tex.filterMode = FilterMode.Bilinear;
             return Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), 100f);
+        }
+    }
+
+    /// <summary>Réduit la taille d'un texte (une seule ligne) pour qu'il tienne dans sa zone, sans jamais dépasser sa taille de départ. Se remet à jour quand le texte change.</summary>
+    public class Ar6dofFitText : MonoBehaviour
+    {
+        Text t;
+        int baseSize, minSize;
+        string last;
+        float lastW = -1f;
+
+        public void Init(Text text, int size)
+        {
+            t = text;
+            baseSize = size;
+            minSize = Mathf.Max(9, Mathf.RoundToInt(size * 0.55f));
+        }
+
+        void LateUpdate()
+        {
+            if (t == null) return;
+            string cur = t.text;
+            float w = ((RectTransform)transform).rect.width;
+            if ((object)cur == (object)last && Mathf.Abs(w - lastW) < 0.5f) return;
+            last = cur;
+            lastW = w;
+            if (string.IsNullOrEmpty(cur) || t.horizontalOverflow != HorizontalWrapMode.Overflow) return;
+            float avail = w - 14f;
+            if (avail < 20f) return;
+            t.fontSize = baseSize;
+            float pw = t.preferredWidth;
+            if (pw > avail) t.fontSize = Mathf.Max(minSize, Mathf.FloorToInt(baseSize * avail / pw));
         }
     }
 }

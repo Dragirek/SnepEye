@@ -16,6 +16,9 @@ namespace AR6DoF
         [NonSerialized] public Ar6dofScreens owner;
         public int slot;
         public int monitor;
+        public long hwnd;                                   // != 0 : écran virtuel logiciel = fenêtre d'application (monitor vaut alors -1)
+        public string windowTitle = "";
+        public bool IsWindow { get { return hwnd != 0; } }
         public int fps = 60;
         public float width = 1.6f;
         [NonSerialized] public Ar6dofScreenPanel parent;   // écran auquel celui-ci est collé (null = libre)
@@ -96,7 +99,14 @@ namespace AR6DoF
             chrome.resizeBegin = hit => BeginDrag(Ar6dofScreenHandle.Kind.Resize, hit, 0);
             chrome.resizeDrag = ray => Drag(ray);
             chrome.resizeEnd = EndDrag;
-            Ar6dofScreenNative.Start(slot, monitor, fps);
+            StartNative();
+        }
+
+        /// <summary>Démarre la capture : le moniteur, ou la fenêtre pour un écran virtuel logiciel.</summary>
+        void StartNative()
+        {
+            if (hwnd != 0) { Ar6dofWindows.Restore(hwnd); Ar6dofScreenNative.StartWindow(slot, hwnd, fps); }
+            else Ar6dofScreenNative.Start(slot, monitor, fps);
         }
 
         Material cursorCenterMat;
@@ -245,7 +255,8 @@ namespace AR6DoF
         // ------------------------------------------------------------------ mise à jour
         void RefreshRect()
         {
-            haveRect = Ar6dofScreenNative.MonitorRect(monitor, out rectL, out rectT, out rectR, out rectB);
+            haveRect = hwnd != 0 ? Ar6dofWindows.Bounds(hwnd, out rectL, out rectT, out rectR, out rectB)
+                                 : Ar6dofScreenNative.MonitorRect(monitor, out rectL, out rectT, out rectR, out rectB);
         }
 
         void RecreateTexture(int w, int h)
@@ -268,7 +279,7 @@ namespace AR6DoF
 
         void Update()
         {
-            if (Time.unscaledTime > nextRect) { nextRect = Time.unscaledTime + 2f; RefreshRect(); }
+            if (Time.unscaledTime > nextRect) { nextRect = Time.unscaledTime + (hwnd != 0 ? 0.4f : 2f); RefreshRect(); }   // une fenêtre peut être déplacée : position relue souvent
             int w = Ar6dofScreenNative.Width(slot), h = Ar6dofScreenNative.Height(slot);
             if (w > 0 && h > 0 && (rt == null || rt.width != w || rt.height != h)) RecreateTexture(w, h);
 
@@ -290,8 +301,9 @@ namespace AR6DoF
         public void SetMonitor(int m)
         {
             monitor = m;
+            hwnd = 0;
             lastFrames = 0;
-            Ar6dofScreenNative.Start(slot, monitor, fps);
+            StartNative();
             RefreshRect();
         }
 
@@ -300,7 +312,7 @@ namespace AR6DoF
         {
             open = on;
             gameObject.SetActive(on);
-            if (on) { lastFrames = 0; Ar6dofScreenNative.Start(slot, monitor, fps); }
+            if (on) { lastFrames = 0; StartNative(); }
             else Ar6dofScreenNative.Stop(slot);
         }
 
@@ -314,6 +326,12 @@ namespace AR6DoF
                 case 1: st = Ar6dofLoc.T(" (demarrage)"); break;
                 case 3: st = Ar6dofLoc.T(" (inaccessible)"); break;
                 case 4: st = Ar6dofLoc.T(" (HDR non gere)"); break;
+            }
+            if (hwnd != 0)
+            {
+                if (!Ar6dofWindows.Alive(hwnd)) st = Ar6dofLoc.T(" (fenetre fermee)");
+                string t = windowTitle.Length > 26 ? windowTitle.Substring(0, 25) + "..." : windowTitle;
+                return Ar6dofLoc.T("Fenetre") + " « " + t + " » - " + Ar6dofScreenNative.Width(slot) + "x" + Ar6dofScreenNative.Height(slot) + st;
             }
             return Ar6dofLoc.F("Moniteur {0}", monitor + 1) + " - " + Ar6dofScreenNative.Width(slot) + "x" + Ar6dofScreenNative.Height(slot) + st;
         }
@@ -381,6 +399,7 @@ namespace AR6DoF
         {
             int x, y;
             if (!Map(world, out x, out y)) return;
+            if (hwnd != 0) Ar6dofWindows.Raise(hwnd);   // la fenêtre passe au-dessus des autres pour que le clic tombe sur elle
             Ar6dofWinInput.SetCursor(x, y);
             Ar6dofWinInput.Nudge();
             Ar6dofWinInput.MouseButton(button, true);

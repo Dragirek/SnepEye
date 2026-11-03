@@ -129,12 +129,13 @@ namespace AR6DoF
             if (kb != null) { var fm = kb.GetComponent<Ar6dofFloatingMenu>(); if (fm != null) fm.Summon(); }   // le clavier se centre sous les écrans
         }
 
-        Ar6dofScreenPanel NewPanel(int monitor, int fps, float width)
+        Ar6dofScreenPanel NewPanel(int monitor, int fps, float width, long windowHandle = 0)
         {
             var go = new GameObject("Ecran virtuel " + (panels.Count + 1));
             var p = go.AddComponent<Ar6dofScreenPanel>();
             int slot = 0;
             while (slot < 8 && panels.Exists(x => x.slot == slot)) slot++;   // 4 emplacements natifs au maximum
+            if (windowHandle != 0) { p.hwnd = windowHandle; p.windowTitle = Ar6dofWindows.Title(windowHandle); monitor = -1; }
             p.Init(this, slot, monitor, fps, width);
             panels.Add(p);
             return p;
@@ -179,10 +180,20 @@ namespace AR6DoF
         // ------------------------------------------------------------------ ajout / retrait
         public void AddScreen() { AddScreen(PickMonitor()); }
 
-        public void AddScreen(int monitor)
+        public void AddScreen(int monitor) { AddScreenCore(monitor, 0); }
+
+        /// <summary>Écran virtuel logiciel : une fenêtre d'application affichée comme un écran, à la taille choisie (0 = on ne touche pas).</summary>
+        public void AddWindowScreen(long hwnd, int clientW, int clientH)
+        {
+            if (!Ar6dofWindows.Alive(hwnd)) return;
+            if (clientW > 0 && clientH > 0) Ar6dofWindows.SetClientSize(hwnd, clientW, clientH);
+            AddScreenCore(-1, hwnd);
+        }
+
+        void AddScreenCore(int monitor, long windowHandle)
         {
             if (panels.Count >= maxScreens || panels.Count >= 4) return;
-            var p = NewPanel(monitor, defaultFps, startWidth);
+            var p = NewPanel(monitor, defaultFps, startWidth, windowHandle);
             // le premier côté libre d'un écran existant, sinon devant toi
             bool placed = false;
             foreach (var q in panels)
@@ -318,12 +329,14 @@ namespace AR6DoF
             try
             {
                 var cfg = new Cfg { hinge = hingeDegrees, snap = snapEnabled };
-                foreach (var p in panels)
+                // les écrans-fenêtres ne sont pas conservés d'un lancement à l'autre (la poignée de la fenêtre change) : on ne sauve que les moniteurs
+                var saved = panels.FindAll(x => x.hwnd == 0);
+                foreach (var p in saved)
                     cfg.items.Add(new Item
                     {
                         monitor = p.monitor, fps = p.fps, width = p.width,
                         pos = p.transform.position, euler = p.transform.rotation.eulerAngles,
-                        parent = p.parent != null ? panels.IndexOf(p.parent) : -1, side = p.side, closed = !p.open
+                        parent = p.parent != null ? saved.IndexOf(p.parent) : -1, side = p.side, closed = !p.open
                     });
                 PlayerPrefs.SetString(PrefKey, JsonUtility.ToJson(cfg));
                 PlayerPrefs.Save();
@@ -356,7 +369,7 @@ namespace AR6DoF
             Vector2 W = new Vector2(400, 46);
             float y = 255;
             titleText = MakeText(go.transform, "", new Vector2(0, y), W, 28, TextAnchor.MiddleCenter); y -= 54;
-            sourceText = MakeButton("", new Vector2(0, y), W, () => CycleMonitor()); y -= 52;
+            sourceText = MakeButton("", new Vector2(0, y), W, () => CycleSource()); y -= 52;
             fpsText = MakeButton("", new Vector2(0, y), W, () => CycleFps()); y -= 52;
             snapText = MakeButton("", new Vector2(0, y), W, () => { snapEnabled = !snapEnabled; Refresh(); Save(); }); y -= 52;
             hingeText = MakeButton("", new Vector2(0, y), W, () => CycleHinge()); y -= 52;
@@ -384,10 +397,15 @@ namespace AR6DoF
 
         // ------------------------------------------------------------------ choix du nouvel écran : écran réel ou virtuel
         Canvas addDlg;
-        Text addInfo;
+        Text addInfo, addHeader, addModeText, addBackText;
         readonly List<Button> addMonBtns = new List<Button>();
         readonly List<Text> addMonTexts = new List<Text>();
-        const int DlgMax = 6;
+        readonly List<Button> addWinBtns = new List<Button>();
+        readonly List<Text> addWinTexts = new List<Text>();
+        readonly List<Ar6dofWindows.Info> addWins = new List<Ar6dofWindows.Info>();
+        bool addWinMode;
+        int addSizeIdx = 2;   // 1920 x 1080 par défaut
+        const int DlgMax = 6, DlgWinMax = 7;
 
         void BuildAddDialog()
         {
@@ -395,7 +413,7 @@ namespace AR6DoF
             var tr = addDlg.transform;
             var row = new Vector2(500, 50);
             Ar6dofVrUi.Label(tr, "Nouvel ecran", new Vector2(0, 315), new Vector2(500, 44), 30);
-            Ar6dofVrUi.Label(tr, "Ecrans reels (a leur resolution)", new Vector2(0, 262), new Vector2(500, 30), 20, TextAnchor.MiddleLeft);
+            addHeader = Ar6dofVrUi.Label(tr, "Ecrans reels (a leur resolution)", new Vector2(0, 262), new Vector2(500, 30), 20, TextAnchor.MiddleLeft);
             for (int i = 0; i < DlgMax; i++)
             {
                 int idx = i;
@@ -404,12 +422,18 @@ namespace AR6DoF
                 addMonBtns.Add(b);
                 addMonTexts.Add(t);
             }
-            Text vt;
-            Ar6dofVrUi.MakeButton(tr, "Ecran virtuel (un ecran Windows de plus)", new Vector2(0, -150), row, () => ShowVirtualInfo(), out vt, 21);
+            for (int i = 0; i < DlgWinMax; i++)
+            {
+                int idx = i;
+                Text t;
+                var b = Ar6dofVrUi.MakeButton(tr, "", new Vector2(0, 205 - 56 * i), row, () => AddWindowChoice(idx), out t, 19);
+                addWinBtns.Add(b);
+                addWinTexts.Add(t);
+            }
+            Ar6dofVrUi.MakeButton(tr, "Ecran virtuel : une fenetre d'application", new Vector2(0, -150), row, () => ToggleAddMode(), out addModeText, 21);
             addInfo = Ar6dofVrUi.Label(tr, "", new Vector2(0, -232), new Vector2(500, 100), 17, TextAnchor.UpperLeft);
             addInfo.horizontalOverflow = HorizontalWrapMode.Wrap;
-            Text ct;
-            Ar6dofVrUi.MakeButton(tr, "Annuler", new Vector2(0, -305), row, () => CloseAddDialog(), out ct, 22);
+            Ar6dofVrUi.MakeButton(tr, "Annuler", new Vector2(0, -305), row, () => { if (addWinMode) { addWinMode = false; FillAddDialog(); } else CloseAddDialog(); }, out addBackText, 22);
             addDlg.gameObject.SetActive(false);
             if (pointer != null) pointer.AddCanvas(addDlg);
             Ar6dofWindowChrome.Create("Nouvel ecran", addDlg.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(addDlg), CloseAddDialog, CloseAddDialog);
@@ -417,24 +441,13 @@ namespace AR6DoF
 
         void CloseAddDialog() { if (addDlg != null) addDlg.gameObject.SetActive(false); }
 
-        /// <summary>Demande quel écran ajouter : un moniteur réel (avec sa résolution) ou un écran virtuel.</summary>
+        /// <summary>Demande quel écran ajouter : un moniteur réel (avec sa résolution) ou un écran virtuel logiciel (fenêtre d'application).</summary>
         public void RequestAddScreen()
         {
             if (panels.Count >= maxScreens || panels.Count >= 4) return;
             if (addDlg == null) BuildAddDialog();
-            int n = Ar6dofScreenNative.MonitorCount();
-            for (int i = 0; i < DlgMax; i++)
-            {
-                bool on = i < n;
-                addMonBtns[i].gameObject.SetActive(on);
-                if (!on) continue;
-                int l, t, r, b;
-                int w = 0, h = 0;
-                if (Ar6dofScreenNative.MonitorRect(i, out l, out t, out r, out b)) { w = r - l; h = b - t; }
-                bool used = panels.Exists(x => x.monitor == i);
-                addMonTexts[i].text = Ar6dofLoc.F("Moniteur {0} - {1} x {2}", i + 1, w, h) + (used ? Ar6dofLoc.T("  (deja affiche)") : "");
-            }
-            addInfo.text = n == 0 ? Ar6dofLoc.T("Aucun moniteur capturable.") : "";
+            addWinMode = false;
+            FillAddDialog();
             Transform hd = Head;
             Vector3 pos = hd != null ? hd.position + FlatForward(hd) * 0.9f : transform.position;
             if (hd != null) pos.y = hd.position.y - 0.05f;
@@ -443,6 +456,68 @@ namespace AR6DoF
             if (toHead.sqrMagnitude < 1e-4f) toHead = Vector3.back;
             addDlg.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toHead.normalized));
             addDlg.gameObject.SetActive(true);
+        }
+
+        void ToggleAddMode()
+        {
+            if (!addWinMode) { addWinMode = true; FillAddDialog(); }
+            else { addSizeIdx = (addSizeIdx + 1) % Ar6dofWindows.Presets.Length; FillAddDialog(); }   // en mode fenêtres, ce bouton change la taille
+        }
+
+        /// <summary>Remplit le dialogue : liste des moniteurs, ou liste des fenêtres ouvertes + taille choisie.</summary>
+        void FillAddDialog()
+        {
+            if (addDlg == null) return;
+            int n = Ar6dofScreenNative.MonitorCount();
+            for (int i = 0; i < DlgMax; i++)
+            {
+                bool on = !addWinMode && i < n;
+                addMonBtns[i].gameObject.SetActive(on);
+                if (!on) continue;
+                int l, t, r, b;
+                int w = 0, h = 0;
+                if (Ar6dofScreenNative.MonitorRect(i, out l, out t, out r, out b)) { w = r - l; h = b - t; }
+                bool used = panels.Exists(x => x.monitor == i);
+                addMonTexts[i].text = Ar6dofLoc.F("Moniteur {0} - {1} x {2}", i + 1, w, h) + (used ? Ar6dofLoc.T("  (deja affiche)") : "");
+            }
+            if (addWinMode)
+            {
+                addWins.Clear();
+                addWins.AddRange(Ar6dofWindows.List());
+                addHeader.text = Ar6dofLoc.T("Choisis la fenetre a afficher comme un ecran");
+                for (int i = 0; i < DlgWinMax; i++)
+                {
+                    bool on = i < addWins.Count;
+                    addWinBtns[i].gameObject.SetActive(on);
+                    if (!on) continue;
+                    string t = addWins[i].title;
+                    if (t.Length > 40) t = t.Substring(0, 39) + "...";
+                    bool used = panels.Exists(x => x.hwnd == addWins[i].hwnd);
+                    addWinTexts[i].text = t + "  (" + addWins[i].width + "x" + addWins[i].height + ")" + (used ? Ar6dofLoc.T("  (deja affichee)") : "");
+                }
+                addModeText.text = Ar6dofLoc.T("Taille de la zone utile : ") + Ar6dofLoc.T(Ar6dofWindows.PresetName(addSizeIdx)) + Ar6dofLoc.T("  (clic = autre)");
+                addInfo.text = addWins.Count == 0 ? Ar6dofLoc.T("Aucune fenetre ouverte a afficher. Ouvre une application sur ton PC, puis reviens ici.")
+                                                  : Ar6dofLoc.T("La fenetre est capturee meme si elle est cachee derriere d'autres. Elle se redimensionne a la taille choisie (ex. 1920 x 1080).");
+                addBackText.text = Ar6dofLoc.T("Retour");
+            }
+            else
+            {
+                addHeader.text = Ar6dofLoc.T("Ecrans reels (a leur resolution)");
+                addModeText.text = Ar6dofLoc.T("Ecran virtuel : une fenetre d'application");
+                for (int i = 0; i < DlgWinMax; i++) addWinBtns[i].gameObject.SetActive(false);
+                addInfo.text = n == 0 ? Ar6dofLoc.T("Aucun moniteur capturable.") : Ar6dofLoc.T("Ecran virtuel logiciel : une fenetre d'application (navigateur, editeur, jeu...) affichee comme un ecran, a la resolution choisie, sans rien installer. Pour un vrai ecran Windows en plus, il faut un pilote d'affichage virtuel (voir le README).");
+                addBackText.text = Ar6dofLoc.T("Annuler");
+            }
+        }
+
+        void AddWindowChoice(int i)
+        {
+            if (i < 0 || i >= addWins.Count) return;
+            var wi = addWins[i];
+            var pre = Ar6dofWindows.Presets[Mathf.Clamp(addSizeIdx, 0, Ar6dofWindows.Presets.Length - 1)];
+            CloseAddDialog();
+            AddWindowScreen(wi.hwnd, pre[0], pre[1]);
+            Refresh();
         }
 
         static Vector3 FlatForward(Transform t)
@@ -457,12 +532,6 @@ namespace AR6DoF
             CloseAddDialog();
             AddScreen(monitor);
             Refresh();
-        }
-
-        void ShowVirtualInfo()
-        {
-            if (addInfo != null)
-                addInfo.text = Ar6dofLoc.T("Un ecran virtuel est un ecran Windows de plus, cree par un pilote d'affichage virtuel. Une fois le pilote installe (voir le README), il apparait dans la liste ci-dessus, a la resolution choisie dans les parametres d'affichage de Windows.");
         }
 
         public void OpenSettings(Ar6dofScreenPanel p)
@@ -488,11 +557,27 @@ namespace AR6DoF
             if (settingsFor == null) return;
             titleText.text = Ar6dofLoc.F("Ecran {0} / {1}", panels.IndexOf(settingsFor) + 1, panels.Count);
             sourceText.text = Ar6dofLoc.T("Source : ") + settingsFor.SourceText();
+            if (settingsFor.hwnd != 0) sourceText.text = settingsFor.SourceText() + Ar6dofLoc.T("  (clic = autre taille)");
             fpsText.text = Ar6dofLoc.F("Images / s : {0}", settingsFor.fps);
             snapText.text = Ar6dofLoc.T("Coller aux bords : ") + Ar6dofLoc.T(snapEnabled ? "OUI" : "NON");
             hingeText.text = Ar6dofLoc.F("Courbure : {0} deg", Mathf.RoundToInt(hingeDegrees));
             addText.text = Ar6dofLoc.T(panels.Count >= maxScreens ? "(3 ecrans maximum)" : "+ Ajouter un ecran");
         }
+
+        /// <summary>Moniteur : passe au moniteur suivant. Fenêtre (écran virtuel logiciel) : change la taille de la zone utile de la fenêtre.</summary>
+        void CycleSource()
+        {
+            if (settingsFor != null && settingsFor.hwnd != 0)
+            {
+                windowSizeIdx = (windowSizeIdx % (Ar6dofWindows.Presets.Length - 1)) + 1;   // 1..4 : jamais "garder"
+                var pre = Ar6dofWindows.Presets[windowSizeIdx];
+                Ar6dofWindows.SetClientSize(settingsFor.hwnd, pre[0], pre[1]);
+                Refresh();
+                return;
+            }
+            CycleMonitor();
+        }
+        int windowSizeIdx = 1;
 
         void CycleMonitor()
         {

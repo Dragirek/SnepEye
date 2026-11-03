@@ -66,6 +66,7 @@ namespace AR6DoF
         public int eyeRenderSize = 1440;
         [Tooltip("La scène 3D est rendue plus large que ce qui est affiché : le décalage IPD ne rogne plus le menu")]
         public float sceneOverscan = 1.3f;
+        [Tooltip("Obsolete : le lissage des bords se regle dans Reglages > Systeme > Performances")]
         public int msaa = 2;
         public KeyCode toggleUiKey = KeyCode.F1;
         public Ar6dofPassthroughSettings settings = new Ar6dofPassthroughSettings();
@@ -102,6 +103,7 @@ namespace AR6DoF
         void Start()
         {
             Application.runInBackground = true;
+            Ar6dofPerf.Apply();
             if (receiver == null) receiver = FindFirstObjectByType<Ar6dofReceiver>();
             if (headRig == null) headRig = FindFirstObjectByType<Ar6dofHeadRig>();
             if (launcher == null) launcher = FindFirstObjectByType<Ar6dofLauncher>();
@@ -149,9 +151,9 @@ namespace AR6DoF
 
         RenderTexture MakeRt(string n)
         {
-            int size = Mathf.RoundToInt(eyeRenderSize * Mathf.Max(1f, sceneOverscan));
+            int size = Mathf.RoundToInt(eyeRenderSize * Mathf.Max(1f, sceneOverscan) * Mathf.Clamp(Ar6dofSettings.Current.perfRenderScale, 0.5f, 1f));
             var rt = new RenderTexture(size, size, 24, RenderTextureFormat.ARGB32);
-            rt.antiAliasing = Mathf.Max(1, msaa);
+            rt.antiAliasing = Mathf.Clamp(Ar6dofSettings.Current.perfMsaa, 1, 4);
             rt.name = n;
             rt.Create();
             return rt;
@@ -169,7 +171,7 @@ namespace AR6DoF
             c.farClipPlane = 100f;
             c.cullingMask = ~(1 << layer);
             c.depth = 0;
-            c.allowHDR = false;
+            Ar6dofPerf.ConfigureCamera(c, Ar6dofSettings.Current.perfMsaa > 1);
             return c;
         }
 
@@ -208,7 +210,7 @@ namespace AR6DoF
             compositeCam.backgroundColor = Color.black;
             compositeCam.cullingMask = 1 << layer;
             compositeCam.depth = 100f;                      // dessiné en dernier, vers l'écran
-            compositeCam.allowHDR = false;
+            Ar6dofPerf.ConfigureCamera(compositeCam, false);   // il ne dessine qu'un rectangle plein écran : ni lissage, ni post-traitement
 
             var quad = new GameObject("CompositeQuad");
             quad.transform.SetParent(root.transform, false);
@@ -238,6 +240,7 @@ namespace AR6DoF
         // ------------------------------------------------------------------ boucle
         void Update()
         {
+            Ar6dofPerf.Tick();
             showUi = Ar6dofDebug.On;          // plus de touche F1 : le panneau complet n'existe qu'en mode debug (Ar6dofDock > Debug)
             Ar6dofUi.Visible = showUi;
             if (!reader.IsOpen && Time.unscaledTime >= nextOpenTry)

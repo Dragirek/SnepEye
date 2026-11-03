@@ -12,6 +12,7 @@ namespace AR6DoF
         [DllImport(Dll)] static extern int A6S_MonitorCount();
         [DllImport(Dll)] static extern int A6S_MonitorRect(int i, int[] rect4);
         [DllImport(Dll)] static extern void A6S_Start(int slot, int monitor, int maxFps);
+        [DllImport(Dll)] static extern void A6S_StartWindow(int slot, long hwnd, int maxFps);
         [DllImport(Dll)] static extern void A6S_Stop(int slot);
         [DllImport(Dll)] static extern void A6S_StopAll();
         [DllImport(Dll)] static extern void A6S_SetActive(int slot, int active);
@@ -50,6 +51,8 @@ namespace AR6DoF
             return true;
         }
         public static void Start(int slot, int monitor, int fps) { if (Available) A6S_Start(slot, monitor, fps); }
+        /// <summary>Écran virtuel logiciel : capture la fenêtre 'hwnd' au lieu d'un moniteur.</summary>
+        public static void StartWindow(int slot, long hwnd, int fps) { if (Available) A6S_StartWindow(slot, hwnd, fps); }
         public static void Stop(int slot) { if (Available) A6S_Stop(slot); }
         public static void StopAll() { if (Available) A6S_StopAll(); }
         public static void SetActive(int slot, bool a) { if (Available) A6S_SetActive(slot, a ? 1 : 0); }
@@ -66,6 +69,7 @@ namespace AR6DoF
         public static int MonitorCount() { return 0; }
         public static bool MonitorRect(int i, out int left, out int top, out int right, out int bottom) { left = top = right = bottom = 0; return false; }
         public static void Start(int slot, int monitor, int fps) { }
+        public static void StartWindow(int slot, long hwnd, int fps) { }
         public static void Stop(int slot) { }
         public static void StopAll() { }
         public static void SetActive(int slot, bool a) { }

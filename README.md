@@ -28,6 +28,8 @@ Deux caméras d'oeil infrarouges (ex. GC0308 320x240 @ 120 fps, avec LED IR) -> 
 - **Threads d'OpenCV** : par défaut 2 (`--cv-threads N` pour changer). Sans cette limite OpenCV disperse chaque petit calcul (flot optique, remap) sur tous les coeurs : sur un CPU à 16 threads, ~50 % de CPU partout pour un suivi léger.
 - **Seul, sans Unity** : réponds `0` à « Afficher les fenêtres » ou lance avec `--no-windows` (Unity le fait déjà). Les 4 fenêtres OpenCV (image, orientation, trajectoire, yeux) redessinent à 30 Hz et coûtent cher.
 - **Compilation** : `/O2 /GL /arch:AVX2 /LTCG` pour le code d'ar6dof, OpenCV minimal (JPEG + PNG seulement, sans TIFF / WebP / lecteur de QR code) : build plus court et exe plus léger.
+- **Lecteur caméra direct (option `mfdirect`, réponds `1`)** : le MJPEG de la caméra est lu par Media Foundation sans décodeur ni convertisseur Windows intercalés (mode faible latence), puis décodé par libjpeg-turbo (SIMD) directement en BGR. Moins de copies, moins de CPU, moins de délai sur du 3200x1200. Au démarrage un auto-test (5 images sur 40 lectures) valide le mode ; en cas d'échec (pas de MJPEG à cette taille...) le programme revient tout seul à OpenCV. Le journal affiche `decodage X ms`.
+- `ar6dof_screen.dll` capture aussi des **fenêtres** (Windows.Graphics.Capture, C++/WinRT) : elle se lie à `windowsapp`.
 - Le journal de l'exe affiche `cpu NN%` une fois par seconde en mode sans fenêtre : compare avant / après.
 
 ## Compiler
