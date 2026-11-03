@@ -80,6 +80,21 @@ namespace AR6DoF
             return t;
         }
 
+        /// <summary>
+        /// Place le texte d'un bouton (ou n'importe quel texte) à une position et une taille PRÉCISES, en pixels du menu, relatives au centre de son parent.
+        /// À utiliser à la place de offsetMin / offsetMax : ces deux-là, sur un texte ancré au centre, donnent une largeur négative (texte invisible) ou minuscule.
+        /// </summary>
+        public static void PlaceLabel(Text t, Vector2 pos, Vector2 size, TextAnchor anchor)
+        {
+            if (t == null) return;
+            var rt = t.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+            t.alignment = anchor;
+        }
+
         public static Button MakeButton(Transform parent, string text, Vector2 pos, Vector2 size, UnityAction onClick, out Text label, int fontSize = 26)
         {
             var rt = Child(parent, "Bouton", pos, size);

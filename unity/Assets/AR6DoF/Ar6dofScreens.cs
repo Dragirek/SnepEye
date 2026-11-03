@@ -381,7 +381,7 @@ namespace AR6DoF
             go.SetActive(false);
             if (pointer != null) pointer.AddCanvas(settings);
             // réduire / fermer : ferment tous les deux le panneau ; coin bas droit : agrandit / réduit le panneau
-            Ar6dofWindowChrome.Create("Parametres ecrans", settings.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(settings), CloseSettings, CloseSettings);
+            Ar6dofWindowChrome.Create("Parametres ecrans", settings.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(settings), CloseSettings, CloseSettings).canMove = true;
         }
 
         /// <summary>Roue d'un écran : ouvre son panneau, ou le referme s'il est déjà ouvert pour cet écran.</summary>
@@ -436,7 +436,7 @@ namespace AR6DoF
             Ar6dofVrUi.MakeButton(tr, "Annuler", new Vector2(0, -305), row, () => { if (addWinMode) { addWinMode = false; FillAddDialog(); } else CloseAddDialog(); }, out addBackText, 22);
             addDlg.gameObject.SetActive(false);
             if (pointer != null) pointer.AddCanvas(addDlg);
-            Ar6dofWindowChrome.Create("Nouvel ecran", addDlg.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(addDlg), CloseAddDialog, CloseAddDialog);
+            Ar6dofWindowChrome.Create("Nouvel ecran", addDlg.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(addDlg), CloseAddDialog, CloseAddDialog).canMove = true;
         }
 
         void CloseAddDialog() { if (addDlg != null) addDlg.gameObject.SetActive(false); }

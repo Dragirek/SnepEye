@@ -297,7 +297,8 @@ namespace AR6DoF
         {
             if (c == null) return;
             Action stow = () => StowCanvas(c);
-            Ar6dofWindowChrome.Create(name, c.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(c), stow, stow);
+            var ch = Ar6dofWindowChrome.Create(name, c.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(c), stow, stow);
+            ch.canMove = true;
         }
 
         /// <summary>Range un menu dans la barre (comme un second clic sur son icône).</summary>

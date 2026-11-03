@@ -209,6 +209,9 @@ namespace AR6DoF
         // ---- Calibration en 2 gestes (comme pour la sonde du casque) ----
         // 1) télécommande à plat, immobile  -> axe "haut" du capteur
         // 2) pointe relevée d'environ 30 deg, immobile -> axe qui pointe vers l'avant
+        /// <summary>Vrai quand l'étape 1 (à plat) a réussi et que l'étape 2 peut suivre.</summary>
+        public bool CalStep1Done { get { return calUpIdx >= 0; } }
+
         public string CalibrateStep1()
         {
             if (!TryGetRotation(out double[] R)) return "pas de donnees de la telecommande";

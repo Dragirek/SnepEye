@@ -165,6 +165,47 @@ namespace AR6DoF
     }
 
     /// <summary>
+    /// Barre de défilement utilisable avec le laser : appuyer sur la piste saute à cet endroit, glisser la poignée fait défiler la page.
+    /// Le visuel (piste fine + poignée) est dessiné par l'appelant ; ce composant est la zone de visée, plus large que la piste.
+    /// </summary>
+    public class Ar6dofScrollBar : MonoBehaviour, IPointerDownHandler, IDragHandler
+    {
+        public RectTransform handle;           // poignée : sa position et sa hauteur donnent la prise
+        public Action<float> setFraction;      // 0 = haut de la page, 1 = bas
+        float grab;
+
+        public void OnPointerDown(PointerEventData e)
+        {
+            Vector2 p;
+            if (!Local(e, out p)) return;
+            float hc = handle != null ? handle.anchoredPosition.y : 0f;
+            float hh = handle != null ? handle.sizeDelta.y : 0f;
+            grab = Mathf.Abs(p.y - hc) <= hh * 0.5f ? p.y - hc : 0f;   // saisie sur la poignée : elle ne saute pas ; sur la piste : elle vient au doigt
+            Apply(p.y - grab);
+        }
+
+        public void OnDrag(PointerEventData e)
+        {
+            Vector2 p;
+            if (Local(e, out p)) Apply(p.y - grab);
+        }
+
+        bool Local(PointerEventData e, out Vector2 p)
+        {
+            return RectTransformUtility.ScreenPointToLocalPointInRectangle((RectTransform)transform, e.position, e.pressEventCamera, out p);
+        }
+
+        void Apply(float y)
+        {
+            var rt = (RectTransform)transform;
+            float h = rt.rect.height, hh = handle != null ? handle.sizeDelta.y : 30f;
+            float span = Mathf.Max(1f, h - hh);
+            float frac = Mathf.Clamp01((h * 0.5f - hh * 0.5f - y) / span);
+            if (setFraction != null) setFraction(frac);
+        }
+    }
+
+    /// <summary>
     /// Défilement vertical d'une page de menu : appuie sur une zone vide et glisse (le contenu suit le laser), ou molette d'une souris.
     /// La page est le 'content' ; 'viewport' la fenêtre qui la découpe. Les boutons et curseurs gardent la priorité sur le glissement.
     /// </summary>

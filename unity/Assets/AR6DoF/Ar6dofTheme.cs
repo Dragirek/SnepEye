@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace AR6DoF
@@ -12,7 +13,7 @@ namespace AR6DoF
         public Ar6dofElem elem = Ar6dofElem.Menus;
     }
 
-    public enum Ar6dofRole { Surface, Button, Accent, Text, AccentText, Track, Handle, Dim }
+    public enum Ar6dofRole { Surface, Button, Accent, Text, AccentText, Track, Handle, Dim, Band }
 
     /// <summary>Applique le style courant (Ar6dofSettings) à un Image ou un Text, et se remet à jour quand le style change.</summary>
     public class Ar6dofThemed : MonoBehaviour
@@ -103,6 +104,15 @@ namespace AR6DoF
                 {
                     Color c = st.text; c.a = 0.25f;
                     g.color = c;
+                    break;
+                }
+                case Ar6dofRole.Band:
+                {
+                    // cadre de regroupement : le fond tire legerement vers la couleur du texte (plus clair sur fond sombre, plus sombre sur fond clair)
+                    Color c = Color.Lerp(st.bg, st.text, 0.07f);
+                    c.a = Mathf.Max(0.6f, st.alpha);
+                    g.color = c;
+                    Ar6dofTheme.SetRounded(img, Mathf.Min(st.corner, radiusCap));
                     break;
                 }
                 case Ar6dofRole.Text:
@@ -219,6 +229,7 @@ namespace AR6DoF
             var th = go.GetComponent<Ar6dofThemed>();
             if (th == null) th = go.AddComponent<Ar6dofThemed>();
             th.Init(role, radiusCap);
+            if ((role == Ar6dofRole.Button || role == Ar6dofRole.Handle) && go.GetComponent<Ar6dofHoverFx>() == null) go.AddComponent<Ar6dofHoverFx>();
             return th;
         }
 
@@ -274,6 +285,66 @@ namespace AR6DoF
             s = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, new Vector4(r, r, r, r));
             rounded[r] = s;
             return s;
+        }
+
+        // ------------------------------------------------------------------ cadre de survol
+        static readonly Dictionary<int, Sprite> rings = new Dictionary<int, Sprite>();
+
+        /// <summary>Contour arrondi de rayon r et d'épaisseur t (pixels), découpable en 9 parties : le cadre qui entoure un bouton visé par le laser.</summary>
+        public static Sprite Ring(int r, int t)
+        {
+            r = Mathf.Clamp(r, 3, 48);
+            t = Mathf.Clamp(t, 1, r);
+            int key = r * 100 + t;
+            Sprite s;
+            if (rings.TryGetValue(key, out s) && s != null) return s;
+            int n = r * 2 + 2;
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Bilinear;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            var px = new Color32[n * n];
+            float half = n * 0.5f;
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float qx = Mathf.Abs(x + 0.5f - half) - (half - r);
+                    float qy = Mathf.Abs(y + 0.5f - half) - (half - r);
+                    float ox = Mathf.Max(qx, 0f), oy = Mathf.Max(qy, 0f);
+                    float sd = Mathf.Sqrt(ox * ox + oy * oy) + Mathf.Min(Mathf.Max(qx, qy), 0f) - r;   // distance au bord : négative à l'intérieur
+                    float a = Mathf.Clamp01(0.5f - sd) * Mathf.Clamp01(sd + t + 0.5f);
+                    px[y * n + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+                }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            s = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, new Vector4(r, r, r, r));
+            rings[key] = s;
+            return s;
+        }
+
+        static float Lin(float v) { return v <= 0.04045f ? v / 12.92f : Mathf.Pow((v + 0.055f) / 1.055f, 2.4f); }
+
+        static float Lum(Color c) { return 0.2126f * Lin(c.r) + 0.7152f * Lin(c.g) + 0.0722f * Lin(c.b); }
+
+        /// <summary>Rapport de contraste (1 à 21) entre deux couleurs, comme les règles d'accessibilité du web.</summary>
+        public static float Contrast(Color a, Color b)
+        {
+            float la = Lum(a), lb = Lum(b);
+            if (la < lb) { float t = la; la = lb; lb = t; }
+            return (la + 0.05f) / (lb + 0.05f);
+        }
+
+        /// <summary>Couleur du cadre de survol : l'accent s'il se voit nettement, sinon blanc ou noir, selon ce qui contraste le plus avec le bouton ET avec le fond du menu.</summary>
+        public static Color HoverColor(Color button, Ar6dofStyle st)
+        {
+            button.a = 1f;
+            Color bg = st.bg; bg.a = 1f;
+            Color acc = st.accent; acc.a = 1f;
+            Color white = Color.white, black = new Color(0.02f, 0.02f, 0.02f, 1f);
+            float sa = Mathf.Min(Contrast(acc, button), Contrast(acc, bg));
+            if (sa >= 2.6f) return acc;
+            float sw = Mathf.Min(Contrast(white, button), Contrast(white, bg));
+            float sb = Mathf.Min(Contrast(black, button), Contrast(black, bg));
+            return sw >= sb ? white : black;
         }
 
         // ------------------------------------------------------------------ textures de fond
@@ -385,6 +456,50 @@ namespace AR6DoF
             if (m == null || !m.HasProperty("_Size")) return;
             m.SetVector("_Size", new Vector4(width, height, 0f, 0f));
             m.SetFloat("_Radius", Mathf.Clamp(cornerPx * 0.0006f, 0f, Mathf.Min(width, height) * 0.5f));
+        }
+    }
+    /// <summary>
+    /// Cadre de survol : quand le laser vise un bouton (ou la poignée d'un curseur), un contour net apparaît autour de lui.
+    /// Sa couleur est choisie pour se voir sur n'importe quelle palette (l'ancienne simple éclaircie du bouton disparaissait sur certaines couleurs).
+    /// </summary>
+    public class Ar6dofHoverFx : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    {
+        Image ring;
+
+        public void OnPointerEnter(PointerEventData e) { Show(true); }
+        public void OnPointerExit(PointerEventData e) { Show(false); }
+        void OnDisable() { if (ring != null) ring.gameObject.SetActive(false); }
+
+        void Show(bool on)
+        {
+            if (!on)
+            {
+                if (ring != null) ring.gameObject.SetActive(false);
+                return;
+            }
+            var g = GetComponent<Graphic>();
+            if (g == null) return;
+            var th = GetComponent<Ar6dofThemed>();
+            var st = Ar6dofSettings.StyleFor(Ar6dofTheme.ElemOf(transform));
+            int cap = th != null ? th.radiusCap : 999;
+            int r = Mathf.Clamp(Mathf.Min(st.corner, cap) + 4, 4, 40);
+            if (ring == null)
+            {
+                var go = new GameObject("Survol", typeof(RectTransform));
+                go.transform.SetParent(transform, false);
+                var rt = (RectTransform)go.transform;
+                rt.anchorMin = Vector2.zero;
+                rt.anchorMax = Vector2.one;
+                rt.offsetMin = new Vector2(-4f, -4f);
+                rt.offsetMax = new Vector2(4f, 4f);
+                ring = go.AddComponent<Image>();
+                ring.raycastTarget = false;
+            }
+            ring.sprite = Ar6dofTheme.Ring(r, 4);
+            ring.type = Image.Type.Sliced;
+            ring.color = Ar6dofTheme.HoverColor(g.color, st);
+            ring.transform.SetAsLastSibling();
+            ring.gameObject.SetActive(true);
         }
     }
 }
