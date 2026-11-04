@@ -208,7 +208,9 @@ namespace AR6DoF
             var shObject = Find<Shader>("Ar6dofObject");
             var model = Find<TextAsset>("camera_model");
             if (shComposite == null || shScreen == null) todo.Add("Les fichiers .shader d'AR6DoF sont introuvables : copie bien tout le dossier AR6DoF dans Assets.");
-            if (model == null) todo.Add("Copie camera_model.json (a cote de ar6dof_probe.exe) dans Assets, puis glisse-le dans Rig > Ar6dof Passthrough > Camera Model Json.");
+            string probeDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64"));
+            if (model == null && !File.Exists(Path.Combine(probeDir, "camera_model.json")))
+                todo.Add("camera_model.json introuvable : place le dossier ar6dof_probe-win64 a cote du dossier Assets (le fichier y est lu tel quel, rien a glisser dans la scene) et lance ar6dof_probe une fois avec la calibration.");
 
             // Rig : reception de la pose, mouvement de la tete, passthrough (cree les 2 cameras des yeux en dessous)
             var rigGo = New("Rig");
@@ -276,12 +278,11 @@ namespace AR6DoF
             OptimizeGraphics();
             if (ForceD3D11()) todo.Insert(0, "REDEMARRE UNITY : l'API graphique a ete reglee sur Direct3D11 (obligatoire, sinon les ecrans virtuels font planter Unity).");
 
-            bool dll = false;
-            foreach (string g in AssetDatabase.FindAssets("ar6dof_screen"))
-                if (AssetDatabase.GUIDToAssetPath(g).EndsWith("ar6dof_screen.dll")) dll = true;
-            if (!dll) todo.Add("Copie ar6dof_screen.dll dans Assets/AR6DoF/Plugins/x86_64/ (sinon pas d'ecrans virtuels).");
+            bool dll = Ar6dofAutoSetup.EnsureDll(false);   // copiee toute seule depuis ar6dof_probe-win64 vers Assets/Plugins/x86_64 (hors du dossier AR6DoF)
+            if (!dll) todo.Add("ar6dof_screen.dll introuvable : place le dossier ar6dof_probe-win64 a cote de Assets (elle sera copiee toute seule dans Assets/Plugins/x86_64), sinon copie-la a la main dans Assets/Plugins/x86_64/.");
             todo.Add("Reglages graphiques optimises pour le casque (MSAA, SSAO, ombres... coupes ; detail dans la Console). A refaire a tout moment : menu AR6DoF > Optimiser les reglages graphiques (GPU).");
-            todo.Add("Dans Launcher > Exe Path : chemin d'ar6dof_probe.exe (ou place le dossier ar6dof_probe-win64 a cote du dossier Assets).");
+            if (!File.Exists(Path.Combine(probeDir, "ar6dof_probe.exe")))
+                todo.Add("ar6dof_probe.exe : place le dossier ar6dof_probe-win64 a cote du dossier Assets, ou renseigne Launcher > Exe Path une seule fois (Unity retient le chemin).");
 
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             Selection.activeGameObject = rigGo;

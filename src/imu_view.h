@@ -2,6 +2,7 @@
 // Graphique de l'IMU pour l'application (aperçu 800x300 dans la mémoire partagée, source « IMU ») : un casque en 3D qui suit l'orientation
 // mesurée (montage et filtre appliqués), ses trois axes, les angles en clair et les consignes de la calibration du montage.
 // Si le modèle penche dans le mauvais sens quand tu penches le casque, le montage est inversé (bouton « Inverser avant / arrière »).
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -95,6 +96,33 @@ inline cv::Mat Draw(const Quat& q, bool qok, const std::string& msg, bool calibr
   for (const auto& e : edges) {
     const bool front = (e[0] & 1) && (e[1] & 1);   // les deux bouts sur la face avant
     seg(c[e[0]], c[e[1]], front ? cv::Scalar(40, 150, 245) : cv::Scalar(190, 190, 190), front ? 3 : 2);
+  }
+  // caméra stéréo en fil de fer, posée sur la face avant du casque : le boîtier (large), ses deux objectifs (octogones) et le champ de vision (lignes
+  // vertes vers l'avant). Elle suit le casque : si elle ne regarde pas devant quand tu regardes devant, le montage de l'IMU est à refaire.
+  {
+    const cv::Scalar camCol(110, 220, 120);
+    const double bx0 = hx + 0.004, bx1 = hx + 0.040, by = 0.062, bz = 0.020;   // boîtier : devant la face avant, sur toute la largeur
+    Vec3 cb[8];
+    for (int i = 0; i < 8; i++) cb[i] = R * Vec3{(i & 1) ? bx1 : bx0, (i & 2) ? by : -by, (i & 4) ? bz : -bz};
+    for (const auto& e : edges) seg(cb[e[0]], cb[e[1]], camCol, 1);
+    const double lensY[2] = {0.032, -0.032};   // gauche, droite
+    for (int s = 0; s < 2; s++) {
+      Vec3 ring[8];
+      for (int k = 0; k < 8; k++) {
+        const double a = k * 3.14159265358979323846 / 4.0;
+        ring[k] = R * Vec3{bx1, lensY[s] + 0.014 * std::cos(a), 0.014 * std::sin(a)};
+      }
+      for (int k = 0; k < 8; k++) seg(ring[k], ring[(k + 1) % 8], camCol, 1);
+      // champ de vision : quatre arêtes vers l'avant (environ 90 x 70 degrés), plus l'axe optique
+      const double len = 0.20, hw = 0.20, hh = 0.14;
+      const Vec3 o = R * Vec3{bx1, lensY[s], 0};
+      const Vec3 fr[4] = {R * Vec3{bx1 + len, lensY[s] + hw, hh}, R * Vec3{bx1 + len, lensY[s] - hw, hh}, R * Vec3{bx1 + len, lensY[s] - hw, -hh}, R * Vec3{bx1 + len, lensY[s] + hw, -hh}};
+      for (int k = 0; k < 4; k++) { seg(o, fr[k], cv::Scalar(70, 130, 75), 1); seg(fr[k], fr[(k + 1) % 4], cv::Scalar(70, 130, 75), 1); }
+    }
+    Vec3 cl;
+    cl = R * Vec3{bx1 + 0.012, 0.0, bz + 0.012};
+    cv::Point pl;
+    if (proj(cl, pl)) cv::putText(img, "CAMERA", pl + cv::Point(-18, -8), cv::FONT_HERSHEY_SIMPLEX, 0.42, camCol, 1, cv::LINE_AA);
   }
   // axes : avant (rouge), gauche (bleu), haut (vert)
   struct Ax { Vec3 d; cv::Scalar col; const char* name; } axes[3] = {

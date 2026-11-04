@@ -89,15 +89,15 @@ enum {
   ID_UDP, ID_SHARE, ID_BLE, ID_AUTOTRACK,
   ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK, ID_EYE_CAL, ID_EYE_RECENTER, ID_EYE_CLEAR, ID_EYE_FOV, ID_EYESTAT,
   ID_MOUTH, ID_MOUTHCAM, ID_MOUTHFPS, ID_MOUTHBACK, ID_MC_NEUTRAL, ID_MC_OPEN, ID_MC_WIDE, ID_MC_NARROW, ID_MC_CLEAR, ID_MOUTHSTAT,
-  ID_PV_CAM, ID_PV_EYE, ID_PV_MOUTH, ID_PVW_CAM, ID_PVW_EYE, ID_PVW_MOUTH, ID_PVW_IMU,
+  ID_PV_CAM, ID_PV_EYE, ID_PV_MOUTH, ID_PVW_CAM, ID_PVW_EYE, ID_PVW_MOUTH, ID_PVW_IMU, ID_PVW_TRK,
   ID_THREADS, ID_KEEP,
   ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK,
   ID_M_STEP1, ID_M_STEP2, ID_M_RESET, ID_M_FLIP,
   ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS,
-  ID_NAV0 = 300   // 7 pages : ID_NAV0 .. ID_NAV0 + 6
+  ID_NAV0 = 300   // 8 pages : ID_NAV0 .. ID_NAV0 + 7
 };
-const int kNavCount = 7;
-enum { PG_CAM = 0, PG_SENSORS, PG_UNITY, PG_EYES, PG_MOUTH, PG_TRACK, PG_ADV };
+const int kNavCount = 8;
+enum { PG_CAM = 0, PG_SENSORS, PG_UNITY, PG_EYES, PG_MOUTH, PG_TRACK, PG_LOG, PG_ADV };
 
 // Modes courants proposés seulement quand la caméra ne répond pas à la question « quels modes as-tu ? » (déjà utilisée par ar6dof_probe, par exemple).
 struct Preset { int w, h, fps; };
@@ -250,10 +250,33 @@ int ModeIndexFor(int w, int h, int fps) {
   return (int)g_modeList.size();   // « personnalisé »
 }
 
+// Les deux modes qui valent la peine d'être signalés (on ne connaît pas la caméra, on le devine d'après la liste) :
+// la plus haute résolution (image nette, suivi précis) et la plus haute cadence (passthrough fluide, faible latence, mais exposition courte : beaucoup de lumière).
+// -1 si la liste n'a qu'un mode (rien à comparer).
+void BestModes(int* byRes, int* byFps) {
+  *byRes = *byFps = -1;
+  if (g_modeList.size() < 2) return;
+  for (size_t i = 0; i < g_modeList.size(); i++) {
+    const ModeEntry& m = g_modeList[i];
+    if (*byRes < 0 || (long long)m.w * m.h > (long long)g_modeList[*byRes].w * g_modeList[*byRes].h ||
+        ((long long)m.w * m.h == (long long)g_modeList[*byRes].w * g_modeList[*byRes].h && m.fps > g_modeList[*byRes].fps)) *byRes = (int)i;
+    if (*byFps < 0 || m.fps > g_modeList[*byFps].fps ||
+        (m.fps == g_modeList[*byFps].fps && (long long)m.w * m.h > (long long)g_modeList[*byFps].w * g_modeList[*byFps].h)) *byFps = (int)i;
+  }
+}
+
 void FillModes() {
   ClearCombo(ID_MODE);
-  for (const auto& m : g_modeList)
-    AddItem(ID_MODE, std::to_wstring(m.w) + L" × " + std::to_wstring(m.h) + Tr(L" à ", L" at ") + std::to_wstring(m.fps) + Tr(L" i/s", L" fps"));
+  int byRes, byFps;
+  BestModes(&byRes, &byFps);
+  for (size_t i = 0; i < g_modeList.size(); i++) {
+    const ModeEntry& m = g_modeList[i];
+    std::wstring t = std::to_wstring(m.w) + L" × " + std::to_wstring(m.h) + Tr(L" à ", L" at ") + std::to_wstring(m.fps) + Tr(L" i/s", L" fps");
+    if ((int)i == byRes && (int)i == byFps) t += Tr(L"   ← recommandé", L"   ← recommended");
+    else if ((int)i == byRes) t += Tr(L"   ← recommandé : suivi précis", L"   ← recommended: accurate tracking");
+    else if ((int)i == byFps) t += Tr(L"   ← recommandé : passthrough fluide", L"   ← recommended: smooth passthrough");
+    AddItem(ID_MODE, t);
+  }
   AddItem(ID_MODE, Tr(L"Personnalisé (valeurs ci-dessous)", L"Custom (values below)"));
   int w, h, f;
   ReadSizeFields(&w, &h, &f);
@@ -371,6 +394,9 @@ void UpdateCamHint() {
     t = std::wstring(Tr(L"Image assemblée : ", L"Combined image: ")) + std::to_wstring(w * 2) + L" × " + std::to_wstring(h) + Tr(L" (gauche | droite)", L" (left | right)");
   else
     t = std::wstring(Tr(L"Chaque œil : ", L"Each eye: ")) + std::to_wstring(w / 2) + L" × " + std::to_wstring(h);
+  if (g_modeState == 0 && !g_modeNonMjpg && known && f >= 100)
+    t += std::wstring(L"  ") + Tr(L"Cadence élevée : prévoir beaucoup de lumière (sinon le suivi décroche).",
+                              L"High frame rate: needs plenty of light (otherwise tracking drops).");
   SetTextIfChanged(H(ID_CAMHINT), t);
 }
 
@@ -465,7 +491,7 @@ void ConfigToFields() {
   UpdateCamType();
   RebuildModes(g_cfg.find("width") == g_cfg.end());   // première utilisation : on propose un mode que la caméra a vraiment
   SetSel(ID_BACKEND, CfgInt("backend", 0) == 1 ? 1 : 0);
-  SetChecked(ID_MFDIRECT, CfgInt("mfdirect", 0) != 0);
+  SetChecked(ID_MFDIRECT, CfgInt("mfdirect", 1) != 0);   // lecteur direct par défaut : repli automatique sur OpenCV si la caméra ne le supporte pas
 
   std::string pn = CfgStr("portname", "");
   int pi = 0;
@@ -700,9 +726,9 @@ void FillRound(HDC dc, RECT r, int rad, COLORREF fill, COLORREF line, bool outli
   if (outline) DeleteObject(p);
 }
 
-const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Capteurs", L"Unity", L"Yeux", L"Bouche", L"Suivi", L"Avancé"};
-const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Sensors", L"Unity", L"Eyes", L"Mouth", L"Tracking", L"Advanced"};
-const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE76E", L"\xE768", L"\xE713"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
+const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Capteurs", L"Unity", L"Yeux", L"Bouche", L"Suivi", L"Journal", L"Avancé"};
+const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Sensors", L"Unity", L"Eyes", L"Mouth", L"Tracking", L"Log", L"Advanced"};
+const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE76E", L"\xE768", L"\xE8A5", L"\xE713"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
 
 // Fond de la fenêtre : titre de l'application, titre de la page et cartes de la page affichée.
 void PaintChrome(HDC dc) {
@@ -1035,10 +1061,11 @@ int WantedSource() {
   if (g_page == PG_EYES && g_pvOn[1]) return 2;
   if (g_page == PG_MOUTH && g_pvOn[2]) return 3;
   if (g_page == PG_SENSORS && GetSel(ID_PORT) > 0) return 4;   // graphique de l'IMU : automatique dans la page Capteurs
+  if (g_page == PG_TRACK && g_procs.full) return 5;            // vue du suivi : automatique, seulement quand le suivi tourne
   return 0;
 }
 
-HWND PvWindow(int src) { return H(src == 1 ? ID_PVW_CAM : src == 2 ? ID_PVW_EYE : src == 3 ? ID_PVW_MOUTH : ID_PVW_IMU); }
+HWND PvWindow(int src) { return H(src == 1 ? ID_PVW_CAM : src == 2 ? ID_PVW_EYE : src == 3 ? ID_PVW_MOUTH : src == 5 ? ID_PVW_TRK : ID_PVW_IMU); }
 
 bool OpenPreview() {
   if (g_pvBase) return true;
@@ -1089,7 +1116,7 @@ void OnFastTick() {
   if (want != g_pvActive) {
     if (want == 0 && g_pvActive != 0) { SendUdp(9877, "PV 0"); ClosePreview(); }
     g_pvHave = false;
-    for (int s = 1; s <= 4; s++) InvalidateRect(PvWindow(s), nullptr, FALSE);
+    for (int s = 1; s <= 5; s++) InvalidateRect(PvWindow(s), nullptr, FALSE);
     g_pvActive = want;
     g_pvLastReq = 0;
   }
@@ -1128,7 +1155,8 @@ LRESULT CALLBACK PvProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       SetBkMode(dc, TRANSPARENT);
       SetTextColor(dc, RGB(160, 160, 160));
       SelectObject(dc, g_font);
-      const wchar_t* msg = WantedSource() == src ? (src == 4 ? Tr(L"En attente de l'IMU…", L"Waiting for the IMU…") : Tr(L"En attente de la caméra…", L"Waiting for the camera…")) : Tr(L"Aperçu désactivé", L"Preview off");
+      const wchar_t* msg = WantedSource() == src ? (src == 4 ? Tr(L"En attente de l'IMU…", L"Waiting for the IMU…") : Tr(L"En attente de la caméra…", L"Waiting for the camera…"))
+                                                 : src == 5 ? Tr(L"Démarre le suivi pour voir la trajectoire", L"Start tracking to see the trajectory") : Tr(L"Aperçu désactivé", L"Preview off");
       DrawTextW(dc, msg, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
     EndPaint(h, &ps);
@@ -1633,11 +1661,16 @@ void CreateControls() {
   Button(L"Inverser gauche / droite", L"Swap left / right", X + PAD, 150, 208, 34, ID_A_SWAP);
   Button(L"Vérifier la calibration", L"Check the calibration", X + PAD + 218, 150, 208, 34, ID_A_CHECK);
 
-  CardBox(L"Journal", L"Log", X, 236, CWd, 440);
-  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, X + PAD, 280, CWd - 2 * PAD, 350, ID_LOG, WS_EX_CLIENTEDGE);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 640, CWd - 2 * PAD, 20, ID_STATS);
+  CardBox(L"Vue du suivi", L"Tracking view", X, 236, CWd, 330);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + 26, 282, 640, 240, ID_PVW_TRK);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 530, CWd - 2 * PAD, 20, ID_STATS);
 
-  // ---- page 6 : Avancé
+  // ---- page 6 : Journal (les messages d'ar6dof_probe, sur toute la page)
+  g_buildPage = PG_LOG;
+  CardBox(L"Journal", L"Log", X, 62, CWd, 628);
+  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, X + PAD, 106, CWd - 2 * PAD, 566, ID_LOG, WS_EX_CLIENTEDGE);
+
+  // ---- page 7 : Avancé
   g_buildPage = PG_ADV;
   CardBox(L"Avancé", L"Advanced", X, 62, CWd, 130);
   Label(L"Threads de calcul", L"Compute threads", X + PAD, 104, 160);
@@ -1889,6 +1922,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   SetWindowLongPtrW(H(ID_PVW_EYE), GWLP_USERDATA, 2);
   SetWindowLongPtrW(H(ID_PVW_MOUTH), GWLP_USERDATA, 3);
   SetWindowLongPtrW(H(ID_PVW_IMU), GWLP_USERDATA, 4);
+  SetWindowLongPtrW(H(ID_PVW_TRK), GWLP_USERDATA, 5);
   ApplyTheme();
   ShowPage(0);
   // liste de langue

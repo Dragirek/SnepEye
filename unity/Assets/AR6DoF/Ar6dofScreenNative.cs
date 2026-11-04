@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace AR6DoF
 {
-    /// <summary>Accès à ar6dof_screen.dll (capture d'écran GPU). À copier dans Assets/AR6DoF/Plugins/x86_64/.</summary>
+    /// <summary>Accès à ar6dof_screen.dll (capture d'écran GPU). Copiée toute seule dans Assets/Plugins/x86_64/ depuis ar6dof_probe-win64 (menu AR6DoF > Vérifier l'installation).</summary>
     public static class Ar6dofScreenNative
     {
         const string Dll = "ar6dof_screen";
@@ -44,7 +44,7 @@ namespace AR6DoF
                 if (available == null)
                 {
                     try { A6S_MonitorCount(); available = true; }
-                    catch (Exception e) { UnityEngine.Debug.LogError("AR6DoF : ar6dof_screen.dll introuvable ou illisible (" + e.GetType().Name + "). Copie-la dans Assets/AR6DoF/Plugins/x86_64/. " + e.Message); available = false; }
+                    catch (Exception e) { UnityEngine.Debug.LogError("AR6DoF : ar6dof_screen.dll introuvable ou illisible (" + e.GetType().Name + "). Copie-la dans Assets/Plugins/x86_64/ (ou place ar6dof_probe-win64 a cote de Assets). " + e.Message); available = false; }
                 }
                 return available.Value;
             }

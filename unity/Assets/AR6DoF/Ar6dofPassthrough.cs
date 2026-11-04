@@ -128,9 +128,24 @@ namespace AR6DoF
 
         void LoadModel()
         {
+            // Ordre : chemin renseigne, puis le camera_model.json qu'ar6dof_probe vient d'ecrire dans SON dossier (toujours a jour : rien a copier ni a glisser
+            // dans la scene), puis le fichier glisse dans le champ.
             string json = null;
-            if (cameraModelJson != null) json = cameraModelJson.text;
-            else if (!string.IsNullOrEmpty(cameraModelPath) && File.Exists(cameraModelPath)) json = File.ReadAllText(cameraModelPath);
+            string src = "";
+            if (!string.IsNullOrEmpty(cameraModelPath) && File.Exists(cameraModelPath)) { json = File.ReadAllText(cameraModelPath); src = cameraModelPath; }
+            if (json == null)
+            {
+                try
+                {
+                    string dir = launcher != null ? launcher.ExeDirectory() : "";
+                    if (string.IsNullOrEmpty(dir)) dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64"));
+                    string p = Path.Combine(dir, "camera_model.json");
+                    if (File.Exists(p)) { json = File.ReadAllText(p); src = p; }
+                }
+                catch (Exception) { }
+            }
+            if (json == null && cameraModelJson != null) { json = cameraModelJson.text; src = "fichier du projet"; }
+            if (json != null) Debug.Log("AR6DoF : camera_model.json lu depuis " + src);
             if (json == null)
             {
                 Debug.LogWarning("AR6DoF : pas de camera_model.json : l'image sera affichée sans correction de distorsion.");
@@ -309,6 +324,8 @@ namespace AR6DoF
         public static string PhotosFolder { get { return Path.Combine(Ar6dofTheme.PicturesFolder, "Photos"); } }
 
         public bool PhotoBusy { get; private set; }
+        /// <summary>Vrai seulement pendant la prise de vue elle-meme (fenetres masquees, quelques images) : pendant le minuteur l'apercu en direct continue.</summary>
+        public bool PhotoShooting { get; private set; }
         Texture2D clearTex;
 
         /// <summary>
@@ -342,6 +359,7 @@ namespace AR6DoF
                 if (done != null) done(new List<string>(), null, "Annule");
                 yield break;
             }
+            PhotoShooting = true;
             if (hideUi != null) hideUi(true);
             yield return null;
             yield return null;                 // la scène est redessinée sans la fenêtre de l'appareil photo
@@ -364,6 +382,7 @@ namespace AR6DoF
             }
             catch (Exception e) { err = e.Message; }
             if (hideUi != null) hideUi(false);
+            PhotoShooting = false;
             PhotoBusy = false;
             if (done != null) done(files, thumb, err);
             else if (thumb != null) Destroy(thumb);
@@ -455,7 +474,7 @@ namespace AR6DoF
         /// </summary>
         public bool RenderPreview(RenderTexture rt, bool withUi, int excludeLayer)
         {
-            if (mat == null || compositeCam == null || rt == null || PhotoBusy || !HasFrames) return false;
+            if (mat == null || compositeCam == null || rt == null || PhotoShooting || !HasFrames) return false;
             if (withUi) RenderSceneWithout(excludeLayer);
             RenderComposite(rt, withUi, EyeAspect, false, withUi ? pvL : null, withUi ? pvR : null);
             return true;

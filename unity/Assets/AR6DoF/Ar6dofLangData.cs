@@ -767,6 +767,14 @@ namespace AR6DoF
             "Assis : OUI => Seated: ON",
             "Assis : NON => Seated: OFF",
             "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Seated mode: dock at hand height, menus and screens at seated eye level. Sit down, then turn it on.",
+            "Tout arreter (sons et musique) => Stop everything (sounds and music)",
+            "IPD logiciel (+ = ecarte) => Software IPD (+ = wider)",
+            "Echelle des deplacements (%, 100 = exact) => Movement scale (%, 100 = exact)",
+            "Distance devant les pieds (cm) => Distance in front of your feet (cm)",
+            "Taille du dock (%) => Dock size (%)",
+            "Taille du clavier (%) => Keyboard size (%)",
+            "Taille des boutons de fenetre (%) => Window button size (%)",
+            "Resolution de l'interface (%, au prochain lancement) => Interface resolution (%, next launch)",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -1524,6 +1532,14 @@ namespace AR6DoF
             "Assis : OUI => Sentado: SI",
             "Assis : NON => Sentado: NO",
             "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Modo sentado: dock a la altura de las manos, menus y pantallas a la altura de los ojos sentado. Sientate y activalo.",
+            "Tout arreter (sons et musique) => Detener todo (sonidos y musica)",
+            "IPD logiciel (+ = ecarte) => IPD por software (+ = mas separado)",
+            "Echelle des deplacements (%, 100 = exact) => Escala de movimientos (%, 100 = exacto)",
+            "Distance devant les pieds (cm) => Distancia delante de los pies (cm)",
+            "Taille du dock (%) => Tamano del dock (%)",
+            "Taille du clavier (%) => Tamano del teclado (%)",
+            "Taille des boutons de fenetre (%) => Tamano de los botones de ventana (%)",
+            "Resolution de l'interface (%, au prochain lancement) => Resolucion de la interfaz (%, proximo inicio)",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -2288,6 +2304,14 @@ namespace AR6DoF
             "Assis : OUI => Sitzen: AN",
             "Assis : NON => Sitzen: AUS",
             "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Sitzmodus: Dock auf Handhoehe, Menues und Bildschirme auf Augenhoehe im Sitzen. Erst hinsetzen, dann einschalten.",
+            "Tout arreter (sons et musique) => Alles stoppen (Klaenge und Musik)",
+            "IPD logiciel (+ = ecarte) => Software-IPD (+ = weiter)",
+            "Echelle des deplacements (%, 100 = exact) => Bewegungsskala (%, 100 = exakt)",
+            "Distance devant les pieds (cm) => Abstand vor den Fuessen (cm)",
+            "Taille du dock (%) => Dock-Groesse (%)",
+            "Taille du clavier (%) => Tastaturgroesse (%)",
+            "Taille des boutons de fenetre (%) => Groesse der Fensterknoepfe (%)",
+            "Resolution de l'interface (%, au prochain lancement) => Aufloesung der Oberflaeche (%, naechster Start)",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -3052,6 +3076,14 @@ namespace AR6DoF
             "Assis : OUI => Seduto: SI",
             "Assis : NON => Seduto: NO",
             "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Modalita seduto: dock all'altezza delle mani, menu e schermi all'altezza degli occhi da seduto. Siediti e attivala.",
+            "Tout arreter (sons et musique) => Ferma tutto (suoni e musica)",
+            "IPD logiciel (+ = ecarte) => IPD software (+ = piu largo)",
+            "Echelle des deplacements (%, 100 = exact) => Scala dei movimenti (%, 100 = esatto)",
+            "Distance devant les pieds (cm) => Distanza davanti ai piedi (cm)",
+            "Taille du dock (%) => Dimensione del dock (%)",
+            "Taille du clavier (%) => Dimensione della tastiera (%)",
+            "Taille des boutons de fenetre (%) => Dimensione dei pulsanti finestra (%)",
+            "Resolution de l'interface (%, au prochain lancement) => Risoluzione dell'interfaccia (%, prossimo avvio)",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -3815,6 +3847,14 @@ namespace AR6DoF
             "Assis : OUI => Sentado: SIM",
             "Assis : NON => Sentado: NAO",
             "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Modo sentado: dock na altura das maos, menus e telas na altura dos olhos sentado. Sente-se e ative.",
+            "Tout arreter (sons et musique) => Parar tudo (sons e musica)",
+            "IPD logiciel (+ = ecarte) => IPD por software (+ = mais afastado)",
+            "Echelle des deplacements (%, 100 = exact) => Escala dos movimentos (%, 100 = exato)",
+            "Distance devant les pieds (cm) => Distancia a frente dos pes (cm)",
+            "Taille du dock (%) => Tamanho do dock (%)",
+            "Taille du clavier (%) => Tamanho do teclado (%)",
+            "Taille des boutons de fenetre (%) => Tamanho dos botoes da janela (%)",
+            "Resolution de l'interface (%, au prochain lancement) => Resolucao da interface (%, proxima inicializacao)",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

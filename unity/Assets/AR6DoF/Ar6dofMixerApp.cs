@@ -75,7 +75,7 @@ namespace AR6DoF
             spec = Ar6dofSpectrum.Make(content, new Vector2(0f, RowY(110f)), new Vector2(IW, 110f), 32);
             var info = Lbl("", 26, 18);
             refreshers.Add(() => info.text = Ar6dofLoc.F("Sons en cours : {0}", a.Meters.voices));
-            Btn("Arreter tous les sons", () => a.StopAllSounds(), 48f, 22);
+            Btn("Tout arreter (sons et musique)", () => { a.StopAllSounds(); a.StopMusic(); Refresh(); }, 48f, 22);
         }
 
         // ------------------------------------------------------------------ musique

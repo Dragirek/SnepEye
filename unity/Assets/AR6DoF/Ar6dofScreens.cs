@@ -765,6 +765,18 @@ namespace AR6DoF
             Save();
         }
 
+        /// <summary>Amene cet ecran (avec tout son cluster) devant toi, a hauteur des yeux.</summary>
+        public void BringToMe(Ar6dofScreenPanel p)
+        {
+            if (p == null || Head == null) return;
+            var root = p;
+            int guard = 0;
+            while (root.parent != null && guard++ < 16) root = root.parent;
+            PlaceInFront(root);
+            RelayoutAttached();
+            Save();
+        }
+
         public void RecenterAll()
         {
             if (panels.Count == 0 || Head == null) return;

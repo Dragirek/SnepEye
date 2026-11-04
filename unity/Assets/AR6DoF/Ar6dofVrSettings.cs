@@ -457,6 +457,34 @@ namespace AR6DoF
             return s;
         }
 
+        /// <summary>
+        /// Réglage par pas, à la place d'un curseur : la valeur au-dessus et six boutons -grand -moyen -petit +petit +moyen +grand.
+        /// Un curseur qu'on fait glisser dans l'air bouge sans arrêt ce qu'on regarde (IPD, champ de vision...) : écœurant. Ici chaque touche change la valeur d'un pas précis.
+        /// </summary>
+        void StepRow(RectTransform page, ref float c, string label, float min, float max, float s1, float s2, float s3, Func<float> get, Action<float> set, string fmt = "0")
+        {
+            float y = Next(ref c, 74f, 10f);
+            Text lbl = Ar6dofVrUi.Label(page, "", new Vector2(0f, y + 22f), new Vector2(CW, 30f), 22, TextAnchor.MiddleLeft);
+            Action upd = () => lbl.text = Ar6dofLoc.T(label) + " : " + get().ToString(fmt, System.Globalization.CultureInfo.InvariantCulture);
+            float[] d = { -s3, -s2, -s1, s1, s2, s3 };
+            const float gap = 6f;
+            float w = (CW - 5f * gap) / 6f;
+            for (int i = 0; i < 6; i++)
+            {
+                float delta = d[i];
+                string t = (delta < 0f ? "-" : "+") + Mathf.Abs(delta).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+                Text bt;
+                Ar6dofVrUi.MakeButton(page, t, new Vector2(-CW * 0.5f + w * 0.5f + i * (w + gap), y - 16f), new Vector2(w, 42f), () =>
+                {
+                    float v = Mathf.Clamp(get() + delta, min, max);
+                    set(Mathf.Round(v * 1000f) / 1000f);
+                    upd();
+                }, out bt, 20);
+            }
+            refreshers.Add(upd);
+            upd();
+        }
+
         /// <summary>Un curseur sur toute la largeur, posé sous le curseur c.</summary>
         void SliderRow(RectTransform page, ref float c, string label, float min, float max, Func<float> get, Action<float> set, string fmt = "0.##")
         {
@@ -761,9 +789,9 @@ namespace AR6DoF
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Affichage");
-            SliderRow(page, ref c, "FOV affiche (deg)", 40f, 130f, () => pt.settings.displayFovDeg, v => pt.settings.displayFovDeg = v, "0");
-            SliderRow(page, ref c, "IPD logiciel (ecarte +)", -0.4f, 0.4f, () => pt.settings.ipdShift, v => pt.settings.ipdShift = v, "0.00");
-            SliderRow(page, ref c, "Delai manuel (ms)", 0f, 120f, () => pt.settings.captureDelayMs, v => pt.settings.captureDelayMs = v, "0");
+            StepRow(page, ref c, "FOV affiche (deg)", 40f, 130f, 1f, 5f, 10f, () => pt.settings.displayFovDeg, v => pt.settings.displayFovDeg = v, "0");
+            StepRow(page, ref c, "IPD logiciel (+ = ecarte)", -400f, 400f, 1f, 10f, 50f, () => Mathf.Round(pt.settings.ipdShift * 1000f), v => pt.settings.ipdShift = v / 1000f, "0");
+            StepRow(page, ref c, "Delai manuel (ms)", 0f, 120f, 1f, 5f, 10f, () => pt.settings.captureDelayMs, v => pt.settings.captureDelayMs = v, "0");
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Traitement de l'image");
@@ -992,8 +1020,8 @@ namespace AR6DoF
                 Btn(page, Col3(2), y, 208f, "Remettre le cap a zero", () => dock.launcher.Send('Z'), 18);
             }
             // échelle des déplacements : si les menus "reculent" quand tu avances, le suivi sous-estime tes pas ; on la mesure avec un pas connu
-            SliderRow(page, ref c, "Echelle des deplacements (1 = exact)", 0.4f, 2.5f, () => Ar6dofSettings.Current.moveScale, v => { Ar6dofSettings.Current.moveScale = v; Touch(); }, "0.00");
-            SliderRow(page, ref c, "Distance que tu vas parcourir (cm)", 30f, 300f, () => scaleDistCm, v => { scaleDistCm = Mathf.Round(v); UpdateScaleBtn(); }, "0");
+            StepRow(page, ref c, "Echelle des deplacements (%, 100 = exact)", 40f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.moveScale * 100f), v => { Ar6dofSettings.Current.moveScale = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Distance que tu vas parcourir (cm)", 30f, 300f, 1f, 10f, 50f, () => scaleDistCm, v => { scaleDistCm = Mathf.Round(v); UpdateScaleBtn(); }, "0");
             scaleBtnText = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", ScaleMeasure, 20);
             refreshers.Add(UpdateScaleBtn);
             CloseCard(page, top, ref c);
@@ -1027,7 +1055,7 @@ namespace AR6DoF
             top = OpenCard(page, ref c, "Filtre du rayon");
             SliderRow(page, ref c, "Stabilite (plus bas = plus stable)", 0.5f, 8f, () => Ar6dofSettings.Current.remoteMinCutoff, v => { Ar6dofSettings.Current.remoteMinCutoff = v; Touch(); }, "0.0");
             SliderRow(page, ref c, "Reactivite en mouvement", 0f, 1f, () => Ar6dofSettings.Current.remoteBeta, v => { Ar6dofSettings.Current.remoteBeta = v; Touch(); }, "0.00");
-            SliderRow(page, ref c, "Anticipation (ms)", 0f, 40f, () => Ar6dofSettings.Current.remotePredictMs, v => { Ar6dofSettings.Current.remotePredictMs = v; Touch(); }, "0");
+            StepRow(page, ref c, "Anticipation (ms)", 0f, 40f, 1f, 5f, 10f, () => Ar6dofSettings.Current.remotePredictMs, v => { Ar6dofSettings.Current.remotePredictMs = v; Touch(); }, "0");
             CloseCard(page, top, ref c);
 
             Finish(PgRemote, c);
@@ -1049,7 +1077,7 @@ namespace AR6DoF
             refreshers.Add(() => { for (int i = 0; i < fpsBtns.Count; i++) Ar6dofTheme.SetSelected(fpsBtns[i], Ar6dofSettings.Current.perfFps == i); });
             InfoLine(page, Next(ref c, 28f, 12f), PgPerf, () => Ar6dofLoc.F("Images par seconde actuelles : {0}", Ar6dofPerf.Fps));
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Lissage des bords (MSAA x2) : plus beau, plus lourd", () => Ar6dofSettings.Current.perfMsaa > 1, v => { Ar6dofSettings.Current.perfMsaa = v ? 2 : 1; Touch(); }, 640f);
-            SliderRow(page, ref c, "Resolution de l'interface (au prochain lancement)", 0.5f, 1f, () => Ar6dofSettings.Current.perfRenderScale, v => { Ar6dofSettings.Current.perfRenderScale = v; Touch(); }, "0.00");
+            StepRow(page, ref c, "Resolution de l'interface (%, au prochain lancement)", 50f, 100f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.perfRenderScale * 100f), v => { Ar6dofSettings.Current.perfRenderScale = v / 100f; Touch(); }, "0");
             CloseCard(page, top, ref c);
             Finish(PgPerf, c);
         }
@@ -1663,7 +1691,7 @@ namespace AR6DoF
             {
                 float c = 0f;
                 float top = OpenCard(d.rt, ref c, null);
-                SliderRow(d.rt, ref c, "Taille des boutons de fenetre", 0.6f, 2.5f, () => Ar6dofSettings.Current.chromeScale, v => { Ar6dofSettings.Current.chromeScale = v; Touch(); }, "0.00");
+                StepRow(d.rt, ref c, "Taille des boutons de fenetre (%)", 60f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.chromeScale * 100f), v => { Ar6dofSettings.Current.chromeScale = v / 100f; Touch(); }, "0");
                 Para(d.rt, ref c, "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre.", 96f);
                 CloseCard(d.rt, top, ref c);
                 d.h = -c;
@@ -2109,15 +2137,15 @@ namespace AR6DoF
             float c = BeginPage(page, PgDock);
             float top = OpenCard(page, ref c, "Position");
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Dock aux pieds (cache, apparait en baissant la tete)", () => Ar6dofSettings.Current.dockAtFeet, v => { Ar6dofSettings.Current.dockAtFeet = v; Touch(); }, 600f);
-            SliderRow(page, ref c, "Distance devant les pieds (m)", 0.3f, 1.4f, () => Ar6dofSettings.Current.dockDistance, v => { Ar6dofSettings.Current.dockDistance = v; Touch(); }, "0.00");
-            SliderRow(page, ref c, "Debut d'apparition : tete baissee de (deg)", 5f, 70f, () => Ar6dofSettings.Current.dockRevealStart, v => { Ar6dofSettings.Current.dockRevealStart = v; Touch(); }, "0");
-            SliderRow(page, ref c, "Pleinement visible a (deg)", 15f, 85f, () => Ar6dofSettings.Current.dockRevealFull, v => { Ar6dofSettings.Current.dockRevealFull = v; Touch(); }, "0");
+            StepRow(page, ref c, "Distance devant les pieds (cm)", 30f, 140f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockDistance * 100f), v => { Ar6dofSettings.Current.dockDistance = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Debut d'apparition : tete baissee de (deg)", 5f, 70f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealStart), v => { Ar6dofSettings.Current.dockRevealStart = v; Touch(); }, "0");
+            StepRow(page, ref c, "Pleinement visible a (deg)", 15f, 85f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealFull), v => { Ar6dofSettings.Current.dockRevealFull = v; Touch(); }, "0");
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Taille");
-            SliderRow(page, ref c, "Taille du dock", 0.5f, 2f, () => Ar6dofSettings.Current.dockScale, v => { Ar6dofSettings.Current.dockScale = v; Touch(); }, "0.00");
-            SliderRow(page, ref c, "Inclinaison supplementaire (deg)", -30f, 30f, () => Ar6dofSettings.Current.dockTilt, v => { Ar6dofSettings.Current.dockTilt = v; Touch(); }, "0");
-            SliderRow(page, ref c, "Taille du clavier", 0.5f, 2.5f, () => Ar6dofSettings.Current.keyboardScale, v => { Ar6dofSettings.Current.keyboardScale = v; Touch(); }, "0.00");
+            StepRow(page, ref c, "Taille du dock (%)", 50f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockScale * 100f), v => { Ar6dofSettings.Current.dockScale = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Inclinaison supplementaire (deg)", -30f, 30f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockTilt), v => { Ar6dofSettings.Current.dockTilt = v; Touch(); }, "0");
+            StepRow(page, ref c, "Taille du clavier (%)", 50f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.keyboardScale * 100f), v => { Ar6dofSettings.Current.keyboardScale = v / 100f; Touch(); }, "0");
             CloseCard(page, top, ref c);
             Finish(PgDock, c);
         }

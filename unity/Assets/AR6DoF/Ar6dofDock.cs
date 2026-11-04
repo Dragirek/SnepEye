@@ -2,10 +2,40 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace AR6DoF
 {
+    /// <summary>
+    /// Appui long (1,5 s) sur une icône du dock : ramene la fenetre de l'application pres de toi (et l'ouvre si elle est fermee ou reduite).
+    /// Le relachement qui suit ne declenche pas le clic normal. Quasi gratuit : un Update qui sort tout de suite tant que personne n'appuie (le composant doit rester actif pour recevoir les evenements du pointeur).
+    /// </summary>
+    public class Ar6dofLongPress : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
+    {
+        public float seconds = 1.5f;
+        public Action onLong;
+        float downAt = -1f;
+        bool fired;
+
+        public void OnPointerDown(PointerEventData e) { downAt = Time.unscaledTime; fired = false; }
+        public void OnPointerUp(PointerEventData e) { downAt = -1f; }
+        public void OnPointerExit(PointerEventData e) { downAt = -1f; }
+
+        void Update()
+        {
+            if (downAt < 0f || fired) return;
+            if (Time.unscaledTime - downAt >= seconds)
+            {
+                fired = true;
+                if (onLong != null) onLong();
+            }
+        }
+
+        /// <summary>Vrai (une seule fois) si l'appui long vient d'avoir lieu : le clic qui suit le relachement doit alors etre ignore.</summary>
+        public bool ConsumeFired() { bool f = fired; fired = false; return f; }
+    }
+
     /// <summary>Une "application" rangeable dans la barre de tâches.</summary>
     public abstract class Ar6dofDockApp
     {
@@ -576,7 +606,10 @@ namespace AR6DoF
             Text lbl;
             Ar6dofDockApp app = a;
             var sa = a as ScreenApp;
-            var b = Ar6dofVrUi.MakeButton(iconsRoot, (isGear || sa != null || a is KeyboardApp || a is Ar6dofAppWindow) ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
+            Ar6dofLongPress lp = null;
+            var b = Ar6dofVrUi.MakeButton(iconsRoot, (isGear || sa != null || a is KeyboardApp || a is Ar6dofAppWindow) ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => { if (lp != null && lp.ConsumeFired()) return; Toggle(app); }, out lbl, 34);
+            lp = b.gameObject.AddComponent<Ar6dofLongPress>();
+            lp.onLong = () => Summon(app);
             var rt = (RectTransform)b.transform;
             iconOf[a] = rt;
             if (isGear)
@@ -686,6 +719,33 @@ namespace AR6DoF
             StartCoroutine(Animate(app, !app.open));
         }
 
+        /// <summary>Appui long sur une icone : amene la fenetre (ou l'ecran, le clavier) devant toi ; l'ouvre d'abord si elle est fermee ou reduite.</summary>
+        public void Summon(Ar6dofDockApp app)
+        {
+            if (app == null || !built || !app.Alive || animating.Contains(app)) return;
+            if (app.open) { MoveNear(app); return; }
+            StartCoroutine(SummonRoutine(app));
+        }
+
+        IEnumerator SummonRoutine(Ar6dofDockApp app)
+        {
+            MoveNear(app);
+            yield return StartCoroutine(Animate(app, true));
+        }
+
+        void MoveNear(Ar6dofDockApp app)
+        {
+            var aw = app as Ar6dofAppWindow;
+            if (aw != null) { aw.Replace(); return; }
+            var dm = app as DeviceMenu;
+            if (dm != null) { dm.Replace(); return; }
+            var ca = app as CanvasApp;
+            if (ca != null) { ca.Replace(); return; }
+            if (app is KeyboardApp) { RecenterKeyboard(); return; }
+            var sa = app as ScreenApp;
+            if (sa != null && sa.panel != null && Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.BringToMe(sa.panel);
+        }
+
         static float Ease(float x) { x = Mathf.Clamp01(x); return 1f - (1f - x) * (1f - x) * (1f - x); }
 
         IEnumerator Animate(Ar6dofDockApp app, bool show)
@@ -693,7 +753,8 @@ namespace AR6DoF
             animating.Add(app);
             var win = app as Ar6dofAppWindow;
             bool inCatalog = (win != null && windows.Contains(win)) || app is DeviceMenu;
-            if (show && inCatalog) { app.docked = true; app.open = true; RebuildIcons(); }   // l'application ouverte prend sa place dans la barre : l'animation part de son icone
+            // l'application ouverte prend sa place dans la barre : l'animation part de son icone. La barre n'est refaite que si elle n'y etait pas deja (rouvrir une application reduite ne change rien aux icones)
+            if (show && inCatalog) { bool wasDocked = app.docked; app.docked = true; app.open = true; if (!wasDocked) RebuildIcons(); }
             Transform t = app.AnimRoot;
             RectTransform icon;
             iconOf.TryGetValue(app, out icon);
@@ -719,8 +780,7 @@ namespace AR6DoF
             }
             if (app is KeyboardApp || app == settingsApp) PlayerPrefs.SetInt("ar6dof_dock_open_" + app.title, app.open ? 1 : 0);
             animating.Remove(app);
-            if (inCatalog && !show && closing.Remove(app)) FinishClose(app);
-            else if (inCatalog) RebuildIcons();
+            if (inCatalog && !show && closing.Remove(app)) FinishClose(app);   // fermer : retire l'icone de la barre (et arrete l'application)
             if (win != null && inCatalog) AudioSync();
         }
 

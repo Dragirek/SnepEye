@@ -33,10 +33,32 @@ namespace AR6DoF
         UdpClient udp;
         volatile bool stopping;
 
+        const string RememberKey = "ar6dof_probe_exe";
+        string remembered;
+
+        /// <summary>
+        /// Chemin d'ar6dof_probe.exe : celui du champ s'il existe, sinon le dossier ar6dof_probe-win64 a cote de Assets, sinon le dernier chemin qui a marche
+        /// (retenu par Unity, il survit a la suppression de la scene ou du dossier AR6DoF : plus besoin de le retaper a chaque nouvelle version).
+        /// </summary>
         string ResolveExe()
         {
-            if (!string.IsNullOrEmpty(exePath)) return exePath;
-            return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64", "ar6dof_probe.exe"));
+            string dflt = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64", "ar6dof_probe.exe"));
+            string found = null;
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath)) found = exePath;
+            else if (File.Exists(dflt)) found = dflt;
+            else
+            {
+                string last = "";
+                try { last = PlayerPrefs.GetString(RememberKey, ""); } catch (System.Exception) { }
+                if (!string.IsNullOrEmpty(last) && File.Exists(last)) found = last;
+            }
+            if (found == null) return string.IsNullOrEmpty(exePath) ? dflt : exePath;
+            if (found != remembered)
+            {
+                remembered = found;
+                try { PlayerPrefs.SetString(RememberKey, found); } catch (System.Exception) { }
+            }
+            return found;
         }
 
         /// <summary>Dossier d'ar6dof_probe.exe (ar6dof_audio.exe doit être à côté).</summary>

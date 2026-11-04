@@ -49,6 +49,7 @@
 #include "mount_auto.h"
 #include "mouth_tracker.h"
 #include "imu_view.h"
+#include "track_view.h"
 #include "preview_share.h"
 #include "frame_share_win.h"
 #include "fusion.h"
@@ -585,6 +586,8 @@ static void PreviewPump(bool manage) {
     } else if (w == ar6pv::kMouth) {
       if (ar6mouth::Running() && ar6mouth::GetPreview(&m)) ar6pv::Shared().Publish(m);
       else ar6pv::Shared().PublishText("mouth tracking non configure : choisis la camera de bouche");
+    } else if (w == ar6pv::kTrack) {
+      ar6pv::Shared().Publish(ar6trk::Draw());
     } else if (w == ar6pv::kImu) {
       if (g_imuView) {
         Quat q;
@@ -597,7 +600,7 @@ static void PreviewPump(bool manage) {
         ar6pv::Shared().PublishText("IMU non selectionnee");
       }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds((w == ar6pv::kEyes || w == ar6pv::kMouth || w == ar6pv::kImu) ? 40 : 200));
+    std::this_thread::sleep_for(std::chrono::milliseconds((w == ar6pv::kEyes || w == ar6pv::kMouth || w == ar6pv::kImu || w == ar6pv::kTrack) ? 40 : 200));
   }
   if (eyeAuto) send(eyeCmd, "EYE 0\n");
   if (mouthAuto) send(mouthCmd, "MOUTH 0\n");
@@ -896,7 +899,7 @@ int main(int argc, char** argv) {
     const int apis[2] = {cv::CAP_MSMF, cv::CAP_DSHOW};
     const char* names[2] = {"MSMF", "DSHOW"};
     int first = AskInt("backend", "Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
-    mfDirect = AskInt("mfdirect", "Lecteur camera direct Media Foundation (1 = oui : moins de latence et de CPU, JPEG decode par libjpeg-turbo ; 0 = OpenCV)", 0, 0, 1);
+    mfDirect = AskInt("mfdirect", "Lecteur camera direct Media Foundation (1 = oui : moins de latence et de CPU, JPEG decode par libjpeg-turbo ; 0 = OpenCV)", 1, 0, 1);
     // La télécommande Bluetooth démarre APRÈS toutes les questions (ses messages ne se mélangent plus aux réponses)
     if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
     if (!noBle) ar6hub::Start([](const std::string& m) { std::cout << m << std::endl; });   // appareils Bluetooth des menus Unity
@@ -1164,6 +1167,25 @@ int main(int argc, char** argv) {
           sl = gl;
           sr = gr;
         }
+        // Image sombre (typiquement 120 i/s : exposition courte, ou pièce peu éclairée) : peu de points accrochables et le suivi décroche.
+        // Gain simple, le même pour les deux images (le suivi compare gauche et droite). Sans effet sur une image normalement exposée.
+        {
+          const double mean = cv::mean(sl)[0];
+          if (mean < 70.0) {
+            const double gain = std::min(3.0, 100.0 / std::max(mean, 20.0));
+            cv::Mat ga, gb;
+            sl.convertTo(ga, -1, gain);
+            sr.convertTo(gb, -1, gain);
+            sl = ga;
+            sr = gb;
+            static bool warned = false;
+            if (!warned && gain > 1.5) {
+              warned = true;
+              std::cout << "[suivi] image sombre (luminosite moyenne " << (int)mean << "/255) : gain x" << gain
+                        << " applique au suivi. A 120 i/s l'exposition est courte : plus de lumiere aide beaucoup.\n";
+            }
+          }
+        }
         cv::remap(sl, tl, rectT.mapL1, rectT.mapL2, cv::INTER_LINEAR);
         cv::remap(sr, tr, rectT.mapR1, rectT.mapR2, cv::INTER_LINEAR);
       }
@@ -1242,6 +1264,7 @@ int main(int argc, char** argv) {
       poseP = po.p;
       poseR = po.R;
       poseValid = true;
+      if (tracking && vo) ar6trk::Update(vo->state == StereoVO::kOk ? 1 : vo->state == StereoVO::kLost ? 2 : 0, poseP, poseR, vo->nPoints(), vo->nInliers, floorValid, floorZ, voMs);
       // Sol : plus bas plan horizontal dense parmi les points 3D suivis (estimé toutes les 0,5 s)
       if (tracking && vo && vo->state == StereoVO::kOk && !floorLocked && (tRead - lastFloorT) > 0.5) {
         lastFloorT = tRead;
@@ -1259,6 +1282,8 @@ int main(int argc, char** argv) {
         udp.Send(pkt.data(), (int)pkt.size());
       }
     }
+
+    if (!tracking) ar6trk::Stop();   // la vue du suivi (application) affiche « arrete »
 
 
     drainCtl();   // commandes de l'application ou d'Unity (un caractere, ou une ligne de texte pour les apercus)
@@ -1297,6 +1322,7 @@ int main(int argc, char** argv) {
             havePrevOk = false;
             if (vo) vo->Reset();
             trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
+            ar6trk::Reset();
             floorF.Reset();
             floorValid = false;
             floorLocked = false;
@@ -1307,6 +1333,7 @@ int main(int argc, char** argv) {
           poseValid = false;
           InvalidateSnap(vsnap);
           trackMsg = "tracking arrete";
+          ar6trk::Stop();
         }
       }
       if (k == 'u') usePrior = !usePrior;

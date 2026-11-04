@@ -157,6 +157,9 @@ namespace AR6DoF
         Thread meterThread, eventThread;
         volatile bool running;
         Process proc;
+        float suspendAt = -1f;        // arret differe du moteur (voir Suspend)
+        int gen;                      // numero du lancement en cours : un lancement devenu inutile se tue lui-meme
+        volatile string launchFail;   // erreur de lancement (le processus est lance sur un autre fil)
         float stateSince, lastPing, lastPong, meterWantedUntil, lastMeterPoke;
         bool dirty;
         float saveAt;
@@ -179,13 +182,15 @@ namespace AR6DoF
         /// <summary>Redemarre le moteur s'il etait active (sans changer ce reglage).</summary>
         public void Resume()
         {
+            suspendAt = -1f;   // rouvrir une application audio juste apres l'avoir fermee : le moteur tourne encore, rien a relancer
             if (data.enabled && State == EngineState.Off) StartEngine();
         }
 
         /// <summary>Arrete le moteur sans changer le reglage « active » (il repart a la prochaine ouverture d'une application audio).</summary>
         public void Suspend()
         {
-            if (State != EngineState.Off) StopEngine(true);
+            // Arret differe de 30 s : fermer puis rouvrir une application ne relance pas le processus (lancer ou arreter un exe fige l'affichage quelques centaines de ms).
+            if (State != EngineState.Off && suspendAt < 0f) suspendAt = Time.unscaledTime + 30f;
         }
 
         void OnDestroy()
@@ -268,9 +273,20 @@ namespace AR6DoF
                 Message = Ar6dofLoc.T("ar6dof_audio.exe introuvable (a cote d'ar6dof_probe.exe)");
                 return;
             }
+            // Process.Start peut prendre plusieurs centaines de ms (antivirus...) : sur un autre fil, sinon l'affichage du casque se fige a l'ouverture.
+            int myGen;
+            lock (lockObj) { myGen = ++gen; }
+            int pid = Process.GetCurrentProcess().Id;
+            launchFail = null;
+            ThreadPool.QueueUserWorkItem(_ => LaunchProcess(exe, pid, myGen));
+        }
+
+        void LaunchProcess(string exe, int parentPid, int myGen)
+        {
+            Process p = null;
             try
             {
-                var psi = new ProcessStartInfo(exe, "--parent " + Process.GetCurrentProcess().Id)
+                var psi = new ProcessStartInfo(exe, "--parent " + parentPid)
                 {
                     WorkingDirectory = Path.GetDirectoryName(exe),
                     UseShellExecute = false,
@@ -278,18 +294,20 @@ namespace AR6DoF
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-                proc = new Process { StartInfo = psi };
-                proc.OutputDataReceived += (s, e) => { };
-                proc.ErrorDataReceived += (s, e) => { };
-                proc.Start();
-                proc.BeginOutputReadLine();
-                proc.BeginErrorReadLine();
+                p = new Process { StartInfo = psi };
+                p.OutputDataReceived += (s, e) => { };
+                p.ErrorDataReceived += (s, e) => { };
+                p.Start();
+                p.BeginOutputReadLine();
+                p.BeginErrorReadLine();
             }
             catch (Exception e)
             {
-                State = EngineState.Failed;
-                Message = Ar6dofLoc.T("Lancement impossible : ") + e.Message;
+                launchFail = e.Message;
+                return;
             }
+            lock (lockObj) { if (myGen == gen) { proc = p; return; } }
+            try { p.Kill(); } catch (Exception) { }   // le moteur a ete arrete avant la fin du lancement
         }
 
         void StopEngine(bool polite)
@@ -301,12 +319,16 @@ namespace AR6DoF
             whenOnline.Clear();
             lock (lockObj) events.Clear();
             CloseSockets();
-            try
+            Process p;
+            lock (lockObj) { p = proc; proc = null; gen++; }
+            if (p == null) return;
+            if (!polite)
             {
-                if (proc != null && !proc.HasExited && !proc.WaitForExit(polite ? 600 : 50)) proc.Kill();
+                try { if (!p.HasExited && !p.WaitForExit(50)) p.Kill(); } catch (Exception) { }
+                return;
             }
-            catch (Exception) { }
-            proc = null;
+            // attendre sa sortie (jusqu'a 600 ms) sur un autre fil : fermer une application ne fige pas l'affichage
+            ThreadPool.QueueUserWorkItem(_ => { try { if (!p.HasExited && !p.WaitForExit(600)) p.Kill(); } catch (Exception) { } });
         }
 
         bool OpenSockets()
@@ -593,6 +615,9 @@ namespace AR6DoF
         void Update()
         {
             if (dirty && Time.unscaledTime > saveAt) Save();
+            if (suspendAt > 0f && Time.unscaledTime >= suspendAt) { suspendAt = -1f; StopEngine(true); }
+            string lf = launchFail;
+            if (lf != null) { launchFail = null; State = EngineState.Failed; Message = Ar6dofLoc.T("Lancement impossible : ") + lf; return; }
             if (State == EngineState.Off || State == EngineState.Failed) return;
 
             // événements du moteur

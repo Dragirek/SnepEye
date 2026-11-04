@@ -24,6 +24,7 @@ namespace AR6DoF
         Text countText;
         RenderTexture preview;
         float lastPreview;
+        int lastCount = -1;
         bool shown;   // la fenetre est affichee (pas reduite, pas fermee) : HideUi la cache seulement pendant la prise
 
         public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct et photo du passthrough", 700f)
@@ -85,12 +86,12 @@ namespace AR6DoF
             }
         }
 
-        // apercu en direct : redessine une dizaine de fois par seconde tant que la fenetre est affichee
+        // apercu en direct : 30 images/s tant que la fenetre est affichee (rien quand elle est reduite ou fermee)
         protected override void OnTick()
         {
             var pt = Pt;
-            if (pt == null || canvas == null || !canvas.gameObject.activeInHierarchy || pt.PhotoBusy) return;
-            if (Time.unscaledTime - lastPreview < 0.08f) return;
+            if (pt == null || canvas == null || !canvas.gameObject.activeInHierarchy || pt.PhotoShooting) return;   // le minuteur ne fige pas l'apercu
+            if (Time.unscaledTime - lastPreview < 1f / 30f) return;                                              // 30 images/s
             lastPreview = Time.unscaledTime;
             EnsurePreview();
             pt.RenderPreview(preview, ui != 0, PreviewLayer);
@@ -174,6 +175,7 @@ namespace AR6DoF
             };
             int delay = Timers[Mathf.Clamp(timer, 0, Timers.Length - 1)];
             status = delay > 0 ? "Minuteur lance..." : "";
+            lastCount = -1;
             if (delay > 0) ShowCount(delay);
             pt.TakePhoto(o, delay, OnCount, HideUi, OnDone);
             UpdateShootLabel();
@@ -207,6 +209,8 @@ namespace AR6DoF
 
         void OnCount(int sec)
         {
+            if (sec == lastCount) return;   // appele a chaque image : on ne touche aux textes que quand le chiffre change
+            lastCount = sec;
             string t = sec > 0 ? sec.ToString() : "";
             if (countText != null) countText.text = t;
             if (countOverlay != null) countOverlay.text = t;
