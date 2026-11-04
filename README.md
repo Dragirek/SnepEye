@@ -31,6 +31,23 @@ Indépendant de l'eye tracking (l'un sans l'autre, ou les deux). Désactivé par
 - **Détection classique** (sans fichier modèle) : cavité sombre de la bouche -> ouverture, largeur, côté, étalonnage en 4 poses. Approximatif, à régler selon l'éclairage (`ar6dof_mouth.txt`).
 Côté Unity : `Ar6dofMouthTracker.Instance.GetShapes(float[45])` (noms et index dans `Ar6dofMouthShapes`), et `Ar6dofMouthDisplay` dessine la bouche sur les **écrans du costume** (1 écran de face, ou 2 écrans de côté), avec déformation réglable (museau long, écran incurvé, ouverture en coin). Tout est coupé tant que rien n'est activé.
 
+## Audio : voix, enceintes externes, soundboard, musique (facultatif)
+`ar6dof_audio.exe` (petit programme séparé, sans OpenCV, à côté de `ar6dof_probe.exe`) est lancé par Unity **seulement** quand on active *Moteur audio* (application *Voix* du Store). Désactivé : aucun processus, aucun thread, aucun port.
+- **Voix** : micro (WASAPI) -> porte de bruit, coupe-bas / coupe-haut, égaliseur 3 bandes, changement de hauteur (-12..+12 demi-tons), robot, distorsion, qualité réduite, écho, réverbération, compresseur, limiteur doux -> **les enceintes choisies seulement** (le casque garde le son de Windows et de la RA). Spectre et niveaux du micro et de la sortie dans la fenêtre. Latence ~ 40-60 ms (pitch inclus). Tout le traitement est dans `src/audio/audio_dsp.h` (aucune bibliothèque externe).
+- **Soundboard** : boutons polyphoniques (jusqu'à 64 sons en même temps, un appui n'en coupe jamais un autre), qui **ne passent pas** par la modification de voix. Chaque bouton : fichier, nom, couleur, volume, vitesse, panoramique, boucle, taille en cases. Dispositions : grille, liste, flux, cercle.
+- **Table de mixage** : volumes, muets et niveaux voix / sons / musique / général, spectre de la sortie, lecteur de musique en flux avec liste de lecture (répéter, aléatoire).
+- Formats lus (Media Foundation, déjà dans Windows, rien à installer) : wav, mp3, m4a, aac, wma, flac. Un son du soundboard est chargé en mémoire (2 minutes maximum) ; pour les longues pistes, utilise le lecteur de musique.
+- UDP 127.0.0.1 : commandes 9890 (texte : `IN id`, `OUT id`, `V cle valeur...`, `VOL canal x`, `MUTE canal 0|1`, `LOAD slot chemin`, `PLAY slot vol pan vitesse boucle`, `STOP slot`, `STOPALL`, `MUSIC chemin`, `MPAUSE`, `MSEEK`, `MLOOP`, `METER`, `DEVLIST`, `PING`, `QUIT`), niveaux 9891 (binaire `AUD1`, 308 octets, seulement tant qu'une fenêtre les demande), évènements 9892.
+
+## Store d'applications (dans la barre de tâches VR)
+Une icône *Store* est toujours dans le dock, juste à gauche des réglages. Elle ajoute ou retire des applications de la barre (Voix, Soundboard, Table de mixage, Appareil photo, Objets 3D...) ; une application fermée est désactivée, donc ne coûte rien. Pour en créer une : une classe qui dérive de `Ar6dofAppWindow` et une ligne dans `Ar6dofCatalog`.
+
+### Appareil photo
+Photographie ce que voit le casque : l'image de la caméra **corrigée comme une vraie photo** (la pré-déformation des lentilles du casque est retirée, le champ est celui de l'affichage) avec les interfaces (fenêtres, dock, objets 3D...), **sans** les interfaces, ou les deux (deux fichiers `_avec` et `_sans`). Minuteur (3 / 5 / 10 s, avec un grand compte à rebours devant toi), qualité 1080 / 1440 / 2160 px, format carré / 4:3 / 16:9, un oeil ou les deux (3D côte à côte). La fenêtre de l'appareil se masque toute seule juste avant la prise de vue. Les PNG vont dans `Images\AR6DoF\Photos`. Rien ne tourne tant que la fenêtre est fermée ; la photo est faite en une seule image, sans capture d'écran Windows. Si une photo sort à l'envers, case *Retourner la photo*.
+
+### Objets 3D, stickers et formes
+Pose dans le monde des **modèles 3D `.obj`** (avec leur `.mtl` : couleur Kd et texture `map_Kd`, plusieurs matériaux, tout en un seul maillage ; lecteur écrit pour AR6DoF, aucun programme à installer), des **stickers** (png / jpg, transparence respectée) et des **formes** (cube, sphère, cylindre, capsule). Chaque objet se règle (taille, teinte, opacité, éclairage, position, cap / inclinaison / roulis, *toujours face à moi*), se **déplace au laser** (option *Déplacer au laser* : on le vise et on garde le bouton appuyé, il suit à la même distance), se duplique, se masque et se supprime (avec confirmation). La liste est enregistrée dans `%APPDATA%\AR6DoF\objects.json`. Les positions sont celles du monde Unity, c'est-à-dire le repère du suivi 6DoF de la **session en cours** (il repart du point où le suivi démarre) : les objets reviennent donc au même endroit *par rapport au point de départ*. Retirer l'application du dock masque les objets (les données restent). Pas d'animation ni de squelette (glTF / FBX pas encore).
+
 ## Mode services et aperçus
 `ar6dof_probe --services` (lancé par `ar6dof_app.exe`) n'a ni suivi stéréo, ni Bluetooth, ni passthrough : seulement l'IMU (étalonnage du montage), les caméras d'oeil / de bouche (étalonnage) et les aperçus, pour tout régler **sans lancer le suivi**. Les aperçus (`PV n` sur UDP 9877 : 1 stéréo, 2 yeux, 3 bouche, renouvelé au moins chaque seconde, expire après 3 s) passent par la mémoire partagée `Local\ar6dof_preview` (800x300 BGRA) et ne coûtent rien tant qu'on ne les demande pas, dans l'application comme dans le menu Unity.
 Les fenêtres OpenCV et les touches du clavier ont été retirées : tout se commande depuis l'application, Unity ou l'UDP 9877.
@@ -44,7 +61,7 @@ Les fenêtres OpenCV et les touches du clavier ont été retirées : tout se com
 - Le journal de l'exe affiche `cpu NN%` une fois par seconde : compare avant / après.
 
 ## Compiler
-Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6dof_app.exe` (la fenêtre de contrôle), `ar6dof_probe.exe`, ses DLL et `ar6dof_screen.dll`.
+Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6dof_app.exe` (la fenêtre de contrôle), `ar6dof_probe.exe`, `ar6dof_audio.exe` (moteur audio), ses DLL et `ar6dof_screen.dll`.
 
 ## Première utilisation
 1. Flasher `firmware/bno085_streamer` sur l'ESP32-C3 (Arduino IDE : *USB CDC On Boot = Enabled*).
@@ -54,4 +71,4 @@ Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6d
 3. Côté Unity : suivre `unity/README_UNITY.md`.
 
 ## Tests (g++)
-    for t in tests/*_test.cpp; do g++ -std=c++17 -Isrc "$t" -o /tmp/t && /tmp/t; done
+    for t in tests/*_test.cpp; do g++ -std=c++17 -Isrc -Isrc/audio "$t" -o /tmp/t -lpthread && /tmp/t; done

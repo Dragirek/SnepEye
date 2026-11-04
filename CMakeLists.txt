@@ -32,6 +32,16 @@ if(MSVC)
   target_compile_definitions(ar6dof_app PRIVATE NOMINMAX)
 endif()
 
+# Moteur audio (voix modifiee vers des enceintes externes, soundboard, musique) : petit exe independant, sans OpenCV.
+# Lance par Unity uniquement quand le son est active ; place-le a cote d'ar6dof_probe.exe.
+add_executable(ar6dof_audio src/audio/ar6dof_audio.cpp)
+target_include_directories(ar6dof_audio PRIVATE src/audio)
+target_link_libraries(ar6dof_audio PRIVATE ole32 ws2_32 mfplat mf mfuuid mfreadwrite avrt propsys)
+if(MSVC)
+  target_compile_options(ar6dof_audio PRIVATE /W3 /utf-8 /arch:AVX2 $<$<CONFIG:Release>:/O2>)
+  target_compile_definitions(ar6dof_audio PRIVATE NOMINMAX)
+endif()
+
 # Capture d'ecran GPU pour Unity (a copier dans Assets/AR6DoF/Plugins/x86_64/ ; remplace uWindowCapture)
 add_library(ar6dof_screen SHARED src/screen/ar6dof_screen.cpp)
 target_link_libraries(ar6dof_screen PRIVATE d3d11 dxgi windowsapp)   # windowsapp : capture de fenetre (Windows.Graphics.Capture, C++/WinRT)
