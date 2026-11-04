@@ -750,6 +750,16 @@ namespace AR6DoF
             "Apps => Apps",
             "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => All applications: touch one to open or put it away",
             "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Touch an application to open it; it then takes its place in the bar. Touch it again to put it away: a stored application uses nothing.",
+            "Appareils Bluetooth => Bluetooth devices",
+            "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger. => Menu of this Bluetooth device: touch to show or put it away.",
+            "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons. => Creates a menu for a Bluetooth device (fan, LEDs, remote...): you choose the device and its buttons.",
+            "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos. => Live preview of what you see, and a photo at the camera's resolution, with or without the interfaces. Timer, 3D. Photos go to Pictures\\AR6DoF\\Photos.",
+            "Apercu et photo du passthrough => Preview and photo of the passthrough",
+            "Apercu en direct et photo du passthrough => Live preview and photo of the passthrough",
+            "Interfaces incluses => Include interfaces",
+            "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Photos in Pictures\\AR6DoF\\Photos, at the camera's resolution.",
+            "Actualiser => Refresh",
+            "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => This folder is empty. Touch \"Open folder\", drop your files in it, then \"Refresh\".",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -1490,6 +1500,16 @@ namespace AR6DoF
             "Apps => Apps",
             "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Todas las aplicaciones: toca una para abrirla o guardarla",
             "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Toca una aplicacion para abrirla; ocupa entonces su lugar en la barra. Tocala de nuevo para guardarla: una aplicacion guardada no consume nada.",
+            "Appareils Bluetooth => Dispositivos Bluetooth",
+            "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger. => Menu de este dispositivo Bluetooth: toca para mostrarlo o guardarlo.",
+            "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons. => Crea un menu para un dispositivo Bluetooth (ventilador, LED, mando...): eliges el dispositivo y sus botones.",
+            "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos. => Vista previa en directo de lo que ves y foto a la resolucion de la camara, con o sin interfaces. Temporizador, 3D. Las fotos van a Imagenes\\AR6DoF\\Photos.",
+            "Apercu et photo du passthrough => Vista previa y foto del passthrough",
+            "Apercu en direct et photo du passthrough => Vista previa en directo y foto del passthrough",
+            "Interfaces incluses => Incluir interfaces",
+            "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Fotos en Imagenes\\AR6DoF\\Photos, a la resolucion de la camara.",
+            "Actualiser => Actualizar",
+            "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Esta carpeta esta vacia. Toca \"Abrir carpeta\", deja tus archivos dentro y luego \"Actualizar\".",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -2237,6 +2257,16 @@ namespace AR6DoF
             "Apps => Apps",
             "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Alle Anwendungen: tippe eine an, um sie zu oeffnen oder wegzulegen",
             "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Tippe eine Anwendung an, um sie zu oeffnen; sie erscheint dann in der Leiste. Erneut antippen legt sie weg: eine weggelegte Anwendung verbraucht nichts.",
+            "Appareils Bluetooth => Bluetooth-Geraete",
+            "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger. => Menue dieses Bluetooth-Geraets: antippen zum Anzeigen oder Weglegen.",
+            "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons. => Erstellt ein Menue fuer ein Bluetooth-Geraet (Luefter, LEDs, Fernbedienung...): du waehlst Geraet und Tasten.",
+            "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos. => Live-Vorschau dessen, was du siehst, und Foto in Kameraaufloesung, mit oder ohne Oberflaechen. Timer, 3D. Fotos landen in Bilder\\AR6DoF\\Photos.",
+            "Apercu et photo du passthrough => Vorschau und Foto des Passthrough",
+            "Apercu en direct et photo du passthrough => Live-Vorschau und Foto des Passthrough",
+            "Interfaces incluses => Oberflaechen einbeziehen",
+            "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Fotos in Bilder\\AR6DoF\\Photos, in Kameraaufloesung.",
+            "Actualiser => Aktualisieren",
+            "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Dieser Ordner ist leer. Tippe auf \"Ordner oeffnen\", lege deine Dateien hinein und dann \"Aktualisieren\".",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -2984,6 +3014,16 @@ namespace AR6DoF
             "Apps => App",
             "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Tutte le applicazioni: tocca per aprirla o riporla",
             "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Tocca un'applicazione per aprirla: prende posto nella barra. Toccala di nuovo per riporla: un'applicazione riposta non consuma nulla.",
+            "Appareils Bluetooth => Dispositivi Bluetooth",
+            "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger. => Menu di questo dispositivo Bluetooth: tocca per mostrarlo o riporlo.",
+            "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons. => Crea un menu per un dispositivo Bluetooth (ventola, LED, telecomando...): scegli il dispositivo e i suoi pulsanti.",
+            "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos. => Anteprima dal vivo di cio che vedi e foto alla risoluzione della camera, con o senza interfacce. Timer, 3D. Le foto vanno in Immagini\\AR6DoF\\Photos.",
+            "Apercu et photo du passthrough => Anteprima e foto del passthrough",
+            "Apercu en direct et photo du passthrough => Anteprima dal vivo e foto del passthrough",
+            "Interfaces incluses => Includi interfacce",
+            "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Foto in Immagini\\AR6DoF\\Photos, alla risoluzione della camera.",
+            "Actualiser => Aggiorna",
+            "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Questa cartella e vuota. Tocca \"Apri cartella\", mettici i tuoi file e poi \"Aggiorna\".",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -3730,6 +3770,16 @@ namespace AR6DoF
             "Apps => Apps",
             "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Todos os aplicativos: toque em um para abrir ou guardar",
             "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Toque em um aplicativo para abri-lo; ele ocupa seu lugar na barra. Toque de novo para guarda-lo: um aplicativo guardado nao consome nada.",
+            "Appareils Bluetooth => Dispositivos Bluetooth",
+            "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger. => Menu deste dispositivo Bluetooth: toque para mostrar ou guardar.",
+            "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons. => Cria um menu para um dispositivo Bluetooth (ventilador, LEDs, controle...): voce escolhe o dispositivo e os botoes.",
+            "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos. => Visualizacao ao vivo do que voce ve e foto na resolucao da camera, com ou sem interfaces. Temporizador, 3D. As fotos vao para Imagens\\AR6DoF\\Photos.",
+            "Apercu et photo du passthrough => Visualizacao e foto do passthrough",
+            "Apercu en direct et photo du passthrough => Visualizacao ao vivo e foto do passthrough",
+            "Interfaces incluses => Incluir interfaces",
+            "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Fotos em Imagens\\AR6DoF\\Photos, na resolucao da camera.",
+            "Actualiser => Atualizar",
+            "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Esta pasta esta vazia. Toque em \"Abrir pasta\", coloque seus arquivos nela e depois \"Atualizar\".",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

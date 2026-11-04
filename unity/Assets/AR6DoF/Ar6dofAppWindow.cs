@@ -353,21 +353,24 @@ namespace AR6DoF
         class BrEntry { public string name = "", path = ""; public bool dir, up; }
         readonly List<BrEntry> brEntries = new List<BrEntry>();
         readonly List<string> brSel = new List<string>();
-        string brPath = "", brTitle = "";
+        string brPath = "", brTitle = "", brLib = "", brRoot = "";
         string[] brExt;
         bool brMulti;
         int brPage;
         Action<List<string>> brDone;
         const int BrPerPage = 8;
 
-        /// <summary>Remplace la fenêtre par un navigateur de fichiers (dossiers, disques, raccourcis). 'done' reçoit les fichiers choisis.</summary>
-        protected void Browse(string titleText, string[] extensions, bool multi, Action<List<string>> done)
+        /// <summary>
+        /// Remplace la fenêtre par la liste des fichiers du dossier 'library' de l'application (Documents\AR6DoF\&lt;library&gt;, voir Ar6dofLibrary) :
+        /// pas de navigation dans le disque. Les sous-dossiers de ce dossier restent accessibles. 'done' reçoit les fichiers choisis.
+        /// </summary>
+        protected void Browse(string titleText, string[] extensions, bool multi, Action<List<string>> done, string library)
         {
             brTitle = titleText; brExt = extensions; brMulti = multi; brDone = done;
+            brLib = library;
+            brRoot = Ar6dofLibrary.Folder(library);
             brSel.Clear();
-            string last = "";
-            try { last = PlayerPrefs.GetString("ar6dof_browse_last", ""); } catch (Exception) { }
-            brPath = (!string.IsNullOrEmpty(last) && Directory.Exists(last)) ? last : "";
+            brPath = brRoot;
             brPage = 0;
             LoadEntries();
             view = View.Browse;
@@ -385,34 +388,14 @@ namespace AR6DoF
         void LoadEntries()
         {
             brEntries.Clear();
-            if (string.IsNullOrEmpty(brPath))
+            if (string.IsNullOrEmpty(brPath)) brPath = brRoot;
+            bool atRoot = string.Equals(brPath.TrimEnd('\\', '/'), brRoot.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+            if (!atRoot)
             {
-                try
-                {
-                    string own = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_sounds"));
-                    if (Directory.Exists(own)) brEntries.Add(new BrEntry { name = "ar6dof_sounds", path = own, dir = true });
-                }
-                catch (Exception) { }
-                AddSpecial(Environment.SpecialFolder.MyMusic, "Musique");
-                AddSpecial(Environment.SpecialFolder.Desktop, "Bureau");
-                AddSpecial(Environment.SpecialFolder.MyDocuments, "Documents");
-                try
-                {
-                    string dl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-                    if (Directory.Exists(dl)) brEntries.Add(new BrEntry { name = Ar6dofLoc.T("Telechargements"), path = dl, dir = true });
-                }
-                catch (Exception) { }
-                try
-                {
-                    foreach (var d in DriveInfo.GetDrives())
-                        if (d.IsReady) brEntries.Add(new BrEntry { name = Ar6dofLoc.T("Disque ") + d.Name, path = d.Name, dir = true });
-                }
-                catch (Exception) { }
-                return;
+                string parent = brRoot;
+                try { var p = Directory.GetParent(brPath.TrimEnd('\\', '/')); if (p != null) parent = p.FullName; } catch (Exception) { }
+                brEntries.Add(new BrEntry { name = Ar6dofLoc.T("Dossier parent"), path = parent, dir = true, up = true });
             }
-            string parent = "";
-            try { var p = Directory.GetParent(brPath.TrimEnd('\\', '/')); parent = p != null ? p.FullName : ""; } catch (Exception) { }
-            brEntries.Add(new BrEntry { name = Ar6dofLoc.T("Dossier parent"), path = parent, dir = true, up = true });
             try
             {
                 var dirs = Directory.GetDirectories(brPath);
@@ -434,22 +417,14 @@ namespace AR6DoF
             catch (Exception) { }
         }
 
-        void AddSpecial(Environment.SpecialFolder sf, string label)
-        {
-            try
-            {
-                string p = Environment.GetFolderPath(sf);
-                if (!string.IsNullOrEmpty(p) && Directory.Exists(p)) brEntries.Add(new BrEntry { name = Ar6dofLoc.T(label), path = p, dir = true });
-            }
-            catch (Exception) { }
-        }
-
         void BuildBrowse()
         {
             var t = Ar6dofVrUi.Label(content, brTitle, new Vector2(0f, -(y + 24f)), new Vector2(IW, 48f), 28, TextAnchor.MiddleLeft);
             t.fontStyle = FontStyle.Bold;
             y += 48f + Gap;
-            string shown = string.IsNullOrEmpty(brPath) ? Ar6dofLoc.T("Ce PC") : brPath;
+            string shown = Ar6dofLibrary.Pretty(brLib);
+            if (!string.Equals(brPath.TrimEnd('\\', '/'), brRoot.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                shown += "\\" + brPath.Substring(Mathf.Min(brPath.Length, brRoot.Length)).Trim('\\', '/');
             if (shown.Length > 52) shown = "..." + shown.Substring(shown.Length - 49);
             Lbl(shown, 28, 18);
             int pages = Mathf.Max(1, (brEntries.Count + BrPerPage - 1) / BrPerPage);
@@ -462,13 +437,16 @@ namespace AR6DoF
                 var b = Btn(text, () => OnEntry(en), 46f, 21);
                 if (!e.dir && brSel.Contains(e.path)) Ar6dofTheme.SetSelected(b, true);
             }
-            if (brEntries.Count == 0 || (brEntries.Count == 1 && brEntries[0].up)) Para("Aucun fichier compatible dans ce dossier", 34, 20);
+            if (brEntries.Count == 0 || (brEntries.Count == 1 && brEntries[0].up))
+                Para("Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ».", 56, 19);
             if (pages > 1)
             {
                 BtnRow(46f, 22, "<", (Action)(() => { brPage = (brPage + pages - 1) % pages; Rebuild(); }),
                                 Ar6dofLoc.F("Page {0}/{1}", brPage + 1, pages), (Action)(() => { }),
                                 ">", (Action)(() => { brPage = (brPage + 1) % pages; Rebuild(); }));
             }
+            BtnRow(48f, 21, "Ouvrir le dossier", (Action)(() => Ar6dofLibrary.OpenInExplorer(brRoot)),
+                            "Actualiser", (Action)(() => { LoadEntries(); Rebuild(); }));
             if (brMulti && brSel.Count > 0)
                 BtnRow(52f, 22, Ar6dofLoc.F("Valider ({0})", brSel.Count), (Action)FinishBrowse, "Annuler", (Action)(() => { view = View.Main; Rebuild(); }));
             else
@@ -481,7 +459,6 @@ namespace AR6DoF
             {
                 brPath = e.path;
                 brPage = 0;
-                if (!string.IsNullOrEmpty(brPath)) { try { PlayerPrefs.SetString("ar6dof_browse_last", brPath); } catch (Exception) { } }
                 LoadEntries();
                 Rebuild();
                 return;

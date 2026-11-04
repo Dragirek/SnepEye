@@ -7,29 +7,26 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Appareil photo : photographie ce que voit le casque (image de la caméra corrigée, sans la déformation des lentilles) avec les interfaces,
-    /// sans les interfaces, ou les deux. Minuteur, qualité, format, les deux yeux (3D). Les fichiers PNG vont dans Images\AR6DoF\Photos.
+    /// Appareil photo : aperçu en direct de ce que voit le casque (image de la caméra corrigée, sans la déformation des lentilles) et photo à la résolution
+    /// de la caméra, avec ou sans les interfaces. Minuteur, les deux yeux (3D). Les fichiers PNG vont dans Images\AR6DoF\Photos.
     /// La fenêtre se masque toute seule juste avant la prise de vue. Rien ne tourne tant que la fenêtre est fermée.
     /// </summary>
     public class Ar6dofCameraApp : Ar6dofAppWindow
     {
-        static readonly string[] ModeNames = { "Avec interfaces", "Sans interfaces", "Les deux" };
         static readonly int[] Timers = { 0, 3, 5, 10 };
-        static readonly int[] Sizes = { 1080, 1440, 2160 };
-        static readonly string[] AspectNames = { "Carre", "4:3", "16:9" };
-        static readonly float[] Aspects = { 1f, 4f / 3f, 16f / 9f };
 
-        int mode, timer, size = 1, aspect, stereo, flip;
+        int ui, timer, stereo, flip;
         string status = "";
         string lastPath = "";
-        Texture2D thumb;
         Text shootLabel;
         Canvas countCanvas;
         Text countText;
+        RenderTexture preview;
+        float lastPreview;
 
-        public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Photo du passthrough, avec ou sans les interfaces", 700f)
+        public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct et photo du passthrough", 700f)
         {
-            mode = Get("mode", 2); timer = Get("timer", 1); size = Get("size", 1); aspect = Get("aspect", 0); stereo = Get("stereo", 0); flip = Get("flip", 0);
+            ui = Get("ui", 1); timer = Get("timer", 1); stereo = Get("stereo", 0); flip = Get("flip", 0);
         }
 
         static int Get(string k, int def) { try { return PlayerPrefs.GetInt("ar6dof_cam_" + k, def); } catch (Exception) { return def; } }
@@ -39,15 +36,35 @@ namespace AR6DoF
 
         protected override void OnVisible(bool on)
         {
-            if (!on) { var pt = dock.passthrough; if (pt != null && pt.PhotoBusy) pt.CancelPhoto(); DestroyCount(); }
+            if (!on) { var pt = dock.passthrough; if (pt != null && pt.PhotoBusy) pt.CancelPhoto(); DestroyCount(); ReleasePreview(); }
         }
 
         public override void Destroy()
         {
             DestroyCount();
-            if (thumb != null) UnityEngine.Object.Destroy(thumb);
-            thumb = null;
+            ReleasePreview();
             base.Destroy();
+        }
+
+        void ReleasePreview()
+        {
+            if (preview != null) { preview.Release(); UnityEngine.Object.Destroy(preview); }
+            preview = null;
+        }
+
+        // apercu en direct : l'image de la camera, redessinee une dizaine de fois par seconde tant que la fenetre est affichee
+        protected override void OnTick()
+        {
+            var pt = Pt;
+            if (pt == null || canvas == null || !canvas.gameObject.activeInHierarchy || pt.PhotoBusy) return;
+            if (Time.unscaledTime - lastPreview < 0.08f) return;
+            lastPreview = Time.unscaledTime;
+            if (preview == null)
+            {
+                preview = new RenderTexture(640, 320, 0, RenderTextureFormat.ARGB32);
+                preview.Create();
+            }
+            pt.RenderPreview(preview, flip != 0);
         }
 
         Ar6dofPassthrough Pt { get { return dock.passthrough; } }
@@ -56,30 +73,30 @@ namespace AR6DoF
         {
             if (Pt == null) { Para("Le passthrough n'est pas disponible dans cette scene.", 40, 20); return; }
 
-            Lbl("Contenu de la photo", 30, 20).MakeAccent();
-            Tabs(ModeNames, mode, t => { mode = t; Put("mode", t); });
-            Para(mode == 0 ? "Comme tu le vois : la camera avec les fenetres, l'horloge, le dock..." :
-                 mode == 1 ? "Seulement la camera : aucune interface, comme une vraie photo." :
-                 "Deux fichiers : _avec et _sans les interfaces.", 30, 17);
+            // apercu en direct (les deux yeux si "3D", sinon l'oeil gauche)
+            bool two = stereo != 0;
+            Vector2 sz = two ? new Vector2(IW, IW * 0.5f) : new Vector2(Mathf.Min(IW, 380f), Mathf.Min(IW, 380f));
+            float cy = RowY(sz.y);
+            var r = Ar6dofVrUi.Rect(content, "Apercu", new Vector2(0f, cy), sz);
+            if (preview == null)
+            {
+                preview = new RenderTexture(640, 320, 0, RenderTextureFormat.ARGB32);
+                preview.Create();
+            }
+            var ri = r.gameObject.AddComponent<RawImage>();
+            ri.texture = preview;
+            ri.uvRect = two ? new Rect(0f, 0f, 1f, 1f) : new Rect(0f, 0f, 0.5f, 1f);
+            ri.raycastTarget = false;
+
+            ToggleRow("Interfaces incluses", () => ui != 0, v => { ui = v ? 1 : 0; Put("ui", ui); }, 48f, 21);
+            ToggleRow("Les deux yeux (3D)", () => stereo != 0, v => { stereo = v ? 1 : 0; Put("stereo", stereo); Rebuild(); }, 48f, 21);
+            ToggleRow("Retourner la photo", () => flip != 0, v => { flip = v ? 1 : 0; Put("flip", flip); }, 48f, 21);
 
             Lbl("Minuteur", 30, 20).MakeAccent();
             var tn = new string[Timers.Length];
             for (int i = 0; i < tn.Length; i++) tn[i] = Timers[i] == 0 ? "Aucun" : Timers[i] + " s";
             Tabs(tn, timer, t => { timer = t; Put("timer", t); });
 
-            Lbl("Qualite (cote d'un oeil)", 30, 20).MakeAccent();
-            var sn = new string[Sizes.Length];
-            for (int i = 0; i < sn.Length; i++) sn[i] = Sizes[i] + " px";
-            Tabs(sn, size, t => { size = t; Put("size", t); });
-
-            Lbl("Format", 30, 20).MakeAccent();
-            Tabs(AspectNames, aspect, t => { aspect = t; Put("aspect", t); });
-
-            ToggleRow("Les deux yeux (3D)", () => stereo != 0, v => { stereo = v ? 1 : 0; Put("stereo", stereo); }, 48f, 21);
-            ToggleRow("Retourner la photo", () => flip != 0, v => { flip = v ? 1 : 0; Put("flip", flip); }, 48f, 21);
-            Para("Si la photo sort a l'envers, active « Retourner la photo ».", 30, 16);
-
-            Space(6f);
             Text lab;
             var shoot = BtnT("", OnShoot, out lab, 76f, 28);
             shootLabel = lab;
@@ -89,21 +106,8 @@ namespace AR6DoF
             var st = Para("", 56, 17);
             refreshers.Add(() => st.text = status.Length > 0 ? Ar6dofLoc.T(status) : "");
 
-            if (thumb != null)
-            {
-                float maxW = IW, maxH = 300f;
-                float k = Mathf.Min(maxW / thumb.width, maxH / thumb.height);
-                Vector2 sz = new Vector2(thumb.width * k, thumb.height * k);
-                float cy = RowY(sz.y);
-                var r = Ar6dofVrUi.Rect(content, "Vignette", new Vector2(0f, cy), sz);
-                var ri = r.gameObject.AddComponent<RawImage>();
-                ri.texture = thumb;
-                ri.raycastTarget = false;
-            }
-            var row = new List<object>();
-            row.Add("Ouvrir le dossier"); row.Add((Action)(() => OpenFolder()));
-            BtnRow(48f, 21, row.ToArray());
-            Para("Dossier : Images\\AR6DoF\\Photos", 28, 16);
+            BtnRow(48f, 21, "Ouvrir le dossier", (Action)(() => OpenFolder()));
+            Para("Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera.", 28, 16);
         }
 
         static void OpenFolder()
@@ -131,10 +135,10 @@ namespace AR6DoF
             if (pt.PhotoBusy) { pt.CancelPhoto(); return; }
             var o = new Ar6dofPassthrough.PhotoOptions
             {
-                withUi = mode != 1, withoutUi = mode != 0,
+                withUi = ui != 0, withoutUi = ui == 0,
                 stereo = stereo != 0, flipV = flip != 0,
-                size = Sizes[Mathf.Clamp(size, 0, Sizes.Length - 1)],
-                aspect = Aspects[Mathf.Clamp(aspect, 0, Aspects.Length - 1)],
+                size = pt.NativePhotoSize,      // resolution reelle de la camera : agrandir n'ajouterait aucun detail
+                aspect = 1f,
             };
             int delay = Timers[Mathf.Clamp(timer, 0, Timers.Length - 1)];
             status = delay > 0 ? "Minuteur lance..." : "";
@@ -181,38 +185,15 @@ namespace AR6DoF
         void OnDone(List<string> files, Texture2D tex, string err)
         {
             DestroyCount();
-            if (thumb != null) UnityEngine.Object.Destroy(thumb);
-            thumb = tex != null ? Shrink(tex, 640) : null;
             if (tex != null) UnityEngine.Object.Destroy(tex);
             if (!string.IsNullOrEmpty(err)) status = err == "Annule" ? "Photo annulee" : Ar6dofLoc.F("Echec : {0}", err);
             else if (files.Count == 0) status = "Rien a enregistrer";
             else
             {
                 lastPath = files[0];
-                status = files.Count == 1 ? Ar6dofLoc.F("Photo enregistree : {0}", Path.GetFileName(files[0]))
-                                          : Ar6dofLoc.F("{0} photos enregistrees : {1}...", files.Count, Path.GetFileName(files[0]));
+                status = Ar6dofLoc.F("Photo enregistree : {0}", Path.GetFileName(files[0]));
             }
-            if (canvas != null && canvas.gameObject.activeSelf) Rebuild();
-        }
-
-        // vignette : on ne garde pas une image de 4000 pixels en mémoire graphique pour un aperçu
-        static Texture2D Shrink(Texture2D src, int maxW)
-        {
-            int w = Mathf.Min(maxW, src.width);
-            int h = Mathf.Max(1, Mathf.RoundToInt((float)src.height * w / src.width));
-            var rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
-            var prev = RenderTexture.active;
-            Texture2D res = null;
-            try
-            {
-                Graphics.Blit(src, rt);
-                RenderTexture.active = rt;
-                res = new Texture2D(w, h, TextureFormat.RGB24, false);
-                res.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
-                res.Apply(false, false);
-            }
-            finally { RenderTexture.active = prev; RenderTexture.ReleaseTemporary(rt); }
-            return res;
+            if (canvas != null && canvas.gameObject.activeSelf) Refresh();
         }
     }
 }

@@ -71,6 +71,17 @@ class StereoVO {
       state = kOk;
       return;
     }
+    // Aucun point suivi (image sombre/unie au démarrage, tous perdus) : OpenCV
+    // refuse un tableau vide dans le KLT (assertion = arrêt du programme).
+    // On cherche de nouveaux points et on réessaie à l'image suivante.
+    if (p2_.empty() || p2_.size() != p3_.size()) {
+      p2_.clear();
+      p3_.clear();
+      prev_ = left.clone();
+      AddPoints(left, right);
+      state = kLost;
+      return;
+    }
     cv::Matx33d Rprior = dRcam ? R * (*dRcam) : R;
     cv::Vec3d tprior = t + v * dt;
     cv::Matx33d Rcw = Rprior.t();

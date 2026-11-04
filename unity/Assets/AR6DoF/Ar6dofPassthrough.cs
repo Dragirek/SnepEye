@@ -362,7 +362,8 @@ namespace AR6DoF
                     bool ui = pass == 0;
                     if (ui ? !o.withUi : !o.withoutUi) continue;
                     Texture2D tex = Shoot(ui, o);
-                    string path = Path.Combine(dir, "ar6dof_" + stamp + (ui ? "_avec" : "_sans") + (o.stereo ? "_3d" : "") + ".png");
+                    string tag = (o.withUi && o.withoutUi) ? (ui ? "_avec" : "_sans") : "";
+                    string path = Path.Combine(dir, "ar6dof_" + stamp + tag + (o.stereo ? "_3d" : "") + ".png");
                     File.WriteAllBytes(path, tex.EncodeToPNG());
                     files.Add(path);
                     if (thumb == null) thumb = tex; else Destroy(tex);
@@ -375,11 +376,22 @@ namespace AR6DoF
             else if (thumb != null) Destroy(thumb);
         }
 
-        // Dessine une fois la composition dans une texture, sans les lentilles du casque (décalage, centre et distorsion à zéro).
-        Texture2D Shoot(bool withUi, PhotoOptions o)
+        /// <summary>Taille native d'un oeil sur la camera (pixels) : c'est la resolution reelle d'une photo, agrandir n'ajouterait aucun detail.</summary>
+        public int NativePhotoSize
         {
-            int s = Mathf.Clamp(o.size, 256, 4096);
-            var rt = RenderTexture.GetTemporary(2 * s, s, 0, RenderTextureFormat.ARGB32);
+            get
+            {
+                int W = camTex != null ? camTex.width : 1600, H = camTex != null ? camTex.height : 600;
+                int ew = settings.layout == Ar6dofStereoLayout.SideBySide ? W / 2 : W;
+                int eh = settings.layout == Ar6dofStereoLayout.SideBySide ? H : H / 2;
+                return Mathf.Clamp(Mathf.Min(ew, eh), 256, 4096);
+            }
+        }
+
+        // Dessine la composition dans 'rt', sans les lentilles du casque (décalage, centre et distorsion à zéro).
+        // 'withUi' faux : seulement la camera. Les reglages du shader sont remis comme avant.
+        void RenderComposite(RenderTexture rt, bool withUi, bool flipV)
+        {
             var tmp = (Vector4[])U.Clone();
             for (int e = 0; e < 2; e++)
             {
@@ -393,17 +405,41 @@ namespace AR6DoF
                 clearTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 0f));
                 clearTex.Apply(false, false);
             }
+            try
+            {
+                mat.SetVectorArray("_U", tmp);
+                mat.SetFloat("_Flip", flipV ? -1f : 1f);
+                if (!withUi) { mat.SetTexture("_SceneL", clearTex); mat.SetTexture("_SceneR", clearTex); }
+                compositeCam.targetTexture = rt;
+                compositeCam.Render();
+            }
+            finally
+            {
+                compositeCam.targetTexture = null;
+                mat.SetVectorArray("_U", U);
+                mat.SetFloat("_Flip", settings.flipComposite ? -1f : 1f);
+                mat.SetTexture("_SceneL", rtL);
+                mat.SetTexture("_SceneR", rtR);
+            }
+        }
+
+        /// <summary>Apercu en direct pour l'appareil photo : l'image de la camera (deux yeux cote a cote dans 'rt', largeur = 2 x hauteur). Vrai si dessine.</summary>
+        public bool RenderPreview(RenderTexture rt, bool flipV)
+        {
+            if (mat == null || compositeCam == null || rt == null || PhotoBusy) return false;
+            RenderComposite(rt, false, flipV);
+            return true;
+        }
+
+        Texture2D Shoot(bool withUi, PhotoOptions o)
+        {
+            int s = Mathf.Clamp(o.size, 256, 4096);
+            var rt = RenderTexture.GetTemporary(2 * s, s, 0, RenderTextureFormat.ARGB32);
             Texture2D res = null;
             var prevActive = RenderTexture.active;
             try
             {
-                mat.SetVectorArray("_U", tmp);
-                mat.SetFloat("_Flip", o.flipV ? -1f : 1f);
-                if (!withUi) { mat.SetTexture("_SceneL", clearTex); mat.SetTexture("_SceneR", clearTex); }
-                compositeCam.targetTexture = rt;
-                compositeCam.Render();
-                compositeCam.targetTexture = null;
-
+                RenderComposite(rt, withUi, o.flipV);
                 int h = Mathf.Clamp(Mathf.RoundToInt(s / Mathf.Max(1f, o.aspect)), 64, s);
                 int w = o.stereo ? 2 * s : s;
                 RenderTexture.active = rt;
@@ -414,11 +450,6 @@ namespace AR6DoF
             finally
             {
                 RenderTexture.active = prevActive;
-                compositeCam.targetTexture = null;
-                mat.SetVectorArray("_U", U);
-                mat.SetFloat("_Flip", settings.flipComposite ? -1f : 1f);
-                mat.SetTexture("_SceneL", rtL);
-                mat.SetTexture("_SceneR", rtR);
                 RenderTexture.ReleaseTemporary(rt);
             }
             return res;

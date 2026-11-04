@@ -413,11 +413,11 @@ namespace AR6DoF
                 }
             }
             if (kbApp != null) groups.Add(new List<Ar6dofDockApp> { kbApp });
-            foreach (var m in devMenus.menus) groups.Add(new List<Ar6dofDockApp> { m });
+            foreach (var m in devMenus.menus) if (m.open) groups.Add(new List<Ar6dofDockApp> { m });   // un menu d'appareil ferme n'est que dans Apps
             foreach (var w in windows) if (w.open) groups.Add(new List<Ar6dofDockApp> { w });   // une application fermee n'est que dans Apps
             foreach (var g in groups) apps.AddRange(g);
 
-            const float size = 96f, inCluster = 102f, between = 116f, gearSize = 116f;
+            const float size = 96f, inCluster = 102f, between = 116f, gearSize = 96f;   // la roue a la meme taille que les autres icones
             // positions (de gauche à droite), puis largeur de la barre
             var xs = new List<float>();
             float cx = size * 0.5f;
@@ -429,8 +429,8 @@ namespace AR6DoF
                     first = false;
                     xs.Add(cx);
                 }
-            float addX = (first ? size * 0.5f : cx + between);
-            float sepX = addX + size * 0.5f + 26f;                                 // le separateur isole le groupe de droite : Apps et reglages
+            float addX = (first ? size * 0.5f : cx + between);                     // place de la prochaine icone (plus de bouton + : les nouveaux appareils se creent dans Apps)
+            float sepX = addX - size * 0.5f + 26f;                                 // le separateur isole le groupe de droite : Apps et reglages
             float appsX = sepX + 26f + size * 0.5f;                                // Apps : juste a gauche de la roue des reglages
             float gearX = appsX + size * 0.5f + 12f + gearSize * 0.5f;
             float total = gearX + gearSize * 0.5f;
@@ -455,7 +455,6 @@ namespace AR6DoF
             }
             xi = 0;
             foreach (var g in groups) foreach (var a in g) { MakeIcon(a, xs[xi] + shift, size, false); xi++; }
-            MakeAddButton(addX + shift, size);
             if (appsApp != null) MakeIcon(appsApp, appsX + shift, size, false);
 
             // séparateur + roue des réglages : plus grande, en couleur d'accent, à part
@@ -513,20 +512,6 @@ namespace AR6DoF
                 var aw = a as Ar6dofAppWindow;
                 if (aw != null) aw.Replace();
             }
-        }
-
-        void MakeAddButton(float x, float size)
-        {
-            Text lbl;
-            var b = Ar6dofVrUi.MakeButton(iconsRoot, "+", new Vector2(x, -26f), new Vector2(size, size), () =>
-            {
-                var m = devMenus.Create();
-                RebuildIcons();
-                Toggle(m);   // s'ouvre tout de suite : on est dans ses parametres a choisir l'appareil
-            }, out lbl, 54);
-            lbl.MakeAccent();
-            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
-            tip.text = () => "Nouveau menu d'appareil Bluetooth";
         }
 
         static readonly Dictionary<string, Sprite> glyphs = new Dictionary<string, Sprite>();
@@ -676,7 +661,7 @@ namespace AR6DoF
         {
             animating.Add(app);
             var win = app as Ar6dofAppWindow;
-            bool inCatalog = win != null && windows.Contains(win);
+            bool inCatalog = (win != null && windows.Contains(win)) || app is DeviceMenu;
             if (show && inCatalog) { app.open = true; RebuildIcons(); }   // l'application ouverte prend sa place dans la barre : l'animation part de son icone
             Transform t = app.AnimRoot;
             RectTransform icon;
@@ -741,6 +726,18 @@ namespace AR6DoF
             foreach (var w in windows) if (w.id == id) return w.open;
             return false;
         }
+
+        // ---- menus d'appareils Bluetooth (crees et ouverts depuis Apps)
+        public List<DeviceMenu> DeviceMenus { get { return devMenus.menus; } }
+
+        /// <summary>Cree un menu d'appareil Bluetooth et l'ouvre sur son choix d'appareil.</summary>
+        public void NewDeviceMenu()
+        {
+            var m = devMenus.Create();
+            Toggle(m);
+        }
+
+        public void ToggleDeviceMenu(DeviceMenu m) { Toggle(m); }
 
         /// <summary>Ouvre l'application si elle est rangee, la range si elle est ouverte.</summary>
         public void ToggleApp(string id)

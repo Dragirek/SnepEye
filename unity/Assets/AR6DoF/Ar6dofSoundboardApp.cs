@@ -71,7 +71,7 @@ namespace AR6DoF
                 foreach (var f in files) a.AddPad(f);
                 if (!a.Enabled) a.SetEnabled(true);
                 Rebuild();
-            });
+            }, Ar6dofLibrary.Sounds);
         }
 
         // ------------------------------------------------------------------ disposition des boutons
@@ -247,7 +247,7 @@ namespace AR6DoF
                     a.MarkDirty();
                     a.LoadPad(p);
                     Rebuild();
-                });
+                }, Ar6dofLibrary.Sounds);
             }, 50f, 20);
             var ft = fb.GetComponentInChildren<Text>();
             refreshers.Add(() => ft.text = string.IsNullOrEmpty(p.path) ? Ar6dofLoc.T("Choisir un fichier...") : System.IO.Path.GetFileName(p.path));

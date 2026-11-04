@@ -30,7 +30,7 @@ namespace AR6DoF
     public class AudioData
     {
         public bool enabled;
-        public string inDev = "off", outDev = "off";
+        public string inDev = "off", outDev = "default";
         public string inName = "", outName = "";
         public List<AudioKV> voice = new List<AudioKV>();
         public float[] vol = { 1f, 1f, 1f, 1f };      // voix, soundboard, musique, général
@@ -287,6 +287,7 @@ namespace AR6DoF
             State = EngineState.Off;
             applied = false;
             loopingSlots.Clear();
+            whenOnline.Clear();
             lock (lockObj) events.Clear();
             CloseSockets();
             try
@@ -449,6 +450,23 @@ namespace AR6DoF
         public void SetVolume(int ch, float v) { data.vol[ch] = v; MarkDirty(); Send("VOL " + ChannelNames[ch] + " " + N(v)); }
         public void SetMute(int ch, bool m) { data.mute[ch] = m; MarkDirty(); Send("MUTE " + ChannelNames[ch] + " " + (m ? "1" : "0")); }
 
+        // Lancer un son ou une musique doit toujours faire du bruit : moteur démarré et sortie choisie (sinon rien ne consomme le son
+        // et la position de la musique reste à 0). La commande attend que le moteur réponde s'il démarre.
+        readonly List<Action> whenOnline = new List<Action>();
+
+        void EnsureOutput()
+        {
+            if (data.outDev == "off") { data.outDev = "default"; data.outName = ""; Save(); Send("OUT default"); }
+            if (!data.enabled) SetEnabled(true);
+            else if (State == EngineState.Off || State == EngineState.Failed) StartEngine();
+        }
+
+        void WhenOnline(Action a)
+        {
+            if (State == EngineState.Online) a();
+            else if (State == EngineState.Starting && whenOnline.Count < 64) whenOnline.Add(a);
+        }
+
         // ---- soundboard
         public PadDef AddPad(string path)
         {
@@ -490,9 +508,10 @@ namespace AR6DoF
 
         public void PlayPad(PadDef p)
         {
-            if (State != EngineState.Online) return;
+            EnsureOutput();
             if (p.loop && loopingSlots.Contains(p.slot)) { Send("STOP " + p.slot); loopingSlots.Remove(p.slot); soundVersion++; return; }
-            Send("PLAY " + p.slot + " " + N(p.vol) + " " + N(p.pan) + " " + N(p.rate) + " " + (p.loop ? "1" : "0"));
+            string cmd = "PLAY " + p.slot + " " + N(p.vol) + " " + N(p.pan) + " " + N(p.rate) + " " + (p.loop ? "1" : "0");
+            WhenOnline(() => Send(cmd));
             if (p.loop) { loopingSlots.Add(p.slot); soundVersion++; }
         }
 
@@ -515,8 +534,9 @@ namespace AR6DoF
             data.track = index;
             musicError = "";
             MarkDirty();
-            Send("MLOOP " + (data.repeat == 2 ? "1" : "0"));
-            Send("MUSIC " + data.playlist[index]);
+            EnsureOutput();
+            string loop = "MLOOP " + (data.repeat == 2 ? "1" : "0"), file = "MUSIC " + data.playlist[index];
+            WhenOnline(() => { Send(loop); Send(file); });
             MusicActive = true;
             musicVersion++;
         }
@@ -633,6 +653,12 @@ namespace AR6DoF
                 lastPong = Time.unscaledTime;
                 if (State != EngineState.Online) { State = EngineState.Online; Message = ""; }
                 if (!applied) ApplyAll();
+                if (whenOnline.Count > 0)
+                {
+                    var todo = whenOnline.ToArray();
+                    whenOnline.Clear();
+                    foreach (var a in todo) a();
+                }
                 return;
             }
             if (s == "DEVBEGIN") { inputs.Clear(); outputs.Clear(); return; }

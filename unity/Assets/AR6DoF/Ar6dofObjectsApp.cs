@@ -91,8 +91,8 @@ namespace AR6DoF
 
             Para("Pose dans le monde des modeles 3D (.obj), des images (stickers) et des formes. Ils restent a leur place et sont enregistres.", 56, 18);
             BtnRow(52f, 20,
-                "+ Modele 3D", (Action)(() => Browse("Choisir un modele 3D (.obj)", ModelExt, false, f => AddNew(0, f[0]))),
-                "+ Sticker", (Action)(() => Browse("Choisir une image", ImageExt, false, f => AddNew(1, f[0]))),
+                "+ Modele 3D", (Action)(() => Browse("Choisir un modele 3D (.obj)", ModelExt, false, f => AddNew(0, f[0]), Ar6dofLibrary.Models)),
+                "+ Sticker", (Action)(() => Browse("Choisir une image", ImageExt, false, f => AddNew(1, f[0]), Ar6dofLibrary.Stickers)),
                 "+ Forme", (Action)(() => Pick("Choisir une forme", ShapeList(), -1, i => AddNew(2, Ar6dofWorldObjects.ShapeNames[i]))));
             ToggleRow("Deplacer au laser", () => world.grab, v => { world.SetGrab(v); }, 50f, 22);
             Para("Active-le, vise un objet avec le laser et garde le bouton appuye pour le deplacer.", 30, 16);
@@ -216,7 +216,7 @@ namespace AR6DoF
                     var it = world.Get(o);
                     status = it != null && it.error.Length > 0 ? it.error : "";
                     Rebuild();
-                }), 50f, 20);
+                }, o.kind == 0 ? Ar6dofLibrary.Models : Ar6dofLibrary.Stickers), 50f, 20);
                 var bt = b.GetComponentInChildren<Text>();
                 refreshers.Add(() => bt.text = string.IsNullOrEmpty(o.file) ? Ar6dofLoc.T("Choisir un fichier...") : Path.GetFileName(o.file));
                 Btn("Relire le fichier", () =>

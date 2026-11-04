@@ -31,7 +31,7 @@ namespace AR6DoF
                 desc = "Volumes, muets et niveaux de la voix, des sons et de la musique, spectre, et lecteur de musique avec liste de lecture.",
                 make = d => new Ar6dofMixerApp(d) },
             new Ar6dofAppEntry { id = "camera", title = "Appareil photo", glyph = "camera", yaw = 71f,
-                desc = "Photographie ce que tu vois : avec les interfaces, sans, ou les deux. Minuteur, qualite, format, 3D. Les photos vont dans Images\\AR6DoF\\Photos.",
+                desc = "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos.",
                 make = d => new Ar6dofCameraApp(d) },
             new Ar6dofAppEntry { id = "objects", title = "Objets 3D", glyph = "cube", yaw = 107f,
                 desc = "Pose des modeles 3D (.obj), des stickers et des formes dans le monde. Deplacement au laser, reglages, suppression.",
@@ -56,6 +56,22 @@ namespace AR6DoF
 
         public Ar6dofAppsApp(Ar6dofDock d) : base(d, "apps", "Apps", "apps", "Toutes les applications : touche-en une pour l'ouvrir ou la ranger", 720f) { }
 
+        string deviceSig = "";
+
+        string DeviceSignature()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var m in dock.DeviceMenus) sb.Append(m.DisplayName).Append('|');
+            return sb.ToString();
+        }
+
+        // un appareil cree, renomme ou supprime : la liste se refait
+        protected override void OnTick()
+        {
+            string sig = DeviceSignature();
+            if (sig != deviceSig) Rebuild();
+        }
+
         protected override void BuildMain()
         {
             Para("Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien.", 56, 18);
@@ -63,23 +79,39 @@ namespace AR6DoF
             int n = Ar6dofCatalog.Entries.Count;
             for (int i = 0; i < n; i++)
             {
-                int col = i % Cols;
-                float cy = 0f;
-                if (col == 0) { rowCy = RowY(TileH); }
-                cy = rowCy;
-                AppTile(Ar6dofCatalog.Entries[i], -IW * 0.5f + tileW * 0.5f + col * (tileW + TileGap), cy, tileW);
+                var e = Ar6dofCatalog.Entries[i];
+                string id = e.id;
+                Tile(i, tileW, e.glyph, e.title, e.desc, () => dock.ToggleApp(id), () => dock.IsOpen(id));
             }
+
+            Section("Appareils Bluetooth");
+            deviceSig = DeviceSignature();
+            var menus = dock.DeviceMenus;
+            int k = 0;
+            foreach (var m in menus)
+            {
+                var mm = m;
+                Tile(k++, tileW, "bluetooth", m.DisplayName, "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger.", () => dock.ToggleDeviceMenu(mm), () => mm.open, false);
+            }
+            Tile(k, tileW, "plus", "Nouvel appareil", "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons.", () => dock.NewDeviceMenu(), null, true);
+
             Section("Prochainement");
             Para("Apprentissage guide de la bouche, matrice de LED sur ESP32, servomoteurs.", 56, 18);
         }
 
         float rowCy;
 
-        void AppTile(Ar6dofAppEntry e, float cx, float cy, float w)
+        void Tile(int index, float tileW, string glyph, string title, string desc, Action click, Func<bool> isOpen, bool translate = true)
+        {
+            int col = index % Cols;
+            if (col == 0) rowCy = RowY(TileH);
+            AppTile(glyph, title, desc, click, isOpen, -IW * 0.5f + tileW * 0.5f + col * (tileW + TileGap), rowCy, tileW, translate);
+        }
+
+        void AppTile(string glyph, string title, string desc, Action click, Func<bool> isOpen, float cx, float cy, float w, bool translate)
         {
             Text lbl;
-            string id = e.id;
-            var b = BtnAt(cx, cy, w, TileH, "", () => { dock.ToggleApp(id); }, out lbl, 18);
+            var b = BtnAt(cx, cy, w, TileH, "", () => click(), out lbl, 18);
             var rt = (RectTransform)b.transform;
             lbl.text = "";
 
@@ -89,13 +121,19 @@ namespace AR6DoF
             grt.anchoredPosition = new Vector2(0f, 14f);
             grt.sizeDelta = new Vector2(74f, 74f);
             var gi = g.AddComponent<Image>();
-            gi.sprite = Ar6dofDock.Glyph(e.glyph);
+            gi.sprite = Ar6dofDock.Glyph(glyph);
             gi.raycastTarget = false;
             Ar6dofTheme.Attach(g, Ar6dofRole.Text);
 
-            var nl = Ar6dofVrUi.Label(rt, Ar6dofLoc.T(e.title), new Vector2(0f, -42f), new Vector2(w - 10f, 28f), 18);
+            string shown = translate || title == "Nouvel appareil" ? Ar6dofLoc.T(title) : title;
+            var nl = Ar6dofVrUi.Label(rt, shown, new Vector2(0f, -42f), new Vector2(w - 10f, 28f), 18);
             nl.gameObject.AddComponent<Ar6dofFitText>().Init(nl, 18);
 
+            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
+            tip.offsetY = TileH * 0.5f + 34f;
+            tip.text = () => shown + " - " + Ar6dofLoc.T(desc);
+
+            if (isOpen == null) return;
             var ind = new GameObject("Indicateur", typeof(RectTransform));
             ind.transform.SetParent(rt, false);
             var irt = (RectTransform)ind.transform;
@@ -105,12 +143,8 @@ namespace AR6DoF
             ii.raycastTarget = false;
             Ar6dofTheme.Attach(ind, Ar6dofRole.Accent, 3);
 
-            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
-            tip.offsetY = TileH * 0.5f + 34f;
-            tip.text = () => Ar6dofLoc.T(e.title) + " - " + Ar6dofLoc.T(e.desc);
-
             GameObject indGo = ind;
-            refreshers.Add(() => indGo.SetActive(dock.IsOpen(id)));
+            refreshers.Add(() => indGo.SetActive(isOpen()));
         }
     }
 }

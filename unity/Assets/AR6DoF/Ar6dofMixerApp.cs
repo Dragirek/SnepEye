@@ -132,7 +132,7 @@ namespace AR6DoF
                     if (a.data.track < 0 && a.data.playlist.Count > 0) a.data.track = 0;
                     a.MarkDirty();
                     Rebuild();
-                });
+                }, Ar6dofLibrary.Music);
             }), "Vider la liste", (Action)(() => { a.StopMusic(); a.data.playlist.Clear(); a.data.track = -1; a.MarkDirty(); Rebuild(); }));
 
             // liste de lecture

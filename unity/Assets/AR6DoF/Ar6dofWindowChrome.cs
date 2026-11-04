@@ -146,6 +146,34 @@ namespace AR6DoF
                             a = Mathf.Clamp01(2.6f - md);
                             break;
                         }
+                        case "reset":
+                        {
+                            // fleche circulaire : revenir a la taille d'origine
+                            float rdx = fx - 32f, rdy = fy - 32f;
+                            float rr = Mathf.Sqrt(rdx * rdx + rdy * rdy);
+                            float ang = Mathf.Atan2(rdy, rdx) * Mathf.Rad2Deg;   // -180..180, 0 = droite
+                            bool gap = ang > 20f && ang < 70f;                     // ouverture en haut a droite, ou se pose la pointe
+                            if (!gap) a = Mathf.Clamp01(3.0f - Mathf.Abs(rr - 17f));
+                            // pointe de fleche au bout de l'arc (vers le haut a droite)
+                            float tx = 32f + 17f * Mathf.Cos(70f * Mathf.Deg2Rad), ty = 32f + 17f * Mathf.Sin(70f * Mathf.Deg2Rad);
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, tx, ty, tx + 11f, ty - 1f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, tx, ty, tx + 1f, ty + 11f)));
+                            break;
+                        }
+                        case "plus":
+                        {
+                            a = Mathf.Max(Mathf.Clamp01(3.2f - SegDist(fx, fy, 32f, 14f, 32f, 50f)), Mathf.Clamp01(3.2f - SegDist(fx, fy, 14f, 32f, 50f, 32f)));
+                            break;
+                        }
+                        case "bluetooth":
+                        {
+                            // rune Bluetooth
+                            float[] bx = { 20f, 44f, 32f, 32f, 44f, 20f }, by = { 41f, 23f, 10f, 54f, 41f, 23f };
+                            float bd = 99f;
+                            for (int k = 0; k < 5; k++) bd = Mathf.Min(bd, SegDist(fx, fy, bx[k], by[k], bx[k + 1], by[k + 1]));
+                            a = Mathf.Clamp01(2.8f - bd);
+                            break;
+                        }
                         case "resize":
                         {
                             // 3 traits en diagonale dans le coin bas droit (le plus long est le plus loin du coin)
@@ -170,7 +198,7 @@ namespace AR6DoF
     /// <summary>Un bouton de fenêtre (réduire, fermer, redimensionner) : petit carré ou rond 3D que le laser peut viser.</summary>
     public class Ar6dofChromeButton : MonoBehaviour, IAr6dofPointerTarget, IAr6dofPointerDrag
     {
-        public enum Kind { Minimize, Close, Resize, Move, Settings }
+        public enum Kind { Minimize, Close, Resize, Move, Settings, ResetSize }
         public Kind kind;
         public Ar6dofWindowChrome chrome;
         public Renderer bg, icon;
@@ -248,6 +276,7 @@ namespace AR6DoF
         public Action resizeEnd;
         public Action onSettings;                      // roue à droite de la barre de déplacement (même place pour toutes les fenêtres) ; vide = pas de roue
         public Func<bool> settingsOn;                  // vrai : le panneau de réglages de cette fenêtre est ouvert (la roue s'allume)
+        public Action onResetSize;                     // remet la fenetre a sa taille d'origine ; vide = l'echelle d'origine de 'target' (menus) ; les fenetres au redimensionnement personnalise n'ont pas ce bouton
         public Action moved;                           // appelé quand on commence à déplacer la fenêtre à la main (un panneau collé à son écran se détache)
         public Action<Vector3, int> moveBegin;         // vides : déplacement par défaut = le menu suit le laser
         public Action<Ray> moveDrag;
@@ -266,7 +295,7 @@ namespace AR6DoF
         public static float MoveBarThickness { get { return S * MoveThick; } }
         public static float EdgeGap { get { return Gap; } }
         float lastS = -1f;
-        Ar6dofChromeButton bMin, bClose, bResize, bMove, bSet;
+        Ar6dofChromeButton bMin, bClose, bResize, bMove, bSet, bReset;
         bool lastSetOn;
         Ar6dofPassthrough pt;
         float grabDist;
@@ -313,6 +342,7 @@ namespace AR6DoF
             bResize = MakeBtn(Ar6dofChromeButton.Kind.Resize, "resize");
             bMove = MakeBtn(Ar6dofChromeButton.Kind.Move, "grip");
             bSet = MakeBtn(Ar6dofChromeButton.Kind.Settings, "gear");
+            bReset = MakeBtn(Ar6dofChromeButton.Kind.ResetSize, "reset");
             group.SetActive(false);
         }
 
@@ -362,7 +392,7 @@ namespace AR6DoF
             var d = Ar6dofSettings.Current;
             bool mac = d.chromeStyle == 1;
             int corner = mac ? 999 : Mathf.Min(Ar6dofSettings.StyleFor(elem).corner, 10);
-            foreach (var b in new[] { bMin, bClose, bResize, bSet })
+            foreach (var b in new[] { bMin, bClose, bResize, bSet, bReset })
             {
                 Ar6dofTheme.SetRoundedSize(b.bg.sharedMaterial, S, S, corner);
                 b.Refresh();
@@ -382,7 +412,7 @@ namespace AR6DoF
             if (Mathf.Abs(sc - lastS) > 1e-4f)
             {
                 lastS = sc;
-                foreach (var b in new[] { bMin, bClose, bResize, bSet }) b.transform.localScale = new Vector3(sc, sc, 1f);
+                foreach (var b in new[] { bMin, bClose, bResize, bSet, bReset }) b.transform.localScale = new Vector3(sc, sc, 1f);
                 bMove.transform.localScale = new Vector3(sc * MoveLen, sc * MoveThick, 1f);
                 var ic = bMove.icon != null ? bMove.icon.transform : null;
                 if (ic != null) ic.localScale = new Vector3(0.8f, 0.62f, 1f);   // une simple ligne qui occupe presque toute la barre
@@ -418,6 +448,10 @@ namespace AR6DoF
             bMin.transform.localPosition = new Vector3(x0 - sign * step, yy, 0f);
             // poignée de taille : SOUS la fenêtre, dans son aplomb (jamais à droite : elle tomberait sur l'écran voisin)
             bResize.transform.localPosition = new Vector3(hs.x - S * 0.5f, -hs.y - Gap - S * 0.5f, 0f);
+            // remise a la taille d'origine : juste a gauche de la poignee de taille
+            bool canReset = onResetSize != null || resizeBegin == null;
+            bReset.gameObject.SetActive(canReset);
+            bReset.transform.localPosition = new Vector3(hs.x - S * 0.5f - (S + Gap), -hs.y - Gap - S * 0.5f, 0f);
             // barre de déplacement : sous la fenêtre, au milieu
             bMove.gameObject.SetActive(canMove);
             float barY = -hs.y - Gap - S * MoveThick * 0.5f;
@@ -437,6 +471,7 @@ namespace AR6DoF
         {
             if (kind == Ar6dofChromeButton.Kind.Minimize) { if (onMinimize != null) onMinimize(); return; }
             if (kind == Ar6dofChromeButton.Kind.Settings) { if (onSettings != null) onSettings(); return; }
+            if (kind == Ar6dofChromeButton.Kind.ResetSize) { ResetSize(); return; }
             if (kind != Ar6dofChromeButton.Kind.Close) return;
             if (confirmClose != null && confirmClose() && !bClose.armed)
             {
@@ -468,6 +503,12 @@ namespace AR6DoF
         }
 
         public void ResizeEnd() { if (resizeEnd != null) resizeEnd(); }
+
+        public void ResetSize()
+        {
+            if (onResetSize != null) { onResetSize(); return; }
+            if (target != null) target.localScale = Vector3.one * baseScale;
+        }
 
         // ---- déplacement du menu : le menu suit le laser en gardant la distance et en restant de face, à la verticale
         public void MoveEnd() { if (moveEnd != null) moveEnd(); }
