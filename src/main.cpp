@@ -46,6 +46,7 @@
 #include "floor.h"
 #include "frame_clock.h"
 #include "mf_camera.h"
+#include "mount_auto.h"
 #include "mouth_tracker.h"
 #include "preview_share.h"
 #include "frame_share_win.h"
@@ -478,8 +479,31 @@ static bool HandlePvCommand(const std::string& line) {
 struct MountCal {
   bool havePendingUp = false;
   Vec3 pendingUp;
-  std::string msg = "montage : etape 1 (casque a plat, a l'endroit), puis etape 2 (penche vers l'avant)";
+  std::string msg = "montage : clique sur Calibrer le montage (un seul bouton, avec compte a rebours)";
+  MountAuto au;   // calibration en un geste (commande MOUNT) : mesures moyennees, sans besoin de cliquer au bon moment
 };
+
+// Commandes texte MOUNT (demarre la calibration en un geste) et MOUNTX (l'annule). Vrai si la ligne a ete traitee.
+static bool HandleMountLine(const std::string& line, MountCal& mc) {
+  if (line == "MOUNT") { mc.au.Start(NowS(), mc.msg); mc.havePendingUp = false; return true; }
+  if (line == "MOUNTX") { mc.au.Cancel(mc.msg); return true; }
+  return false;
+}
+
+// A appeler souvent : fait avancer la calibration en un geste avec les mesures de l'IMU (ne coute rien quand elle est inactive).
+static void TickMountAuto(ImuState& imu, MountCal& mc) {
+  if (!mc.au.Active()) return;
+  Vec3 acc, gyr;
+  { std::lock_guard<std::mutex> l(imu.m); acc = imu.acc_s; gyr = imu.gyr_s; }
+  Mat3 R;
+  if (mc.au.Update(NowS(), acc, gyr, R, mc.msg)) {
+    std::lock_guard<std::mutex> l(imu.m);
+    imu.mount = R;
+    imu.reinit = true;
+    SaveMount(R);
+  }
+  if (mc.au.TakeBeep()) std::thread([] { Beep(988, 140); }).detach();   // « mesure prise » : audible meme casque sur la tete
+}
 
 static void HandleMountCmd(int k, ImuState& imu, MountCal& mc, const Vec3& acc, const Vec3& gyr) {
   if (k == 'g') {
@@ -658,11 +682,13 @@ static int RunServices() {
     while (ctl.PollText(line)) {
       if (line == "Q" || line == "q") { quit = true; break; }
       if (HandlePvCommand(line)) continue;
+      if (HandleMountLine(line, mcal)) continue;
       if (line.size() != 1) continue;
       Vec3 acc, gyr;
       { std::lock_guard<std::mutex> l(imu.m); acc = imu.acc_s; gyr = imu.gyr_s; }
       HandleMountCmd((unsigned char)line[0], imu, mcal, acc, gyr);
     }
+    TickMountAuto(imu, mcal);
     if (mcal.msg != lastMsg) { lastMsg = mcal.msg; std::cout << "[montage] " << mcal.msg << std::endl; }
     const double now = NowS();
     if (now - lastStat >= 1.0) {
@@ -1002,7 +1028,7 @@ int main(int argc, char** argv) {
     std::string l;
     while (ctl.PollText(l)) {
       if (l == "Q" || l == "q") quit = true;
-      else if (!HandlePvCommand(l)) cmdQ.push_back(l);
+      else if (!HandlePvCommand(l) && !HandleMountLine(l, mc)) cmdQ.push_back(l);
     }
   };
 
@@ -1015,6 +1041,7 @@ int main(int argc, char** argv) {
       if (mb.id == lastId) {   // pas de nouvelle image : on reste réactif aux commandes
         l.unlock();
         drainCtl();
+        TickMountAuto(imu, mc);
         if (quit || g_parentGone) break;
         continue;
       }
@@ -1203,6 +1230,7 @@ int main(int argc, char** argv) {
     while (!cmdQ.empty()) {
       const std::string cl = cmdQ.front();
       cmdQ.pop_front();
+      if (HandleMountLine(cl, mc)) continue;
       if (cl.size() != 1) continue;
       int k = (unsigned char)cl[0];
       if (k == 'V') k = 'v';   // V sol, Z yaw : commandes d'Unity
@@ -1253,6 +1281,7 @@ int main(int argc, char** argv) {
       if (k == '-') predS = std::max(0.0, predS - 0.005);
       if (k == '=') predS = std::min(0.1, predS + 0.005);
     }
+    TickMountAuto(imu, mc);
     if (mc.msg != lastMountMsg) { lastMountMsg = mc.msg; std::cout << "[montage] " << mc.msg << std::endl; }
     if (trackMsg != lastTrackMsg) { lastTrackMsg = trackMsg; std::cout << "[suivi] " << trackMsg << std::endl; }
     if (checkMsg != lastCheckMsg) { lastCheckMsg = checkMsg; std::cout << "[calibration] " << checkMsg << std::endl; }

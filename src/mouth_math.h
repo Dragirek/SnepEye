@@ -122,4 +122,77 @@ inline void Encode(const Packet& g, uint8_t* out) {
   std::memcpy(out + 32, &g.micros, 4);
 }
 
+// ---------------------------------------------------------------- mode « modele IA » : 45 parametres (ordre de Project Babble / ARKit-VRChat)
+constexpr int kShapes = 45;
+inline const char* ShapeName(int i) {
+  static const char* n[kShapes] = {
+      "cheekPuffLeft", "cheekPuffRight", "cheekSuckLeft", "cheekSuckRight", "jawOpen", "jawForward", "jawLeft", "jawRight", "noseSneerLeft",
+      "noseSneerRight", "mouthFunnel", "mouthPucker", "mouthLeft", "mouthRight", "mouthRollUpper", "mouthRollLower", "mouthShrugUpper",
+      "mouthShrugLower", "mouthClose", "mouthSmileLeft", "mouthSmileRight", "mouthFrownLeft", "mouthFrownRight", "mouthDimpleLeft",
+      "mouthDimpleRight", "mouthUpperUpLeft", "mouthUpperUpRight", "mouthLowerDownLeft", "mouthLowerDownRight", "mouthPressLeft",
+      "mouthPressRight", "mouthStretchLeft", "mouthStretchRight", "tongueOut", "tongueUp", "tongueDown", "tongueLeft", "tongueRight",
+      "tongueRoll", "tongueBendDown", "tongueCurlUp", "tongueSquish", "tongueFlat", "tongueTwistLeft", "tongueTwistRight"};
+  return (i >= 0 && i < kShapes) ? n[i] : "";
+}
+
+// Etalonnage : « neutre » (valeur au repos de chaque parametre, soustraite) et « expressions » (maximum atteint par chaque parametre, pour le mettre a l'echelle 0..1).
+struct MlCal {
+  bool hasBase = false, hasRange = false;
+  float base[kShapes] = {};
+  float maxv[kShapes] = {};
+};
+
+inline void MlApply(const MlCal& c, const float* in, float* out) {
+  for (int i = 0; i < kShapes; i++) {
+    float v = in[i];
+    if (c.hasBase) v -= c.base[i];
+    if (c.hasRange) {
+      const float span = c.maxv[i] - (c.hasBase ? c.base[i] : 0.f);
+      if (span > 0.12f) v /= span;   // un parametre qui n'a presque pas bouge pendant l'etalonnage reste tel quel
+    }
+    out[i] = v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
+  }
+}
+
+// 90e centile de chaque parametre sur une serie de mesures (ignore les pics isoles).
+inline void MlPercentile(const std::vector<std::vector<float>>& samples, double q, float* out) {
+  for (int i = 0; i < kShapes; i++) {
+    std::vector<float> t;
+    t.reserve(samples.size());
+    for (const auto& s : samples) t.push_back(s[i]);
+    if (t.empty()) { out[i] = 0.f; continue; }
+    std::sort(t.begin(), t.end());
+    size_t k = (size_t)(q * (double)(t.size() - 1) + 0.5);
+    out[i] = t[std::min(k, t.size() - 1)];
+  }
+}
+
+inline std::string FloatsToString(const float* v, int n) {
+  std::string r;
+  char b[24];
+  for (int i = 0; i < n; i++) { std::snprintf(b, sizeof(b), i ? " %.5f" : "%.5f", v[i]); r += b; }
+  return r;
+}
+inline bool FloatsFromString(const std::string& s, float* v, int n) {
+  std::istringstream in(s);
+  for (int i = 0; i < n; i++) if (!(in >> v[i])) return false;
+  return true;
+}
+
+// Paquet 2 (196 octets, petit-boutiste) : meme port 9886. Entete 16 octets puis 45 floats dans l'ordre de ShapeName().
+constexpr uint32_t kMagic2 = 0x3248544Du;   // "MTH2"
+constexpr int kPacket2Size = 16 + kShapes * 4;
+inline void Encode2(uint8_t flags, uint16_t seq, uint32_t micros, const float* shapes, uint8_t* out) {
+  uint32_t magic = kMagic2;
+  std::memcpy(out, &magic, 4);
+  out[4] = 2;
+  out[5] = flags;
+  std::memcpy(out + 6, &seq, 2);
+  std::memcpy(out + 8, &micros, 4);
+  uint16_t count = kShapes, pad = 0;
+  std::memcpy(out + 12, &count, 2);
+  std::memcpy(out + 14, &pad, 2);
+  std::memcpy(out + 16, shapes, kShapes * 4);
+}
+
 }  // namespace mouth

@@ -29,6 +29,30 @@ int main() {
   std::vector<Feature> v = {F(0.01, 0.3, 0.02), F(0.02, 0.3, 0.02), F(0.9, 0.9, 0.9)};
   Feature m = MedianFeature(v);
   CHECK(m.found && m.area < 0.03);                         // la valeur aberrante est ignoree
+  // mode IA : etalonnage neutre + expressions, paquet 2
+  {
+    MlCal mc;
+    float in[kShapes] = {}, out[kShapes];
+    in[4] = 0.30f; in[19] = 0.05f;
+    mc.hasBase = true; mc.base[4] = 0.10f; mc.base[19] = 0.05f;
+    mc.hasRange = true; mc.maxv[4] = 0.70f; mc.maxv[19] = 0.10f;   // jawOpen: 0.1..0.7 ; smile : plage trop petite -> inchange
+    MlApply(mc, in, out);
+    CHECK(std::fabs(out[4] - (0.20f / 0.60f)) < 1e-5f);
+    CHECK(out[19] == 0.f && out[0] == 0.f);
+    std::vector<std::vector<float>> sm;
+    for (int i = 0; i < 100; i++) sm.push_back(std::vector<float>(kShapes, (float)i / 99.f));
+    float p90[kShapes];
+    MlPercentile(sm, 0.9, p90);
+    CHECK(std::fabs(p90[3] - 0.9f) < 0.02f);
+    float rt[kShapes];
+    CHECK(FloatsFromString(FloatsToString(p90, kShapes), rt, kShapes) && std::fabs(rt[7] - p90[7]) < 1e-4f);
+    uint8_t pk[kPacket2Size];
+    Encode2(3, 7, 123456u, out, pk);
+    uint32_t mg; std::memcpy(&mg, pk, 4);
+    float f4; std::memcpy(&f4, pk + 16 + 4 * 4, 4);
+    CHECK(mg == kMagic2 && pk[4] == 2 && pk[5] == 3 && std::fabs(f4 - out[4]) < 1e-7f);
+    CHECK(std::string(ShapeName(4)) == "jawOpen" && std::string(ShapeName(44)) == "tongueTwistRight");
+  }
   if (!fails) std::printf("mouth_math_test : OK\n");
   return fails;
 }

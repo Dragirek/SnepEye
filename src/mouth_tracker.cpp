@@ -7,19 +7,32 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <fstream>
 #include <memory>
+#include <cstring>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
-
+// Module IA d'OpenCV (feature « dnn » de vcpkg.json). S'il manque, le programme compile quand meme et reste en detection classique.
+#if defined(__has_include)
+#if __has_include(<opencv2/dnn.hpp>)
+#include <opencv2/dnn.hpp>
+#define AR6_HAVE_DNN 1
+#endif
+#endif
+#ifndef AR6_HAVE_DNN
+#define AR6_HAVE_DNN 0
+#endif
 #include "eye_math.h"      // OneEuro, SplitWords
 #include "mouth_math.h"
 #include "mouth_tracker.h"
@@ -49,6 +62,9 @@ struct Tunables {
   double reactivity = 0.08;  // OneEuro beta
   double roiX = 0, roiY = 0, roiW = 1, roiH = 1;   // zone analysée (parts de l'image)
   std::string fourcc = "auto";
+  std::string model = "auto";   // modele IA (ONNX, 45 parametres type Project Babble) : auto = babble_model.onnx a cote de l'exe ; none = detection classique
+  int rotate = 0;               // rotation de l'image avant le modele : 0, 90, 180, 270 (sens horaire)
+  int flip = 0;                 // 1 = miroir horizontal avant le modele
 };
 
 const char* kDefaultTunables =
@@ -59,7 +75,10 @@ const char* kDefaultTunables =
     "smooth=3.0        # Hz : plus bas = plus stable, plus haut = plus nerveux\n"
     "reactivity=0.08   # plus haut = moins de retard sur les mouvements rapides\n"
     "roi=0,0,1,1       # zone analysee : x,y,largeur,hauteur en parts de l'image (exclut les joues, le nez...)\n"
-    "fourcc=auto       # auto | mjpg | yuy2 | none\n";
+    "fourcc=auto       # auto | mjpg | yuy2 | none\n"
+    "model=auto        # modele IA ONNX (45 parametres, type Project Babble) : auto = babble_model.onnx a cote de l'exe | chemin complet | none = detection classique\n"
+    "rotate=0          # modele IA : rotation de l'image avant analyse (0, 90, 180, 270) pour que le menton soit en bas\n"
+    "flip=0            # modele IA : 1 = miroir horizontal (gauche / droite inverses)\n";
 
 Tunables LoadTunables(const std::string& path, const LogFn& log) {
   Tunables t;
@@ -83,6 +102,9 @@ Tunables LoadTunables(const std::string& path, const LogFn& log) {
       else if (k == "smooth") t.smooth = std::stod(v);
       else if (k == "reactivity") t.reactivity = std::stod(v);
       else if (k == "fourcc") t.fourcc = v;
+      else if (k == "model") t.model = v;
+      else if (k == "rotate") t.rotate = std::stoi(v);
+      else if (k == "flip") t.flip = std::stoi(v) != 0 ? 1 : 0;
       else if (k == "roi") {
         for (char& c : v) if (c == ',') c = ' ';
         std::vector<std::string> w = eye::SplitWords(v);
@@ -148,6 +170,17 @@ class Tracker {
     tun_ = LoadTunables(opt_.dataDir + "\\ar6dof_mouth.txt", log_);
     fx_.minCutoff = fw_.minCutoff = fs_.minCutoff = fv_.minCutoff = tun_.smooth;
     fx_.beta = fw_.beta = fs_.beta = fv_.beta = tun_.reactivity;
+    for (auto& f : mlF_) { f.minCutoff = tun_.smooth; f.beta = tun_.reactivity; }
+    modelPath_ = tun_.model == "auto" ? opt_.dataDir + "\\babble_model.onnx" : tun_.model;
+#if AR6_HAVE_DNN
+    if (tun_.model != "none") {
+      std::ifstream mf(modelPath_, std::ios::binary);
+      mlWanted_ = (bool)mf;
+      if (!mlWanted_ && tun_.model != "auto") log_("[bouche] modele IA introuvable : " + modelPath_ + " (detection classique)");
+    }
+#else
+    if (tun_.model != "none") log_("[bouche] cet ar6dof_probe a ete compile sans le module IA d'OpenCV : detection classique");
+#endif
     LoadCalibration();
     if (!out_.Open("127.0.0.1", kPortOut)) log_("[bouche] UDP 9886 indisponible");
     if (!ev_.Open("127.0.0.1", kPortEvent)) log_("[bouche] UDP 9888 indisponible");
@@ -155,7 +188,7 @@ class Tracker {
     worker_ = std::thread([this] { Worker(); });
     cmdTh_ = std::thread([this] { CmdLoop(); });
     log_(std::string("[bouche] mouth tracking pret (") + (enabled_ ? "camera ouverte" : "en veille : commande MOUTH 1 pour demarrer") + "), cadence visee " +
-         std::to_string(opt_.fps) + " fps");
+         std::to_string(opt_.fps) + " fps, " + (mlWanted_ ? "modele IA : " + modelPath_ : std::string("detection classique (pas de babble_model.onnx)")));
     return true;
   }
 
@@ -171,6 +204,32 @@ class Tracker {
   bool Preview(cv::Mat* out) {
     previewReq_ = NowS();
     cv::Mat t(240, 320, CV_8UC3, cv::Scalar(30, 30, 30));
+    if (mlOn_) {   // ce que voit le modele (224x224, apres zone / rotation / miroir) + ses plus gros parametres
+      std::lock_guard<std::mutex> l(pm_);
+      if (!prevGray_.empty() && camState_ == 1) {
+        cv::Mat sq;
+        cv::resize(prevGray_, sq, cv::Size(240, 240), 0, 0, cv::INTER_LINEAR);
+        cv::cvtColor(sq, sq, cv::COLOR_GRAY2BGR);
+        sq.copyTo(t(cv::Rect(0, 0, 240, 240)));
+        std::array<int, mouth::kShapes> idx;
+        for (int i = 0; i < mouth::kShapes; i++) idx[i] = i;
+        std::sort(idx.begin(), idx.end(), [&](int a, int b) { return prevShapes_[a] > prevShapes_[b]; });
+        for (int k = 0; k < 14; k++) {
+          const int i = idx[k];
+          if (prevShapes_[i] < 0.02f) break;
+          char b[64];
+          std::snprintf(b, sizeof(b), "%.2f %s", prevShapes_[i], mouth::ShapeName(i));
+          cv::putText(t, b, cv::Point(244, 30 + k * 15), cv::FONT_HERSHEY_SIMPLEX, 0.32, cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+        }
+      } else {
+        cv::putText(t, enabled_ ? "attente de la camera..." : "bouche : en veille", cv::Point(10, 120), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(160, 160, 160), 1, cv::LINE_AA);
+      }
+      bool hb;
+      { std::lock_guard<std::mutex> lc(cm_); hb = mlCal_.hasBase; }
+      cv::putText(t, hb ? "modele IA" : "modele IA : pas encore etalonne", cv::Point(6, 14), cv::FONT_HERSHEY_SIMPLEX, 0.42, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+      *out = t;
+      return true;
+    }
     {
       std::lock_guard<std::mutex> l(pm_);
       if (!prevGray_.empty() && camState_ == 1) {
@@ -232,6 +291,7 @@ class Tracker {
     while (!stop_) {
       if (!enabled_) {
         if (cap_.isOpened()) { cap_.release(); camState_ = 0; log_("[bouche] camera arretee"); }
+        ReleaseModel();
         std::unique_lock<std::mutex> l(cvMu_);
         cv_.wait_for(l, std::chrono::milliseconds(500), [this] { return stop_ || enabled_; });
         continue;
@@ -248,9 +308,10 @@ class Tracker {
         camState_ = 1;
         {
           std::lock_guard<std::mutex> l(calMu_);
-          if (calPhase_ != 0 && calFrom_ > NowS() + 100.0) { calFrom_ = NowS() + 1.0; calTo_ = calFrom_ + 1.5; }
+          if (calPhase_ != 0 && calFrom_ > NowS() + 100.0) { calFrom_ = NowS() + 1.0; calTo_ = calFrom_ + (calPhase_ == 5 ? 8.0 : 1.5); }
         }
         log_("[bouche] camera ouverte : " + std::to_string((int)cap_.get(cv::CAP_PROP_FRAME_WIDTH)) + "x" + std::to_string((int)cap_.get(cv::CAP_PROP_FRAME_HEIGHT)));
+        if (mlWanted_) LoadModel();
       }
       if (!cap_.grab()) {
         if (++fail > 100) {
@@ -267,6 +328,7 @@ class Tracker {
       if (t - lastProc < minInterval) continue;
       if (!cap_.retrieve(frame) || frame.empty()) continue;
       lastProc = t;
+      if (mlOn_) { ProcessMlFrame(frame, t); continue; }
       // zone analysée, puis réduction : tout le reste se fait sur ~160x120
       cv::Rect roi((int)(tun_.roiX * frame.cols), (int)(tun_.roiY * frame.rows), (int)(tun_.roiW * frame.cols), (int)(tun_.roiH * frame.rows));
       roi &= cv::Rect(0, 0, frame.cols, frame.rows);
@@ -279,6 +341,96 @@ class Tracker {
       Process(gray, t);
     }
     cap_.release();
+  }
+
+  // ------------------------------------------------ mode modele IA
+  void LoadModel() {
+#if AR6_HAVE_DNN
+    if (mlOn_) return;
+    try {
+      net_ = cv::dnn::readNetFromONNX(modelPath_);
+      net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+      net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+      // essai a blanc : verifie la taille de la sortie avant de s'engager
+      cv::Mat z(224, 224, CV_8UC1, cv::Scalar(0));
+      net_.setInput(cv::dnn::blobFromImage(z, 1.0 / 255.0, cv::Size(224, 224), cv::Scalar(), false, false, CV_32F));
+      cv::Mat o = net_.forward();
+      if (o.total() < (size_t)mouth::kShapes) throw std::runtime_error("le modele ne sort que " + std::to_string(o.total()) + " valeurs (45 attendues)");
+      mlOn_ = true;
+      for (auto& f : mlF_) f.Reset();
+      log_("[bouche] modele IA charge : " + modelPath_);
+    } catch (const std::exception& e) {
+      mlWanted_ = false;
+      net_ = cv::dnn::Net();
+      log_(std::string("[bouche] modele IA inutilisable (") + e.what() + ") : detection classique");
+    }
+#endif
+  }
+
+  void ReleaseModel() {
+#if AR6_HAVE_DNN
+    if (!mlOn_) return;
+    mlOn_ = false;   // d'abord : le thread de calcul est le seul qui utilise le reseau, et c'est celui-ci
+    net_ = cv::dnn::Net();
+#endif
+  }
+
+  void ProcessMlFrame(const cv::Mat& frame, double t) {
+#if AR6_HAVE_DNN
+    cv::Rect roi((int)(tun_.roiX * frame.cols), (int)(tun_.roiY * frame.rows), (int)(tun_.roiW * frame.cols), (int)(tun_.roiH * frame.rows));
+    roi &= cv::Rect(0, 0, frame.cols, frame.rows);
+    if (roi.width < 8 || roi.height < 8) roi = cv::Rect(0, 0, frame.cols, frame.rows);
+    cv::Mat img = frame(roi), g;
+    if (img.channels() == 3) cv::cvtColor(img, g, cv::COLOR_BGR2GRAY);
+    else if (img.channels() == 4) cv::cvtColor(img, g, cv::COLOR_BGRA2GRAY);
+    else g = img;
+    if (tun_.rotate == 90) cv::rotate(g, g, cv::ROTATE_90_CLOCKWISE);
+    else if (tun_.rotate == 180) cv::rotate(g, g, cv::ROTATE_180);
+    else if (tun_.rotate == 270) cv::rotate(g, g, cv::ROTATE_90_COUNTERCLOCKWISE);
+    if (tun_.flip) cv::flip(g, g, 1);
+    cv::Mat in224;
+    cv::resize(g, in224, cv::Size(224, 224), 0, 0, cv::INTER_AREA);
+    net_.setInput(cv::dnn::blobFromImage(in224, 1.0 / 255.0, cv::Size(224, 224), cv::Scalar(), false, false, CV_32F));
+    const cv::Mat o = net_.forward();
+    if (o.total() < (size_t)mouth::kShapes || o.type() != CV_32F) return;
+    const float* raw = o.ptr<float>(0);
+    frames_++;
+    lastSeen_ = t;   // le modele donne toujours une sortie : « vu » = camera qui tourne
+    float v[mouth::kShapes];
+    for (int i = 0; i < mouth::kShapes; i++) v[i] = std::min(1.f, std::max(0.f, (float)mlF_[i].Filter(raw[i], t)));
+    {
+      std::lock_guard<std::mutex> l(calMu_);
+      if ((calPhase_ == 1 || calPhase_ == 5) && t >= calFrom_ && t <= calTo_) mlSamples_.emplace_back(v, v + mouth::kShapes);
+    }
+    float out[mouth::kShapes];
+    mouth::MlCal c;
+    { std::lock_guard<std::mutex> l(cm_); c = mlCal_; }
+    mouth::MlApply(c, v, out);
+    {
+      std::lock_guard<std::mutex> l(m_);
+      std::memcpy(mlOut_, out, sizeof(out));
+      lastOut_.valid = true;
+      lastOut_.jawOpen = out[4];
+    }
+    if (NowS() - previewReq_ < 1.5) {
+      std::lock_guard<std::mutex> l(pm_);
+      in224.copyTo(prevGray_);
+      std::memcpy(prevShapes_, out, sizeof(out));
+    }
+    PublishMl(out);
+#else
+    (void)frame; (void)t;
+#endif
+  }
+
+  void PublishMl(const float* shapes) {
+    uint8_t flags = mouth::kValid;
+    { std::lock_guard<std::mutex> l(cm_); if (mlCal_.hasBase) flags |= mouth::kCalibrated; }
+    if (calPhase_ != 0) flags |= mouth::kCalibrating;
+    using namespace std::chrono;
+    uint8_t buf[mouth::kPacket2Size];
+    mouth::Encode2(flags, (uint16_t)(seq_++), (uint32_t)duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count(), shapes, buf);
+    out_.Send(buf, mouth::kPacket2Size);
   }
 
   void Process(const cv::Mat& gray, double t) {
@@ -334,7 +486,10 @@ class Tracker {
     std::ifstream f(CalPath());
     std::string line;
     mouth::Cal c;
+    mouth::MlCal mc;
     while (std::getline(f, line)) {
+      if (line.size() > 3 && line[0] == 'M' && line[1] == 'B' && line[2] == ' ') { mc.hasBase = mouth::FloatsFromString(line.substr(3), mc.base, mouth::kShapes); continue; }
+      if (line.size() > 3 && line[0] == 'M' && line[1] == 'R' && line[2] == ' ') { mc.hasRange = mouth::FloatsFromString(line.substr(3), mc.maxv, mouth::kShapes); continue; }
       if (line.size() < 3 || line[1] != ' ') continue;
       mouth::Feature ft;
       if (!mouth::FeatureFromString(line.substr(2), &ft)) continue;
@@ -343,14 +498,17 @@ class Tracker {
       else if (line[0] == 'W') { c.wide = ft; c.hasWide = true; }
       else if (line[0] == 'S') { c.narrow = ft; c.hasNarrow = true; }
     }
-    { std::lock_guard<std::mutex> l(cm_); cal_ = c; }
-    if (c.Valid()) log_("[bouche] etalonnage precedent recharge");
+    { std::lock_guard<std::mutex> l(cm_); cal_ = c; mlCal_ = mc; }
+    if (c.Valid() || mc.hasBase) log_("[bouche] etalonnage precedent recharge");
   }
 
   void SaveCalibration() {
     std::ofstream f(CalPath());
     if (!f) { log_("[bouche] impossible d'ecrire " + CalPath()); return; }
     const mouth::Cal c = GetCal();
+    { std::lock_guard<std::mutex> l(cm_);
+      if (mlCal_.hasBase) f << "MB " << mouth::FloatsToString(mlCal_.base, mouth::kShapes) << "\n";
+      if (mlCal_.hasRange) f << "MR " << mouth::FloatsToString(mlCal_.maxv, mouth::kShapes) << "\n"; }
     if (c.hasNeutral) f << "N " << mouth::FeatureToString(c.neutral) << "\n";
     if (c.hasOpen) f << "O " << mouth::FeatureToString(c.open) << "\n";
     if (c.hasWide) f << "W " << mouth::FeatureToString(c.wide) << "\n";
@@ -364,10 +522,13 @@ class Tracker {
 
   void SendStatus() {
     const mouth::Cal c = GetCal();
-    char b[256];
-    std::snprintf(b, sizeof(b), "STATUS on=%d cam=%d fps=%.0f see=%d neutral=%d open=%d wide=%d narrow=%d cal=%d", enabled_ ? 1 : 0, camState_.load(), fps_,
-                  enabled_ && NowS() - lastSeen_.load() < 0.5 ? 1 : 0, c.hasNeutral ? 1 : 0, c.hasOpen ? 1 : 0, c.hasWide ? 1 : 0,
-                  c.hasNarrow ? 1 : 0, c.Valid() ? 1 : 0);
+    char b[320];
+    mouth::MlCal mc;
+    { std::lock_guard<std::mutex> l(cm_); mc = mlCal_; }
+    const bool ml = mlWanted_.load();   // « modele IA » = fichier present et module IA disponible (la charge a lieu a l'ouverture de la camera)
+    std::snprintf(b, sizeof(b), "STATUS on=%d cam=%d fps=%.0f see=%d neutral=%d open=%d wide=%d narrow=%d cal=%d ml=%d mlbase=%d mlrange=%d", enabled_ ? 1 : 0, camState_.load(), fps_,
+                  enabled_ && NowS() - lastSeen_.load() < 0.5 ? 1 : 0, ml ? (mc.hasBase ? 1 : 0) : (c.hasNeutral ? 1 : 0), c.hasOpen ? 1 : 0, c.hasWide ? 1 : 0,
+                  c.hasNarrow ? 1 : 0, ml ? (mc.hasBase ? 1 : 0) : (c.Valid() ? 1 : 0), ml ? 1 : 0, mc.hasBase ? 1 : 0, mc.hasRange ? 1 : 0);
     Event(b);
   }
 
@@ -385,11 +546,12 @@ class Tracker {
     SetEnabled(true);
     std::lock_guard<std::mutex> l(calMu_);
     calSamples_.clear();
+    mlSamples_.clear();
     calPhase_ = phase;
     const double now = NowS();
     if (camState_ == 1) {
       calFrom_ = now + 1.0;
-      calTo_ = calFrom_ + 1.5;
+      calTo_ = calFrom_ + (phase == 5 ? 8.0 : 1.5);
     } else {   // la camera s'ouvre encore : la mesure commence 1 s apres son ouverture (voir Worker) ; delai maxi 10 s
       calFrom_ = now + 1e9;
       calTo_ = now + 10.0;
@@ -398,12 +560,32 @@ class Tracker {
 
   void FinishPhase() {
     std::vector<mouth::Feature> s;
+    std::vector<std::vector<float>> ms;
     int phase;
     {
       std::lock_guard<std::mutex> l(calMu_);
       s.swap(calSamples_);
+      ms.swap(mlSamples_);
       phase = calPhase_;
       calPhase_ = 0;
+    }
+    if ((phase == 1 && mlWanted_) || phase == 5) {   // modele IA : neutre = moyenne au repos ; expressions = maximum de chaque parametre
+      if (ms.size() < 5) {
+        Event(std::string("MCAL_DONE ") + std::to_string(phase) + " fail pas assez d'images (camera ouverte ? modele charge ?)");
+        log_("[bouche] etalonnage echoue : pas assez d'images");
+        return;
+      }
+      {
+        std::lock_guard<std::mutex> l(cm_);
+        if (phase == 1) { mouth::MlPercentile(ms, 0.5, mlCal_.base); mlCal_.hasBase = true; }
+        else { mouth::MlPercentile(ms, 0.92, mlCal_.maxv); mlCal_.hasRange = true; }
+      }
+      for (auto& f : mlF_) f.Reset();
+      SaveCalibration();
+      Event(std::string("MCAL_DONE ") + std::to_string(phase) + " ok");
+      log_(phase == 1 ? "[bouche] etalonnage 'neutre' enregistre (modele IA)" : "[bouche] etalonnage 'expressions' enregistre (modele IA)");
+      SendStatus();
+      return;
     }
     static const char* names[] = {"", "neutre", "grande ouverture", "large", "serree"};
     if (s.size() < 5) {
@@ -441,10 +623,14 @@ class Tracker {
     else if (c == "MOUTH" && w.size() >= 2) { SetEnabled(w[1] != "0"); SendStatus(); }
     else if (c == "MCAL" && w.size() >= 2) {
       const std::string& p = w[1];
-      const int ph = p == "neutral" ? 1 : p == "open" ? 2 : p == "wide" ? 3 : p == "narrow" ? 4 : 0;
-      if (ph) { BeginPhase(ph); log_("[bouche] etalonnage : prends l'expression dans 1 s et garde-la 1,5 s"); }
+      int ph = p == "neutral" ? 1 : p == "open" ? 2 : p == "wide" ? 3 : p == "narrow" ? 4 : p == "range" ? 5 : 0;
+      if (mlWanted_ && (ph == 2 || ph == 3 || ph == 4)) ph = 5;   // modele IA : une seule serie d'expressions libres
+      if (ph == 5 && !mlWanted_) { log_("[bouche] 'range' n'existe qu'avec le modele IA"); ph = 0; }
+      if (ph == 5) { BeginPhase(5); log_("[bouche] etalonnage : dans 1 s, fais toutes les expressions (bouche grande ouverte, sourire, moue, langue, joues...) pendant 8 s"); }
+      else if (ph) { BeginPhase(ph); log_(mlWanted_ ? "[bouche] etalonnage : visage neutre dans 1 s, tiens-le 1,5 s" : "[bouche] etalonnage : prends l'expression dans 1 s et garde-la 1,5 s"); }
     } else if (c == "MCAL_CLEAR") {
-      { std::lock_guard<std::mutex> l(cm_); cal_ = mouth::Cal(); }
+      { std::lock_guard<std::mutex> l(cm_); cal_ = mouth::Cal(); mlCal_ = mouth::MlCal(); }
+      for (auto& f : mlF_) f.Reset();
       std::remove(CalPath().c_str());
       log_("[bouche] etalonnage efface");
       SendStatus();
@@ -517,6 +703,18 @@ class Tracker {
   std::mutex cm_;
   mouth::Cal cal_;   // protégé par cm_
   eye::OneEuro fx_, fw_, fs_, fv_;
+  // mode modele IA
+  std::string modelPath_;
+  std::atomic<bool> mlWanted_{false};   // fichier .onnx present (et module IA compile)
+  std::atomic<bool> mlOn_{false};       // reseau charge (touche seulement par le thread de calcul)
+#if AR6_HAVE_DNN
+  cv::dnn::Net net_;
+#endif
+  eye::OneEuro mlF_[mouth::kShapes];
+  mouth::MlCal mlCal_;                  // protege par cm_
+  float mlOut_[mouth::kShapes] = {};    // protege par m_
+  float prevShapes_[mouth::kShapes] = {};   // protege par pm_
+  std::vector<std::vector<float>> mlSamples_;   // protege par calMu_
   // dernière mesure (protégée par m_)
   std::mutex m_;
   mouth::Out lastOut_;

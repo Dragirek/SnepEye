@@ -1381,7 +1381,7 @@ void UpdateState() {
   else if (!g_lastImu.empty()) imu = LogToW(g_lastImu);
   else imu = Tr(L"Lecture de l'IMU en cours de démarrage…", L"Starting the IMU reading…");
   SetTextIfChanged(H(ID_IMUSTAT), imu);
-  SetTextIfChanged(H(ID_MOUNTMSG), g_lastMount.empty() ? std::wstring(Tr(L"Suis les deux étapes ci-dessus : le résultat s'affiche ici.", L"Follow the two steps above: the result appears here."))
+  SetTextIfChanged(H(ID_MOUNTMSG), g_lastMount.empty() ? std::wstring(Tr(L"Clique sur « Calibrer le montage » : les consignes et le résultat s'affichent ici.", L"Click “Calibrate the mounting”: the prompts and the result appear here."))
                                                       : LogToW(g_lastMount));
   SetTextIfChanged(H(ID_EYESTAT), g_lastEye.empty() ? std::wstring(Tr(L"Aperçu et étalonnage des yeux : aucune mesure pour l'instant.", L"Eye preview and calibration: nothing measured yet."))
                                                     : LogToW(g_lastEye));
@@ -1538,10 +1538,10 @@ void CreateControls() {
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 152, CWd - 2 * PAD, 68, ID_IMUSTAT);
 
   CardBox(L"Montage de l'IMU (une seule fois, sans lancer le suivi)", L"IMU mounting (once, without starting tracking)", X, 246, CWd, 232);
-  Label(L"1. Pose le casque à plat, à l'endroit, sans bouger, puis clique sur « 1 ».\r\n2. Penche-le vers l'avant (pointe vers le haut), immobile, puis clique sur « 2 ».",
-        L"1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", X + PAD, 290, CWd - 2 * PAD, 44);
-  Button(L"1 · Casque à plat", L"1 · Headset flat", X + PAD, 342, 316, 34, ID_M_STEP1);
-  Button(L"2 · Penché en avant", L"2 · Tilted forward", X + PAD + 328, 342, 316, 34, ID_M_STEP2);
+  Label(L"Un seul bouton : clique, puis suis les consignes (compte à rebours, bip à chaque mesure). Tu as le temps de lâcher le casque :\r\nd'abord à plat, à l'endroit ; ensuite penché vers l'avant (nez en haut). Chaque pose est mesurée sur 1 s.",
+        L"One button: click, then follow the prompts (countdown, a beep at each measurement). You have time to let go of the headset:\r\nfirst flat and the right way up, then tilted forward (nose up). Each pose is averaged over 1 s.", X + PAD, 290, CWd - 2 * PAD, 44);
+  Button(L"Calibrer le montage", L"Calibrate the mounting", X + PAD, 342, 316, 34, ID_M_STEP1);
+  Button(L"Annuler", L"Cancel", X + PAD + 328, 342, 316, 34, ID_M_STEP2);
   Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 386, 644, 34, ID_M_RESET);
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 430, CWd - 2 * PAD, 40, ID_MOUNTMSG);
 
@@ -1613,10 +1613,12 @@ void CreateControls() {
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 486, PVW, 56, ID_MOUTHSTAT);
   Label(L"Clique sur une étape, puis prends l'expression dans la seconde qui suit et garde-la 1,5 s. Les étapes 1 et 2 suffisent pour l'ouverture de la bouche ; "
         L"3 et 4 règlent la largeur. La détection repère la cavité sombre de la bouche : une caméra proche, bien éclairée (ou infrarouge), cadrée sur la bouche. "
-        L"La zone analysée se règle dans ar6dof_mouth.txt.",
+        L"La zone analysée se règle dans ar6dof_mouth.txt. AVEC LE MODÈLE IA (fichier babble_model.onnx à côté de l'exe, 45 paramètres) : "
+        L"l'étape 1 = visage neutre, les étapes 2 à 4 = 8 s d'expressions libres (bouche grande ouverte, sourire, moue, langue, joues…).",
         L"Click a step, then make the expression within a second and hold it for 1.5 s. Steps 1 and 2 are enough for mouth opening; "
         L"3 and 4 tune the width. Detection finds the dark cavity of the mouth: use a close, well-lit (or infrared) camera framing the mouth. "
-        L"The analysed area is set in ar6dof_mouth.txt.",
+        L"The analysed area is set in ar6dof_mouth.txt. WITH THE AI MODEL (babble_model.onnx next to the exe, 45 parameters): "
+        L"step 1 = neutral face, steps 2 to 4 = 8 s of free expressions (wide open, smile, pout, tongue, cheeks…).",
         X + PAD, 556, CWd - 2 * PAD, 112);
 
   // ---- page 5 : Suivi
@@ -1760,8 +1762,8 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_A_YAW: SendCmd('Z'); break;
         case ID_A_SWAP: SendCmd('x'); break;
         case ID_A_CHECK: SendCmd('c'); break;
-        case ID_M_STEP1: QueueUdp(9877, "g", EnsureProbe()); break;   // fonctionne sans suivi : le mode services lit l'IMU
-        case ID_M_STEP2: QueueUdp(9877, "f", EnsureProbe()); break;
+        case ID_M_STEP1: QueueUdp(9877, "MOUNT", EnsureProbe()); break;    // fonctionne sans suivi : le mode services lit l'IMU
+        case ID_M_STEP2: QueueUdp(9877, "MOUNTX", EnsureProbe()); break;
         case ID_M_RESET: QueueUdp(9877, "0", EnsureProbe()); break;
       }
       return 0;

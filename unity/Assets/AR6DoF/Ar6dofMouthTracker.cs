@@ -18,6 +18,7 @@ namespace AR6DoF
         public float vert;           // déplacement vertical de la bouche (-1 ... 1)
         public float rawArea, rawWidth;   // mesures brutes (part de l'image)
         public ushort seq;
+        public bool hasShapes;       // vrai avec le modèle IA : les 45 paramètres sont disponibles (GetShapes)
         public double time;          // Ar6dofClock.Now() à la réception
     }
 
@@ -29,6 +30,7 @@ namespace AR6DoF
         public float fps;
         public bool see;             // cavité de la bouche vue
         public bool hasNeutral, hasOpen, hasWide, hasNarrow, calibrated;
+        public bool ml, mlBase, mlRange;   // modèle IA : fichier trouvé, étalonnage « neutre » fait, étalonnage « expressions » fait
         public double time;          // dernière réception (Ar6dofClock.Now())
     }
 
@@ -52,6 +54,8 @@ namespace AR6DoF
         Ar6dofMouth mouth;
         Ar6dofMouthStatus status;
         bool haveData;
+        readonly float[] shapes = new float[Ar6dofMouthShapes.Count];   // derniers paramètres du modèle IA (protégés par lockObj)
+        bool haveShapes;
         double lastDataTime;
         float startTime, lastPoke = -10f;
         int parkSent;
@@ -59,6 +63,19 @@ namespace AR6DoF
         public bool Enabled { get; private set; }
 
         public Ar6dofMouth Mouth { get { lock (lockObj) return mouth; } }
+        /// <summary>
+        /// Copie les 45 paramètres (voir Ar6dofMouthShapes) dans dst (tableau de 45 floats, à réutiliser : aucune allocation).
+        /// Avec le modèle IA ce sont les vraies valeurs ; sinon elles sont déduites de la détection classique. Tout à zéro tant que rien n'arrive.
+        /// </summary>
+        public void GetShapes(float[] dst)
+        {
+            lock (lockObj)
+            {
+                if (haveShapes) { System.Array.Copy(shapes, dst, Ar6dofMouthShapes.Count); return; }
+                Ar6dofMouthShapes.FromLegacy(mouth, dst);
+            }
+        }
+
         public Ar6dofMouthStatus Status { get { lock (lockObj) return status; } }
         /// <summary>Des mesures arrivent (ar6dof_probe tourne avec le mouth tracking et la caméra est ouverte).</summary>
         public bool Receiving { get { lock (lockObj) return haveData && Ar6dofClock.Now() - lastDataTime < 0.5; } }
@@ -102,7 +119,7 @@ namespace AR6DoF
             {
                 Send("MOUTH 0");
                 CloseSockets();
-                lock (lockObj) { haveData = false; mouth = new Ar6dofMouth(); status = new Ar6dofMouthStatus(); }
+                lock (lockObj) { haveData = false; haveShapes = false; mouth = new Ar6dofMouth(); status = new Ar6dofMouthStatus(); }
                 parkSent = 0;
                 startTime = Time.unscaledTime;
             }
@@ -120,8 +137,8 @@ namespace AR6DoF
             catch (Exception) { }
         }
 
-        /// <summary>Étape d'étalonnage : "neutral" (bouche détendue), "open" (grande ouverture), "wide" (sourire large), "narrow" (bouche serrée).
-        /// La mesure se fait 1 s après la commande et dure 1,5 s : prends l'expression tout de suite.</summary>
+        /// <summary>Étape d'étalonnage : "neutral" (visage détendu), puis soit (détection classique) "open" (grande ouverture), "wide" (sourire large), "narrow" (bouche serrée),
+        /// soit (modèle IA) "range" : 8 s pendant lesquelles tu fais toutes les expressions. La mesure commence 1 s après la commande : prends la pose tout de suite.</summary>
         public void Calibrate(string phase) { SetEnabled(true); Send("MCAL " + phase); }
         public void ClearCalibration() { Send("MCAL_CLEAR"); }
 
@@ -166,6 +183,28 @@ namespace AR6DoF
                 try { d = udp.Receive(ref any); }
                 catch (SocketException) { if (!running) break; continue; }
                 catch (ObjectDisposedException) { break; }
+                if (d.Length == 16 + 4 * Ar6dofMouthShapes.Count && BitConverter.ToUInt32(d, 0) == 0x3248544Du && d[4] == 2 && BitConverter.ToUInt16(d, 12) == Ar6dofMouthShapes.Count)
+                {
+                    // paquet du modèle IA : 45 paramètres
+                    byte f2 = d[5];
+                    var m2 = new Ar6dofMouth
+                    {
+                        valid = (f2 & 1) != 0,
+                        calibrated = (f2 & 2) != 0,
+                        calibrating = (f2 & 4) != 0,
+                        seq = BitConverter.ToUInt16(d, 6),
+                        hasShapes = true,
+                        time = Ar6dofClock.Now()
+                    };
+                    lock (lockObj)
+                    {
+                        Buffer.BlockCopy(d, 16, shapes, 0, 4 * Ar6dofMouthShapes.Count);
+                        for (int i = 0; i < Ar6dofMouthShapes.Count; i++) shapes[i] = Mathf.Clamp01(shapes[i]);
+                        Ar6dofMouthShapes.ToLegacy(shapes, ref m2);
+                        mouth = m2; haveData = true; haveShapes = true; lastDataTime = m2.time;
+                    }
+                    continue;
+                }
                 if (d.Length != 36 || BitConverter.ToUInt32(d, 0) != 0x3148544Du || d[4] != 1) continue;
                 byte f = d[5];
                 var m = new Ar6dofMouth
@@ -182,7 +221,7 @@ namespace AR6DoF
                     rawWidth = BitConverter.ToSingle(d, 28),
                     time = Ar6dofClock.Now()
                 };
-                lock (lockObj) { mouth = m; haveData = true; lastDataTime = m.time; }
+                lock (lockObj) { mouth = m; haveData = true; haveShapes = false; lastDataTime = m.time; }
             }
         }
 
@@ -222,6 +261,9 @@ namespace AR6DoF
                     case "wide": st.hasWide = v == "1"; break;
                     case "narrow": st.hasNarrow = v == "1"; break;
                     case "cal": st.calibrated = v == "1"; break;
+                    case "ml": st.ml = v == "1"; break;
+                    case "mlbase": st.mlBase = v == "1"; break;
+                    case "mlrange": st.mlRange = v == "1"; break;
                 }
             }
             st.time = Ar6dofClock.Now();

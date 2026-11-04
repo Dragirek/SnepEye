@@ -176,7 +176,7 @@ inline bool MountStep1(const Vec3& acc, const Vec3& gyr, Vec3& up_s, std::string
   int i = MaxAxis(acc);
   if (std::abs(Comp(acc, i)) / n < 0.9) { msg = "etape 1 : pose le casque bien a plat (< 25 deg d'inclinaison)"; return false; }
   up_s = AxisVec(i, Comp(acc, i));
-  msg = "etape 1 OK : haut = " + AxisName(up_s) + ". Penche maintenant le casque vers l'avant (~30 deg), immobile, puis clique sur Etape 2";
+  msg = "etape 1 OK : haut = " + AxisName(up_s) + ". Penche maintenant le casque vers l'avant (~30 deg), immobile";
   return true;
 }
 
@@ -184,9 +184,9 @@ inline bool MountStep2(const Vec3& up_s, const Vec3& acc, const Vec3& gyr, Mat3&
   if (Norm(gyr) > 0.15) { msg = "etape 2 : le casque bouge, immobilise-le"; return false; }
   Vec3 h = acc - up_s * Dot(acc, up_s);  // composante horizontale de l'accel
   double hn = Norm(h);
-  if (hn < 2.5) { msg = "etape 2 : penche plus vers l'avant (au moins 15 deg)"; return false; }
+  if (hn < 2.0) { msg = "etape 2 : penche plus vers l'avant (au moins 15 deg)"; return false; }
   int j = MaxAxis(h);
-  if (std::abs(Comp(h, j)) / hn < 0.8) { msg = "etape 2 : penche bien droit vers l'avant, pas sur le cote"; return false; }
+  if (std::abs(Comp(h, j)) / hn < 0.75) { msg = "etape 2 : penche bien droit vers l'avant, pas sur le cote"; return false; }
   // Penche vers l'avant => l'accel (qui mesure "le haut") pointe vers l'ARRIERE.
   Vec3 forward = AxisVec(j, Comp(h, j)) * -1.0;
   Vec3 left = Cross(up_s, forward);

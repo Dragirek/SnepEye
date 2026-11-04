@@ -146,7 +146,6 @@ namespace AR6DoF
 
         // colonnes : 2 colonnes (largeur 320), 3 colonnes (208), 4 colonnes (156), 6 colonnes (102)
         static float Col3(int i) { return (i - 1) * 220f; }
-        static float Col4(int i) { return (i - 1.5f) * 164f; }
         static float Col4(int i) { return (i - 1.5f) * 162f; }
         static float Col6(int i) { return (i - 2.5f) * 109.2f; }
 
@@ -1132,6 +1131,7 @@ namespace AR6DoF
         /// <summary>Appelé à chaque image par Tick() : n'envoie et ne copie rien tant qu'aucun aperçu n'est affiché.</summary>
         void PumpPreview()
         {
+            PumpMouthScreensPreview();
             // l'aperçu s'arrête dès qu'on quitte sa page (ou que le menu se ferme : Tick n'est plus appelé et ar6dof_probe coupe seul au bout de 3 s)
             if (eyePvOn && curTab != PgEyes) SetPreview(true, false);
             if (mouthPvOn && curTab != PgMouth) SetPreview(false, false);
@@ -1158,9 +1158,12 @@ namespace AR6DoF
         }
 
         // ================================================================== BOUCHE
+        RawImage mdPvFull, mdPvA, mdPvB;
+
         void BuildMouth(RectTransform page)
         {
             var mt = dock.mouth;
+            var md = dock.mouthDisplay;
             float c = BeginPage(page, PgMouth);
             if (mt == null)
             {
@@ -1172,7 +1175,8 @@ namespace AR6DoF
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Mouth tracking actif", () => mt.Enabled, v => mt.SetEnabled(v), 400f);
             Text l1 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
             Text l2 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
-            Text l3 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 12f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
+            Text l3 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
+            Text l4 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 12f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
             Live(PgMouth, () =>
             {
                 var st = mt.Status;
@@ -1182,10 +1186,11 @@ namespace AR6DoF
                 else l1.text = Ar6dofLoc.T("ar6dof_probe : en ligne") + (st.on ? "" : Ar6dofLoc.T(" (camera arretee)"));
                 bool on = mt.Enabled && mt.EngineOnline;
                 l2.text = on ? Ar6dofLoc.F("Camera : {0}   Etalonnage : {1}", CamTxt(st.cam, st.fps), Ar6dofLoc.T(st.calibrated ? "fait" : "a faire")) : "";
+                l3.text = on ? Ar6dofLoc.T(st.ml ? "Methode : modele IA (45 parametres)" : "Methode : detection classique (pas de babble_model.onnx)") : "";
                 if (on && mt.Receiving)
-                    l3.text = m.valid ? Ar6dofLoc.F("Ouverture {0}   largeur {1}   cote {2}", m.jawOpen.ToString("0.00"), m.wide.ToString("+0.00;-0.00;0.00"), m.side.ToString("+0.00;-0.00;0.00"))
+                    l4.text = m.valid ? Ar6dofLoc.F("Ouverture {0}   largeur {1}   cote {2}", m.jawOpen.ToString("0.00"), m.wide.ToString("+0.00;-0.00;0.00"), m.side.ToString("+0.00;-0.00;0.00"))
                                       : Ar6dofLoc.T("Pas d'etalonnage");
-                else l3.text = "";
+                else l4.text = "";
             });
             CloseCard(page, top, ref c);
 
@@ -1195,16 +1200,132 @@ namespace AR6DoF
 
             top = OpenCard(page, ref c, "Etalonnage de la bouche");
             float y = Next(ref c, 48f, 12f);
-            Btn(page, -164f, y, 320f, "1 - Bouche neutre", () => mt.Calibrate("neutral"), 22);
-            Btn(page, 164f, y, 320f, "2 - Grande ouverture", () => mt.Calibrate("open"), 22);
+            Text tNeutral = ButtonText(page, -164f, y, 320f, "1 - Bouche neutre", () => mt.Calibrate("neutral"), 22);
+            Text tOpen = ButtonText(page, 164f, y, 320f, "2 - Grande ouverture", () => mt.Calibrate(mt.Status.ml ? "range" : "open"), 22);
             y = Next(ref c, 48f, 12f);
-            Btn(page, -164f, y, 320f, "3 - Sourire large", () => mt.Calibrate("wide"), 22);
-            Btn(page, 164f, y, 320f, "4 - Bouche serree", () => mt.Calibrate("narrow"), 22);
+            Button bWide = Btn(page, -164f, y, 320f, "3 - Sourire large", () => mt.Calibrate("wide"), 22);
+            Button bNarrow = Btn(page, 164f, y, 320f, "4 - Bouche serree", () => mt.Calibrate("narrow"), 22);
             y = Next(ref c, 48f, 12f);
             Btn(page, 0f, y, 440f, "Effacer l'etalonnage", () => mt.ClearCalibration(), 22);
-            Para(page, ref c, "Clique sur une etape puis prends l'expression tout de suite et garde-la\n1,5 s. Les etapes 1 et 2 suffisent pour l'ouverture ; 3 et 4 reglent la\nlargeur. Les valeurs sont lues dans Ar6dofMouthTracker.Instance.Mouth.", 100f);
+            Text help = Para(page, ref c, "", 120f);
+            Live(PgMouth, () =>
+            {
+                bool ml = mt.Status.ml;
+                tNeutral.text = Ar6dofLoc.T(ml ? "1 - Visage neutre" : "1 - Bouche neutre");
+                tOpen.text = Ar6dofLoc.T(ml ? "2 - Toutes les expressions (8 s)" : "2 - Grande ouverture");
+                bWide.gameObject.SetActive(!ml);
+                bNarrow.gameObject.SetActive(!ml);
+                help.text = Ar6dofLoc.T(ml
+                    ? "Etape 1 : visage detendu, bouche fermee. Etape 2 : pendant 8 s, fais toutes\nles expressions (grande ouverture, sourire, moue, langue, joues...).\nLes 45 parametres sont lus dans Ar6dofMouthTracker.Instance.GetShapes()."
+                    : "Clique sur une etape puis prends l'expression tout de suite et garde-la\n1,5 s. Les etapes 1 et 2 suffisent pour l'ouverture ; 3 et 4 reglent la\nlargeur. Les valeurs sont lues dans Ar6dofMouthTracker.Instance.Mouth.");
+            });
             CloseCard(page, top, ref c);
+
+            if (md != null) BuildMouthScreens(page, ref c, md);
             Finish(PgMouth, c);
+        }
+
+        /// <summary>Cartes « Ecrans du costume » et « Apercu de la bouche » : la bouche suivie, dessinée sur les écrans du costume.</summary>
+        void BuildMouthScreens(RectTransform page, ref float c, Ar6dofMouthDisplay md)
+        {
+            var cfg = md.Config;
+            Action<Action> mod = a => { a(); md.Touch(); RefreshAll(); };
+            float top = OpenCard(page, ref c, "Ecrans du costume");
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Afficher la bouche sur les ecrans du costume", () => md.Enabled, v => { md.SetEnabled(v); RefreshAll(); }, 640f);
+            Text info = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 12f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
+            Live(PgMouth, () =>
+            {
+                string miss = md.Describe();
+                info.text = !md.Enabled ? Ar6dofLoc.T("Les ecrans du costume sont des moniteurs : branche-les avant de lancer l'application") : miss;
+            });
+
+            float y = Next(ref c, 48f, 12f);
+            Button bFace = Btn(page, -164f, y, 320f, "Face : 1 ecran", () => mod(() => cfg.layout = 0), 22);
+            Button bSide = Btn(page, 164f, y, 320f, "Cotes : 2 ecrans", () => mod(() => cfg.layout = 1), 22);
+            refreshers.Add(() => { Ar6dofTheme.SetSelected(bFace, cfg.layout == 0); Ar6dofTheme.SetSelected(bSide, cfg.layout == 1); });
+
+            Ar6dofVrUi.Label(page, "Forme du costume", new Vector2(0f, Next(ref c, 28f, 6f)), new Vector2(CW, 28f), 20, TextAnchor.MiddleLeft);
+            y = Next(ref c, 48f, 12f);
+            for (int k = 0; k < Ar6dofMouthDisplay.PresetNames.Length; k++)
+            {
+                int kk = k;
+                Btn(page, Col3(k), y, 208f, Ar6dofMouthDisplay.PresetNames[k], () => { md.ApplyPreset(kk); RefreshAll(); }, 17);
+            }
+            SliderRow(page, ref c, "Taille de la bouche", 0.3f, 1.6f, () => cfg.size, v => { cfg.size = v; md.Touch(); }, "0.00");
+            SliderRow(page, ref c, "Etirement horizontal (museau long)", 0.5f, 3f, () => cfg.stretch, v => { cfg.stretch = v; md.Touch(); }, "0.00");
+            SliderRow(page, ref c, "Courbure", -1f, 1f, () => cfg.curve, v => { cfg.curve = v; md.Touch(); }, "0.00");
+            SliderRow(page, ref c, "Ouverture en coin (machoire)", 0f, 1f, () => cfg.hinge, v => { cfg.hinge = v; md.Touch(); }, "0.00");
+            SliderRow(page, ref c, "Epaisseur des levres", 0f, 1f, () => cfg.thick, v => { cfg.thick = v; md.Touch(); }, "0.00");
+            SliderRow(page, ref c, "Decalage horizontal", -1f, 1f, () => cfg.offsetX, v => { cfg.offsetX = v; md.Touch(); }, "0.00");
+            SliderRow(page, ref c, "Decalage vertical", -1f, 1f, () => cfg.offsetY, v => { cfg.offsetY = v; md.Touch(); }, "0.00");
+
+            y = Next(ref c, 48f, 12f);
+            Button bDraw = Btn(page, -164f, y, 320f, "Dessin (remplie)", () => mod(() => cfg.style = 0), 22);
+            Button bLine = Btn(page, 164f, y, 320f, "Trait (contour)", () => mod(() => cfg.style = 1), 22);
+            refreshers.Add(() => { Ar6dofTheme.SetSelected(bDraw, cfg.style == 0); Ar6dofTheme.SetSelected(bLine, cfg.style == 1); });
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Dents", () => cfg.teeth, v => { cfg.teeth = v; md.Touch(); }, 400f);
+            y = Next(ref c, 48f, 12f);
+            Text tPal = ButtonText(page, 0f, y, 440f, "", () => mod(() => cfg.palette = (cfg.palette + 1) % Ar6dofMouthDisplay.Palettes.Length), 22);
+
+            y = Next(ref c, 48f, 12f);
+            Text tA = ButtonText(page, -164f, y, 320f, "", () => mod(() => cfg.displayA = (cfg.displayA + 1) % 8), 22);
+            Text tB = ButtonText(page, 164f, y, 320f, "", () => mod(() => cfg.displayB = (cfg.displayB + 1) % 8), 22);
+            y = Next(ref c, 48f, 12f);
+            Text tRA = ButtonText(page, -164f, y, 320f, "", () => mod(() => cfg.rotA = (cfg.rotA + 1) % 4), 22);
+            Text tRB = ButtonText(page, 164f, y, 320f, "", () => mod(() => cfg.rotB = (cfg.rotB + 1) % 4), 22);
+            y = Next(ref c, 48f, 12f);
+            Toggle(page, -164f, y, "Miroir ecran A", () => cfg.flipA, v => { cfg.flipA = v; md.Touch(); }, 320f);
+            Toggle(page, 164f, y, "Miroir ecran B", () => cfg.flipB, v => { cfg.flipB = v; md.Touch(); }, 320f);
+            Live(PgMouth, () =>
+            {
+                tPal.text = Ar6dofLoc.F("Couleurs : {0}", Ar6dofLoc.T(Ar6dofMouthDisplay.Palettes[cfg.palette].name));
+                tA.text = Ar6dofLoc.F(cfg.layout == 0 ? "Ecran : {0}" : "Ecran A (cote gauche) : {0}", cfg.displayA);
+                tB.text = Ar6dofLoc.F("Ecran B (cote droit) : {0}", cfg.displayB);
+                tB.transform.parent.gameObject.SetActive(cfg.layout == 1);
+                tRA.text = Ar6dofLoc.F("Rotation A : {0} deg", cfg.rotA * 90);
+                tRB.text = Ar6dofLoc.F("Rotation B : {0} deg", cfg.rotB * 90);
+                tRB.transform.parent.gameObject.SetActive(cfg.layout == 1);
+            });
+            Para(page, ref c, "Ecran 0 = ecran principal (celui du casque) : choisis les numeros des ecrans du costume, comme dans les parametres d'affichage de Windows.\nEn mode Cotes, l'ecran A montre la moitie gauche de la bouche, l'ecran B la moitie droite.", 100f);
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Apercu de la bouche");
+            float py = Next(ref c, 180f, 12f);
+            var bg = Ar6dofVrUi.Rect(page, "ApercuBouche", new Vector2(0f, py), new Vector2(480f, 180f));
+            var bgi = bg.gameObject.AddComponent<Image>();
+            bgi.color = new Color(0.09f, 0.09f, 0.09f, 1f);
+            bgi.raycastTarget = false;
+            mdPvFull = MakeRaw(bg, "Plein", 0f, 480f);
+            mdPvA = MakeRaw(bg, "A", -121f, 238f);
+            mdPvB = MakeRaw(bg, "B", 121f, 238f);
+            Para(page, ref c, "L'apercu n'existe que tant que cette page est ouverte : la bouche est dessinee avec les memes reglages que sur les ecrans du costume.", 56f);
+            CloseCard(page, top, ref c);
+        }
+
+        static RawImage MakeRaw(RectTransform parent, string name, float x, float w)
+        {
+            var rt = Ar6dofVrUi.Rect(parent, name, new Vector2(x, 0f), new Vector2(w, 180f));
+            var r = rt.gameObject.AddComponent<RawImage>();
+            r.raycastTarget = false;
+            r.enabled = false;
+            return r;
+        }
+
+        /// <summary>Apercu des ecrans du costume : seulement tant que la page Bouche est visible (sinon aucune camera, aucun maillage).</summary>
+        void PumpMouthScreensPreview()
+        {
+            var md = dock.mouthDisplay;
+            if (md == null || mdPvFull == null) return;
+            if (curTab != PgMouth) { mdPvFull.enabled = mdPvA.enabled = mdPvB.enabled = false; return; }
+            md.RequestPreview();
+            bool sides = md.Config.layout == 1;
+            Texture a = md.PreviewA, b = md.PreviewB;
+            mdPvFull.texture = sides ? null : a;
+            mdPvFull.enabled = !sides && a != null;
+            mdPvA.texture = sides ? a : null;
+            mdPvA.enabled = sides && a != null;
+            mdPvB.texture = sides ? b : null;
+            mdPvB.enabled = sides && b != null;
         }
 
         // ================================================================== STYLE
