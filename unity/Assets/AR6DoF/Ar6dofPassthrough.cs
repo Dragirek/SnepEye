@@ -237,6 +237,7 @@ namespace AR6DoF
             reader.Dispose();
             if (rtL != null) rtL.Release();
             if (rtR != null) rtR.Release();
+            ReleasePreviewScene();
         }
 
         // ------------------------------------------------------------------ boucle
@@ -298,11 +299,9 @@ namespace AR6DoF
         /// <summary>Réglages d'une photo (voir Ar6dofCameraApp).</summary>
         public class PhotoOptions
         {
-            public bool withUi = true, withoutUi = true;   // une photo avec les interfaces, une sans (ou les deux)
-            public bool stereo;                            // les deux yeux côte à côte (sinon : oeil gauche seul)
-            public bool flipV;                             // retourne la photo si elle sort à l'envers
-            public int size = 1440;                        // côté d'un oeil, en pixels
-            public float aspect = 1f;                      // largeur / hauteur (1, 4/3, 16/9) : rognage au centre
+            public bool withUi = true;     // avec les interfaces (menus, objets 3D...) ou la camera seule
+            public int eye;                // 0 = camera gauche, 1 = camera droite
+            public int width = 1600, height = 1200;   // resolution d'un oeil de la camera
             public string folder = "";
         }
 
@@ -357,17 +356,11 @@ namespace AR6DoF
                 string dir = string.IsNullOrEmpty(o.folder) ? PhotosFolder : o.folder;
                 Directory.CreateDirectory(dir);
                 string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                for (int pass = 0; pass < 2; pass++)
-                {
-                    bool ui = pass == 0;
-                    if (ui ? !o.withUi : !o.withoutUi) continue;
-                    Texture2D tex = Shoot(ui, o);
-                    string tag = (o.withUi && o.withoutUi) ? (ui ? "_avec" : "_sans") : "";
-                    string path = Path.Combine(dir, "ar6dof_" + stamp + tag + (o.stereo ? "_3d" : "") + ".png");
-                    File.WriteAllBytes(path, tex.EncodeToPNG());
-                    files.Add(path);
-                    if (thumb == null) thumb = tex; else Destroy(tex);
-                }
+                Texture2D tex = Shoot(o.withUi, o);
+                string path = Path.Combine(dir, "ar6dof_" + stamp + ".png");
+                File.WriteAllBytes(path, tex.EncodeToPNG());
+                files.Add(path);
+                thumb = tex;
             }
             catch (Exception e) { err = e.Message; }
             if (hideUi != null) hideUi(false);
@@ -377,20 +370,24 @@ namespace AR6DoF
         }
 
         /// <summary>Taille native d'un oeil sur la camera (pixels) : c'est la resolution reelle d'une photo, agrandir n'ajouterait aucun detail.</summary>
-        public int NativePhotoSize
+        public Vector2Int EyeSize
         {
             get
             {
                 int W = camTex != null ? camTex.width : 1600, H = camTex != null ? camTex.height : 600;
                 int ew = settings.layout == Ar6dofStereoLayout.SideBySide ? W / 2 : W;
                 int eh = settings.layout == Ar6dofStereoLayout.SideBySide ? H : H / 2;
-                return Mathf.Clamp(Mathf.Min(ew, eh), 256, 4096);
+                if ((((settings.left.rotateQuarterTurns % 4) + 4) % 4) % 2 == 1) { int t = ew; ew = eh; eh = t; }
+                return new Vector2Int(Mathf.Clamp(ew, 64, 4096), Mathf.Clamp(eh, 64, 4096));
             }
         }
 
-        // Dessine la composition dans 'rt', sans les lentilles du casque (décalage, centre et distorsion à zéro).
-        // 'withUi' faux : seulement la camera. Les reglages du shader sont remis comme avant.
-        void RenderComposite(RenderTexture rt, bool withUi, bool flipV)
+        /// <summary>Largeur / hauteur d'un oeil (1600x1200 -> 1,333) : l'apercu et la photo ont ce format, a n'importe quelle resolution de camera.</summary>
+        public float EyeAspect { get { var s = EyeSize; return (float)s.x / Mathf.Max(1, s.y); } }
+
+        // Dessine la composition dans 'rt' (deux yeux cote a cote), sans les lentilles du casque (decalage, centre et distorsion a zero), avec la vue au
+        // format 'aspect'. 'withUi' faux : seulement la camera. texL / texR : scenes a utiliser (null = celles de l'affichage). Tout est remis comme avant.
+        void RenderComposite(RenderTexture rt, bool withUi, float aspect, bool flipV, Texture texL, Texture texR)
         {
             var tmp = (Vector4[])U.Clone();
             for (int e = 0; e < 2; e++)
@@ -409,7 +406,9 @@ namespace AR6DoF
             {
                 mat.SetVectorArray("_U", tmp);
                 mat.SetFloat("_Flip", flipV ? -1f : 1f);
+                mat.SetFloat("_Aspect", Mathf.Max(0.2f, aspect));
                 if (!withUi) { mat.SetTexture("_SceneL", clearTex); mat.SetTexture("_SceneR", clearTex); }
+                else if (texL != null && texR != null) { mat.SetTexture("_SceneL", texL); mat.SetTexture("_SceneR", texR); }
                 compositeCam.targetTexture = rt;
                 compositeCam.Render();
             }
@@ -418,33 +417,63 @@ namespace AR6DoF
                 compositeCam.targetTexture = null;
                 mat.SetVectorArray("_U", U);
                 mat.SetFloat("_Flip", settings.flipComposite ? -1f : 1f);
+                mat.SetFloat("_Aspect", 1f);
                 mat.SetTexture("_SceneL", rtL);
                 mat.SetTexture("_SceneR", rtR);
             }
         }
 
-        /// <summary>Apercu en direct pour l'appareil photo : l'image de la camera (deux yeux cote a cote dans 'rt', largeur = 2 x hauteur). Vrai si dessine.</summary>
-        public bool RenderPreview(RenderTexture rt, bool flipV)
+        RenderTexture pvL, pvR;
+
+        // Scene (menus, objets...) rendue a part SANS la couche 'excludeLayer' (la fenetre de l'appareil photo) : sinon l'apercu se filmerait lui-meme.
+        void RenderSceneWithout(int excludeLayer)
         {
-            if (mat == null || compositeCam == null || rt == null || PhotoBusy) return false;
-            RenderComposite(rt, false, flipV);
+            if (pvL == null) { pvL = new RenderTexture(512, 512, 24, RenderTextureFormat.ARGB32); pvL.Create(); }
+            if (pvR == null) { pvR = new RenderTexture(512, 512, 24, RenderTextureFormat.ARGB32); pvR.Create(); }
+            for (int i = 0; i < 2; i++)
+            {
+                var c = eyeCams[i];
+                int mask = c.cullingMask;
+                var tt = c.targetTexture;
+                c.cullingMask = mask & ~(1 << excludeLayer);
+                c.targetTexture = i == 0 ? pvL : pvR;
+                try { c.Render(); }
+                finally { c.cullingMask = mask; c.targetTexture = tt; }
+            }
+        }
+
+        /// <summary>Libere les textures de l'apercu (fenetre de l'appareil photo fermee).</summary>
+        public void ReleasePreviewScene()
+        {
+            if (pvL != null) { pvL.Release(); Destroy(pvL); pvL = null; }
+            if (pvR != null) { pvR.Release(); Destroy(pvR); pvR = null; }
+        }
+
+        /// <summary>
+        /// Apercu en direct pour l'appareil photo : image de la camera au format d'un oeil, deux yeux cote a cote dans 'rt'.
+        /// 'withUi' : avec les menus et objets, sauf la couche 'excludeLayer' (la fenetre de l'appareil photo). Vrai si dessine.
+        /// </summary>
+        public bool RenderPreview(RenderTexture rt, bool withUi, int excludeLayer)
+        {
+            if (mat == null || compositeCam == null || rt == null || PhotoBusy || !HasFrames) return false;
+            if (withUi) RenderSceneWithout(excludeLayer);
+            RenderComposite(rt, withUi, EyeAspect, false, withUi ? pvL : null, withUi ? pvR : null);
             return true;
         }
 
+        // Une photo d'un oeil, a la resolution de la camera. Les interfaces viennent de la scene de l'affichage (la fenetre de l'appareil photo est deja masquee).
         Texture2D Shoot(bool withUi, PhotoOptions o)
         {
-            int s = Mathf.Clamp(o.size, 256, 4096);
-            var rt = RenderTexture.GetTemporary(2 * s, s, 0, RenderTextureFormat.ARGB32);
+            int w = Mathf.Clamp(o.width, 64, 4096), h = Mathf.Clamp(o.height, 64, 4096);
+            var rt = RenderTexture.GetTemporary(2 * w, h, 0, RenderTextureFormat.ARGB32);
             Texture2D res = null;
             var prevActive = RenderTexture.active;
             try
             {
-                RenderComposite(rt, withUi, o.flipV);
-                int h = Mathf.Clamp(Mathf.RoundToInt(s / Mathf.Max(1f, o.aspect)), 64, s);
-                int w = o.stereo ? 2 * s : s;
+                RenderComposite(rt, withUi, (float)w / h, false, null, null);
                 RenderTexture.active = rt;
                 res = new Texture2D(w, h, TextureFormat.RGB24, false);
-                res.ReadPixels(new Rect(0, (s - h) / 2, w, h), 0, 0, false);
+                res.ReadPixels(new Rect(o.eye == 0 ? 0 : w, 0, w, h), 0, 0, false);
                 res.Apply(false, false);
             }
             finally

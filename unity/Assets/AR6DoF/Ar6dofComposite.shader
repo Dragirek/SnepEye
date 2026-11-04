@@ -11,6 +11,7 @@ Shader "AR6DoF/Composite"
         _SceneL ("Scene oeil gauche", 2D) = "black" {}
         _SceneR ("Scene oeil droit", 2D) = "black" {}
         _Flip ("Inversion verticale (1 ou -1)", Float) = 1
+        _Aspect ("Largeur / hauteur de la vue (1 = carree ; photo : celle de la camera)", Float) = 1
     }
     SubShader
     {
@@ -26,6 +27,7 @@ Shader "AR6DoF/Composite"
 
             sampler2D _Cam, _SceneL, _SceneR;
             float _Flip;
+            float _Aspect;
             float4 _TexSize;   // largeur, hauteur de l'image partagee
             float4 _Misc;      // x : marge de la scene (overscan), y : 1 = etirer les bords de l'image
             float4 _U[20];     // 10 vecteurs par oeil (voir Ar6dofPassthrough.cs)
@@ -53,6 +55,7 @@ Shader "AR6DoF/Composite"
                 float4 A = _U[b + 0];        // panX, panY, lensCx, lensCy
                 float4 Bq = _U[b + 1];       // k1, k2, k3, tan(fov/2)
                 float2 p = e * 2.0 - 1.0;
+                p.x *= _Aspect;   // photo : vue plus large que haute (comme l'image de la camera) ; 1 = vue carree de l'afficheur
                 float2 d = p - A.zw;
                 float r2 = dot(d, d);
                 float s = 1.0 + Bq.x * r2 + Bq.y * r2 * r2 + Bq.z * r2 * r2 * r2;

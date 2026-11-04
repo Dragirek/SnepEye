@@ -88,7 +88,7 @@ class MountAuto {
     const bool one = st_ == Count1;
     std::string s = one ? "etape 1/2 : pose le casque a plat, a l'endroit, et lache-le"
                         : (noseUp ? "etape 2/2 : incline le casque vers l'ARRIERE (~30 deg, visiere vers le HAUT) et tiens-le immobile"
-                              : "etape 2/2 : incline le casque vers l'AVANT (~30 deg, visiere vers le BAS) et tiens-le immobile");
+                              : "etape 2/2 : incline le casque vers l'AVANT (~30 deg, comme pour regarder tes pieds : visiere vers le BAS) et tiens-le immobile");
     if (sec > 0) s += " - mesure dans " + std::to_string(sec) + " s";
     return s;
   }

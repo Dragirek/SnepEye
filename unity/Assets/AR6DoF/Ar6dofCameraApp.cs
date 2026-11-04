@@ -7,36 +7,53 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Appareil photo : aperçu en direct de ce que voit le casque (image de la caméra corrigée, sans la déformation des lentilles) et photo à la résolution
-    /// de la caméra, avec ou sans les interfaces. Minuteur, les deux yeux (3D). Les fichiers PNG vont dans Images\AR6DoF\Photos.
-    /// La fenêtre se masque toute seule juste avant la prise de vue. Rien ne tourne tant que la fenêtre est fermée.
+    /// Appareil photo : aperçu en direct de ce que voit le casque (image de la caméra corrigée, sans la déformation des lentilles) au format réel de la caméra,
+    /// et photo à sa résolution, de la caméra gauche ou droite, avec ou sans les interfaces. Minuteur : le compte à rebours s'affiche sur l'aperçu (pas sur le PNG).
+    /// Les fichiers PNG vont dans Images\AR6DoF\Photos. Rien ne tourne tant que la fenêtre est fermée ou réduite.
     /// </summary>
     public class Ar6dofCameraApp : Ar6dofAppWindow
     {
         static readonly int[] Timers = { 0, 3, 5, 10 };
+        const int PreviewLayer = 30;   // la fenetre est sur cette couche : l'apercu en direct l'exclut (sinon il se filmerait lui-meme)
 
-        int ui, timer, stereo, flip;
+        int ui, eye, timer;
         string status = "";
-        string lastPath = "";
         Text shootLabel;
+        Text countOverlay;
         Canvas countCanvas;
         Text countText;
         RenderTexture preview;
         float lastPreview;
+        bool shown;   // la fenetre est affichee (pas reduite, pas fermee) : HideUi la cache seulement pendant la prise
 
         public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct et photo du passthrough", 700f)
         {
-            ui = Get("ui", 1); timer = Get("timer", 1); stereo = Get("stereo", 0); flip = Get("flip", 0);
+            ui = Get("ui", 1); eye = Get("eye", 0); timer = Get("timer", 1);
         }
 
         static int Get(string k, int def) { try { return PlayerPrefs.GetInt("ar6dof_cam_" + k, def); } catch (Exception) { return def; } }
         static void Put(string k, int v) { try { PlayerPrefs.SetInt("ar6dof_cam_" + k, v); } catch (Exception) { } }
 
-        protected override void OnRebuildStart() { shootLabel = null; }
+        protected override void OnRebuildStart() { shootLabel = null; countOverlay = null; }
+
+        protected override void OnRebuilt() { SetLayer(canvas != null ? canvas.gameObject : null, PreviewLayer); }
+
+        static void SetLayer(GameObject go, int layer)
+        {
+            if (go == null) return;
+            foreach (var t in go.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = layer;
+        }
 
         protected override void OnVisible(bool on)
         {
-            if (!on) { var pt = dock.passthrough; if (pt != null && pt.PhotoBusy) pt.CancelPhoto(); DestroyCount(); ReleasePreview(); }
+            shown = on;
+            if (!on)
+            {
+                var pt = dock.passthrough;
+                if (pt != null) { if (pt.PhotoBusy) pt.CancelPhoto(); pt.ReleasePreviewScene(); }
+                DestroyCount();
+                ReleasePreview();
+            }
         }
 
         public override void Destroy()
@@ -52,45 +69,66 @@ namespace AR6DoF
             preview = null;
         }
 
-        // apercu en direct : l'image de la camera, redessinee une dizaine de fois par seconde tant que la fenetre est affichee
+        Ar6dofPassthrough Pt { get { return dock.passthrough; } }
+
+        // texture de l'apercu : deux yeux cote a cote, chacun au format de l'oeil de la camera (se refait si la resolution de la camera change)
+        void EnsurePreview()
+        {
+            var pt = Pt;
+            float aspect = pt != null ? pt.EyeAspect : 4f / 3f;
+            int h = 360, w = Mathf.RoundToInt(h * aspect);
+            if (preview != null && (preview.height != h || preview.width != 2 * w)) ReleasePreview();
+            if (preview == null)
+            {
+                preview = new RenderTexture(2 * w, h, 0, RenderTextureFormat.ARGB32);
+                preview.Create();
+            }
+        }
+
+        // apercu en direct : redessine une dizaine de fois par seconde tant que la fenetre est affichee
         protected override void OnTick()
         {
             var pt = Pt;
             if (pt == null || canvas == null || !canvas.gameObject.activeInHierarchy || pt.PhotoBusy) return;
             if (Time.unscaledTime - lastPreview < 0.08f) return;
             lastPreview = Time.unscaledTime;
-            if (preview == null)
-            {
-                preview = new RenderTexture(640, 320, 0, RenderTextureFormat.ARGB32);
-                preview.Create();
-            }
-            pt.RenderPreview(preview, flip != 0);
+            EnsurePreview();
+            pt.RenderPreview(preview, ui != 0, PreviewLayer);
         }
-
-        Ar6dofPassthrough Pt { get { return dock.passthrough; } }
 
         protected override void BuildMain()
         {
-            if (Pt == null) { Para("Le passthrough n'est pas disponible dans cette scene.", 40, 20); return; }
+            var pt = Pt;
+            if (pt == null) { Para("Le passthrough n'est pas disponible dans cette scene.", 40, 20); return; }
 
-            // apercu en direct (les deux yeux si "3D", sinon l'oeil gauche)
-            bool two = stereo != 0;
-            Vector2 sz = two ? new Vector2(IW, IW * 0.5f) : new Vector2(Mathf.Min(IW, 380f), Mathf.Min(IW, 380f));
+            // apercu en direct : remplit la fenetre, au format reel de la camera
+            EnsurePreview();
+            float aspect = pt.EyeAspect;
+            Vector2 sz = new Vector2(IW, IW / aspect);
             float cy = RowY(sz.y);
             var r = Ar6dofVrUi.Rect(content, "Apercu", new Vector2(0f, cy), sz);
-            if (preview == null)
-            {
-                preview = new RenderTexture(640, 320, 0, RenderTextureFormat.ARGB32);
-                preview.Create();
-            }
             var ri = r.gameObject.AddComponent<RawImage>();
             ri.texture = preview;
-            ri.uvRect = two ? new Rect(0f, 0f, 1f, 1f) : new Rect(0f, 0f, 0.5f, 1f);
+            ri.uvRect = new Rect(eye == 0 ? 0f : 0.5f, 0f, 0.5f, 1f);
             ri.raycastTarget = false;
+            // compte a rebours du minuteur, sur l'apercu
+            countOverlay = Ar6dofVrUi.Label(r, "", Vector2.zero, new Vector2(sz.x, sz.y), 150, TextAnchor.MiddleCenter);
+            countOverlay.fontStyle = FontStyle.Bold;
+            var sh = countOverlay.gameObject.AddComponent<Shadow>();
+            sh.effectColor = new Color(0f, 0f, 0f, 0.8f);
+            sh.effectDistance = new Vector2(4f, -4f);
 
-            ToggleRow("Interfaces incluses", () => ui != 0, v => { ui = v ? 1 : 0; Put("ui", ui); }, 48f, 21);
-            ToggleRow("Les deux yeux (3D)", () => stereo != 0, v => { stereo = v ? 1 : 0; Put("stereo", stereo); Rebuild(); }, 48f, 21);
-            ToggleRow("Retourner la photo", () => flip != 0, v => { flip = v ? 1 : 0; Put("flip", flip); }, 48f, 21);
+            var bb = BtnRow(52f, 21, "", (Action)(() => { ui = ui != 0 ? 0 : 1; Put("ui", ui); Refresh(); }),
+                                      "", (Action)(() => { eye = eye != 0 ? 0 : 1; Put("eye", eye); Rebuild(); }));
+            var uiTxt = bb[0].GetComponentInChildren<Text>();
+            var eyeTxt = bb[1].GetComponentInChildren<Text>();
+            var uiBtn = bb[0];
+            refreshers.Add(() =>
+            {
+                uiTxt.text = Ar6dofLoc.T(ui != 0 ? "Interfaces incluses : oui" : "Interfaces incluses : non");
+                eyeTxt.text = Ar6dofLoc.T(eye == 0 ? "Camera : gauche" : "Camera : droite");
+                Ar6dofTheme.SetSelected(uiBtn, ui != 0);
+            });
 
             Lbl("Minuteur", 30, 20).MakeAccent();
             var tn = new string[Timers.Length];
@@ -103,7 +141,7 @@ namespace AR6DoF
             Ar6dofTheme.SetSelected(shoot, true);
             refreshers.Add(UpdateShootLabel);
 
-            var st = Para("", 56, 17);
+            var st = Para("", 40, 17);
             refreshers.Add(() => st.text = status.Length > 0 ? Ar6dofLoc.T(status) : "");
 
             BtnRow(48f, 21, "Ouvrir le dossier", (Action)(() => OpenFolder()));
@@ -112,13 +150,7 @@ namespace AR6DoF
 
         static void OpenFolder()
         {
-            string dir = Ar6dofPassthrough.PhotosFolder;
-            try { Directory.CreateDirectory(dir); } catch (Exception) { }
-            try { System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\""); }
-            catch (Exception)
-            {
-                try { Application.OpenURL("file:///" + dir.Replace('\\', '/')); } catch (Exception) { }
-            }
+            Ar6dofLibrary.OpenInExplorer(Ar6dofPassthrough.PhotosFolder);
         }
 
         void UpdateShootLabel()
@@ -133,12 +165,12 @@ namespace AR6DoF
             var pt = Pt;
             if (pt == null) return;
             if (pt.PhotoBusy) { pt.CancelPhoto(); return; }
+            var es = pt.EyeSize;
             var o = new Ar6dofPassthrough.PhotoOptions
             {
-                withUi = ui != 0, withoutUi = ui == 0,
-                stereo = stereo != 0, flipV = flip != 0,
-                size = pt.NativePhotoSize,      // resolution reelle de la camera : agrandir n'ajouterait aucun detail
-                aspect = 1f,
+                withUi = ui != 0,
+                eye = eye,
+                width = es.x, height = es.y,     // resolution reelle de la camera : agrandir n'ajouterait aucun detail
             };
             int delay = Timers[Mathf.Clamp(timer, 0, Timers.Length - 1)];
             status = delay > 0 ? "Minuteur lance..." : "";
@@ -148,9 +180,11 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ minuteur
+        // Le chiffre est affiche sur l'apercu (dans la fenetre) et, pour ne pas la rater, devant toi : jamais dans le PNG.
         void ShowCount(int sec)
         {
             DestroyCount();
+            if (countOverlay != null) countOverlay.text = sec.ToString();
             var head = Pt != null ? Pt.HeadView : null;
             if (head == null) return;
             countCanvas = Ar6dofVrUi.NewCanvas("Compte a rebours", new Vector2(260f, 260f));
@@ -161,17 +195,21 @@ namespace AR6DoF
             var tr = countCanvas.transform;
             tr.position = head.position + f * 1.3f;
             tr.rotation = Quaternion.LookRotation(tr.position - head.position, Vector3.up);
+            SetLayer(countCanvas.gameObject, PreviewLayer);
         }
 
         void DestroyCount()
         {
             if (countCanvas != null) UnityEngine.Object.Destroy(countCanvas.gameObject);
             countCanvas = null; countText = null;
+            if (countOverlay != null) countOverlay.text = "";
         }
 
         void OnCount(int sec)
         {
-            if (countText != null) countText.text = sec > 0 ? sec.ToString() : "";
+            string t = sec > 0 ? sec.ToString() : "";
+            if (countText != null) countText.text = t;
+            if (countOverlay != null) countOverlay.text = t;
             status = sec > 0 ? Ar6dofLoc.F("Photo dans {0} s...", sec) : "";
             if (canvas != null && canvas.gameObject.activeSelf) Refresh();
         }
@@ -179,7 +217,7 @@ namespace AR6DoF
         void HideUi(bool hide)
         {
             if (hide) DestroyCount();
-            if (canvas != null) canvas.gameObject.SetActive(!hide && open);
+            if (canvas != null) canvas.gameObject.SetActive(!hide && shown);
         }
 
         void OnDone(List<string> files, Texture2D tex, string err)
@@ -188,11 +226,7 @@ namespace AR6DoF
             if (tex != null) UnityEngine.Object.Destroy(tex);
             if (!string.IsNullOrEmpty(err)) status = err == "Annule" ? "Photo annulee" : Ar6dofLoc.F("Echec : {0}", err);
             else if (files.Count == 0) status = "Rien a enregistrer";
-            else
-            {
-                lastPath = files[0];
-                status = Ar6dofLoc.F("Photo enregistree : {0}", Path.GetFileName(files[0]));
-            }
+            else status = Ar6dofLoc.F("Photo enregistree : {0}", Path.GetFileName(files[0]));
             if (canvas != null && canvas.gameObject.activeSelf) Refresh();
         }
     }

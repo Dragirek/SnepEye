@@ -80,6 +80,7 @@ namespace AR6DoF
         public float dockRevealFull = 55f; // angle où il est entièrement visible (deg)
         public float dockScale = 1f;
         public float dockTilt = 0f;        // inclinaison en plus (deg) ; 0 = face à tes yeux
+        public bool seated = false;        // mode assis : le dock se place a hauteur des mains et le sol suppose est ajuste a la hauteur des yeux assis
 
         public float keyboardScale = 1f;
 

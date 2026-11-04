@@ -17,7 +17,7 @@
 namespace ar6pv {
 
 constexpr int kW = 800, kH = 300;
-enum Src { kNone = 0, kStereo = 1, kEyes = 2, kMouth = 3 };
+enum Src { kNone = 0, kStereo = 1, kEyes = 2, kMouth = 3, kImu = 4 };
 
 inline double Now() {
   using namespace std::chrono;

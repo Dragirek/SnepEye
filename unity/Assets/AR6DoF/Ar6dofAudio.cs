@@ -172,9 +172,20 @@ namespace AR6DoF
             Load();
         }
 
-        void Start()
+        // Le moteur ne demarre plus tout seul : Ar6dofDock le lance (Resume) quand une application audio (Voix, Soundboard, Table de mixage) est dans la barre
+        // et l'arrete (Suspend) quand la derniere est fermee. Tant qu'aucune n'est ouverte : aucun processus, aucun port.
+        void Start() { }
+
+        /// <summary>Redemarre le moteur s'il etait active (sans changer ce reglage).</summary>
+        public void Resume()
         {
-            if (data.enabled) StartEngine();
+            if (data.enabled && State == EngineState.Off) StartEngine();
+        }
+
+        /// <summary>Arrete le moteur sans changer le reglage « active » (il repart a la prochaine ouverture d'une application audio).</summary>
+        public void Suspend()
+        {
+            if (State != EngineState.Off) StopEngine(true);
         }
 
         void OnDestroy()

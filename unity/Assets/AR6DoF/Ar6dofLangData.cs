@@ -760,6 +760,13 @@ namespace AR6DoF
             "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Photos in Pictures\\AR6DoF\\Photos, at the camera's resolution.",
             "Actualiser => Refresh",
             "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => This folder is empty. Touch \"Open folder\", drop your files in it, then \"Refresh\".",
+            "Interfaces incluses : oui => Include interfaces: yes",
+            "Interfaces incluses : non => Include interfaces: no",
+            "Camera : gauche => Camera: left",
+            "Camera : droite => Camera: right",
+            "Assis : OUI => Seated: ON",
+            "Assis : NON => Seated: OFF",
+            "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Seated mode: dock at hand height, menus and screens at seated eye level. Sit down, then turn it on.",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -1510,6 +1517,13 @@ namespace AR6DoF
             "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Fotos en Imagenes\\AR6DoF\\Photos, a la resolucion de la camara.",
             "Actualiser => Actualizar",
             "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Esta carpeta esta vacia. Toca \"Abrir carpeta\", deja tus archivos dentro y luego \"Actualizar\".",
+            "Interfaces incluses : oui => Incluir interfaces: si",
+            "Interfaces incluses : non => Incluir interfaces: no",
+            "Camera : gauche => Camara: izquierda",
+            "Camera : droite => Camara: derecha",
+            "Assis : OUI => Sentado: SI",
+            "Assis : NON => Sentado: NO",
+            "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Modo sentado: dock a la altura de las manos, menus y pantallas a la altura de los ojos sentado. Sientate y activalo.",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -2267,6 +2281,13 @@ namespace AR6DoF
             "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Fotos in Bilder\\AR6DoF\\Photos, in Kameraaufloesung.",
             "Actualiser => Aktualisieren",
             "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Dieser Ordner ist leer. Tippe auf \"Ordner oeffnen\", lege deine Dateien hinein und dann \"Aktualisieren\".",
+            "Interfaces incluses : oui => Oberflaechen einbeziehen: ja",
+            "Interfaces incluses : non => Oberflaechen einbeziehen: nein",
+            "Camera : gauche => Kamera: links",
+            "Camera : droite => Kamera: rechts",
+            "Assis : OUI => Sitzen: AN",
+            "Assis : NON => Sitzen: AUS",
+            "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Sitzmodus: Dock auf Handhoehe, Menues und Bildschirme auf Augenhoehe im Sitzen. Erst hinsetzen, dann einschalten.",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -3024,6 +3045,13 @@ namespace AR6DoF
             "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Foto in Immagini\\AR6DoF\\Photos, alla risoluzione della camera.",
             "Actualiser => Aggiorna",
             "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Questa cartella e vuota. Tocca \"Apri cartella\", mettici i tuoi file e poi \"Aggiorna\".",
+            "Interfaces incluses : oui => Includi interfacce: si",
+            "Interfaces incluses : non => Includi interfacce: no",
+            "Camera : gauche => Fotocamera: sinistra",
+            "Camera : droite => Fotocamera: destra",
+            "Assis : OUI => Seduto: SI",
+            "Assis : NON => Seduto: NO",
+            "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Modalita seduto: dock all'altezza delle mani, menu e schermi all'altezza degli occhi da seduto. Siediti e attivala.",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -3780,6 +3808,13 @@ namespace AR6DoF
             "Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera. => Fotos em Imagens\\AR6DoF\\Photos, na resolucao da camera.",
             "Actualiser => Atualizar",
             "Ce dossier est vide. Touche « Ouvrir le dossier », depose tes fichiers dedans, puis « Actualiser ». => Esta pasta esta vazia. Toque em \"Abrir pasta\", coloque seus arquivos nela e depois \"Atualizar\".",
+            "Interfaces incluses : oui => Incluir interfaces: sim",
+            "Interfaces incluses : non => Incluir interfaces: nao",
+            "Camera : gauche => Camera: esquerda",
+            "Camera : droite => Camera: direita",
+            "Assis : OUI => Sentado: SIM",
+            "Assis : NON => Sentado: NAO",
+            "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active. => Modo sentado: dock na altura das maos, menus e telas na altura dos olhos sentado. Sente-se e ative.",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

@@ -11,6 +11,7 @@ namespace AR6DoF
     {
         public string title = "", icon = "";
         public bool open;
+        public bool docked;     // applications et menus d'appareils : present dans la barre (affiche OU reduit) ; ferme = absent de la barre
         public Image indicator, statusDot;
         public abstract Transform AnimRoot { get; }
         /// <summary>Pastille d'état sur l'icône (menus d'appareils : connecté ou non).</summary>
@@ -87,6 +88,7 @@ namespace AR6DoF
         readonly List<Ar6dofDockApp> apps = new List<Ar6dofDockApp>();      // dans la barre (sans les réglages)
         readonly Dictionary<Ar6dofScreenPanel, ScreenApp> screenApps = new Dictionary<Ar6dofScreenPanel, ScreenApp>();
         readonly HashSet<Ar6dofDockApp> animating = new HashSet<Ar6dofDockApp>();
+        readonly HashSet<Ar6dofDockApp> closing = new HashSet<Ar6dofDockApp>();   // fermeture demandee : retirees de la barre une fois rangees
         readonly Dictionary<Ar6dofDockApp, RectTransform> iconOf = new Dictionary<Ar6dofDockApp, RectTransform>();
         KeyboardApp kbApp;
         CanvasApp settingsApp;
@@ -102,7 +104,8 @@ namespace AR6DoF
         Vector3 feetPos;
         bool feetInit, lastFeetMode;
         Vector3 lastFlat = Vector3.forward;
-        Text followLbl;
+        Text followLbl, seatLbl;
+        bool seatApplied;
         Ar6dofFloatingMenu kbMenu;
 
         Transform Head
@@ -131,6 +134,7 @@ namespace AR6DoF
                 if (Head == null) return;
                 if (rig == null) rig = FindFirstObjectByType<Ar6dofHeadRig>();
                 if (rig != null && !rig.Ready) return;
+                if (rig != null && !seatApplied) { rig.SetSeated(Ar6dofSettings.Current.seated); seatApplied = true; }
                 if (waitStart < 0f) waitStart = Time.unscaledTime;
                 var sc = Ar6dofScreens.Instance;
                 bool screensReady = sc == null || sc.Built || Time.unscaledTime - waitStart > 3f;   // la barre se place sous les écrans
@@ -165,7 +169,9 @@ namespace AR6DoF
 
             // inclinaison de la tête vers le bas (degrés) : le dock apparaît entre dockRevealStart et dockRevealFull
             float pitch = Mathf.Asin(Mathf.Clamp(-h.forward.y, -1f, 1f)) * Mathf.Rad2Deg;
-            float a = Mathf.Clamp01(Mathf.InverseLerp(d.dockRevealStart, Mathf.Max(d.dockRevealStart + 1f, d.dockRevealFull), pitch));
+            float sub = d.seated ? 12f : 0f;   // assis, le dock est plus pres : il apparait en baissant moins la tete
+            float rs = Mathf.Max(8f, d.dockRevealStart - sub);
+            float a = Mathf.Clamp01(Mathf.InverseLerp(rs, Mathf.Max(rs + 1f, d.dockRevealFull - sub), pitch));
             a = a * a * (3f - 2f * a);
             float dt = Time.unscaledDeltaTime;
             reveal = Mathf.Lerp(reveal, a, 1f - Mathf.Exp(-12f * dt));
@@ -188,6 +194,7 @@ namespace AR6DoF
             group.interactable = on;
             canvas.enabled = reveal > 0.003f;
             if (followLbl != null && kbMenu != null) followLbl.text = Ar6dofLoc.T(kbMenu.follow ? "Suivi : OUI" : "Suivi : NON");
+            if (seatLbl != null) seatLbl.text = Ar6dofLoc.T(Ar6dofSettings.Current.seated ? "Assis : OUI" : "Assis : NON");
         }
 
         /// <summary>Place le dock sur le sol devant tes pieds, orienté pile vers tes yeux (angle fort).</summary>
@@ -198,7 +205,11 @@ namespace AR6DoF
             var d = Ar6dofSettings.Current;
             Vector3 f = h.forward; f.y = 0f;
             if (f.sqrMagnitude > 1e-3f) lastFlat = f.normalized;
-            Vector3 target = new Vector3(h.position.x, 0.12f, h.position.z) + lastFlat * Mathf.Clamp(d.dockDistance, 0.3f, 1.5f);
+            // debout : sur le sol devant les pieds ; assis : a hauteur des mains (sous les yeux), plus pres
+            float ty = d.seated ? Mathf.Max(0.3f, h.position.y - 0.55f) : 0.12f;
+            float dist = Mathf.Clamp(d.dockDistance, 0.3f, 1.5f);
+            if (d.seated) dist = Mathf.Min(dist, 0.55f);
+            Vector3 target = new Vector3(h.position.x, ty, h.position.z) + lastFlat * dist;
             if (snap || !feetInit) { feetPos = target; feetInit = true; }
             else feetPos = Vector3.Lerp(feetPos, target, 1f - Mathf.Exp(-4f * Time.unscaledDeltaTime));
             Vector3 dir = feetPos - h.position;
@@ -299,6 +310,7 @@ namespace AR6DoF
             {
                 var dm = a as DeviceMenu;
                 bool want = dm != null ? dm.def.open : PlayerPrefs.GetInt("ar6dof_dock_open_" + a.title, a == kbApp ? 1 : 0) != 0;
+                if (dm != null) dm.docked = want;
                 if (want) { a.BeforeFirstShow(); }
                 a.Activate(want);
                 a.open = want;
@@ -323,17 +335,19 @@ namespace AR6DoF
         public void Adopt(DeviceMenu m)
         {
             if (pointer != null) pointer.AddCanvas(m.canvas);
-            AddChrome(m.canvas, m.title);
+            AddChrome(m.canvas, m.title, m);
             float yaw = -35f - 30f * (devMenus.menus.Count - 1);
             m.place = t => PlaceBeside(t, yaw, 0.28f);   // le haut du menu à peine au-dessus des yeux : il descend vers les mains
         }
 
         /// <summary>Réduire / fermer / redimensionner d'un menu (Canvas) : ici, les deux premiers le rangent dans la barre.</summary>
-        void AddChrome(Canvas c, string name)
+        void AddChrome(Canvas c, string name, Ar6dofDockApp app = null)
         {
             if (c == null) return;
             Action stow = () => StowCanvas(c);
-            var ch = Ar6dofWindowChrome.Create(name, c.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(c), stow, stow);
+            // Reduire : la fenetre se cache, son icone reste dans la barre. Fermer (applications et appareils) : elle est retiree de la barre et s'arrete.
+            Action close = app != null ? (Action)(() => CloseApp(app)) : stow;
+            var ch = Ar6dofWindowChrome.Create(name, c.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(c), stow, close);
             ch.canMove = true;
         }
 
@@ -413,8 +427,8 @@ namespace AR6DoF
                 }
             }
             if (kbApp != null) groups.Add(new List<Ar6dofDockApp> { kbApp });
-            foreach (var m in devMenus.menus) if (m.open) groups.Add(new List<Ar6dofDockApp> { m });   // un menu d'appareil ferme n'est que dans Apps
-            foreach (var w in windows) if (w.open) groups.Add(new List<Ar6dofDockApp> { w });   // une application fermee n'est que dans Apps
+            foreach (var m in devMenus.menus) if (m.open || m.docked) groups.Add(new List<Ar6dofDockApp> { m });   // un menu d'appareil ferme n'est que dans Apps
+            foreach (var w in windows) if (w.open || w.docked) groups.Add(new List<Ar6dofDockApp> { w });   // une application fermee n'est que dans Apps
             foreach (var g in groups) apps.AddRange(g);
 
             const float size = 96f, inCluster = 102f, between = 116f, gearSize = 96f;   // la roue a la meme taille que les autres icones
@@ -434,7 +448,7 @@ namespace AR6DoF
             float appsX = sepX + 26f + size * 0.5f;                                // Apps : juste a gauche de la roue des reglages
             float gearX = appsX + size * 0.5f + 12f + gearSize * 0.5f;
             float total = gearX + gearSize * 0.5f;
-            float barW = Mathf.Max(680f, total + 60f);
+            float barW = Mathf.Max(720f, total + 60f);
             barRt.sizeDelta = new Vector2(barW, BarHeight);
             float shift = -total * 0.5f;
             MakeQuickRow(barW);
@@ -472,10 +486,10 @@ namespace AR6DoF
         // ------------------------------------------------------------------ actions rapides (remplacent les touches R, M et F)
         void MakeQuickRow(float barW)
         {
-            const float bw = 150f, bh = 58f, gap = 10f, y = 62f;
-            float x = -(4 * bw + 3 * gap) * 0.5f + bw * 0.5f;
+            const float bw = 134f, bh = 58f, gap = 6f, y = 62f;
+            float x = -(5 * bw + 4 * gap) * 0.5f + bw * 0.5f;
             Text lbl;
-            followLbl = null;
+            followLbl = null; seatLbl = null;
             var b1 = Ar6dofVrUi.MakeButton(iconsRoot, "Recentrer", new Vector2(x, y), new Vector2(bw, bh), () => { if (rig != null) rig.Recenter(); FollowFeet(true); }, out lbl, 22);
             Tip(b1, "Recentrer la tete : ici devant moi = cap de depart");
             x += bw + gap;
@@ -492,12 +506,29 @@ namespace AR6DoF
             }, out lbl, 22);
             followLbl = lbl;
             Tip(b4, "Le clavier te suit quand tu t'eloignes (oui / non)");
+            x += bw + gap;
+            var b5 = Ar6dofVrUi.MakeButton(iconsRoot, "Assis : NON", new Vector2(x, y), new Vector2(bw, bh), ToggleSeated, out lbl, 22);
+            seatLbl = lbl;
+            Tip(b5, "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active.");
         }
 
         static void Tip(Button b, string text)
         {
             var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
             tip.text = () => text;
+        }
+
+        /// <summary>Mode assis (oui / non) : enregistre dans les reglages, ajuste la hauteur des yeux supposee, replace le dock et les menus.</summary>
+        void ToggleSeated()
+        {
+            var d = Ar6dofSettings.Current;
+            d.seated = !d.seated;
+            Ar6dofSettings.SaveFields(new[] { "seated" });
+            if (rig != null) rig.SetSeated(d.seated);
+            feetInit = false;
+            FollowFeet(true);
+            BringMenus();
+            ApplyReveal();
         }
 
         void BringMenus()
@@ -662,7 +693,7 @@ namespace AR6DoF
             animating.Add(app);
             var win = app as Ar6dofAppWindow;
             bool inCatalog = (win != null && windows.Contains(win)) || app is DeviceMenu;
-            if (show && inCatalog) { app.open = true; RebuildIcons(); }   // l'application ouverte prend sa place dans la barre : l'animation part de son icone
+            if (show && inCatalog) { app.docked = true; app.open = true; RebuildIcons(); }   // l'application ouverte prend sa place dans la barre : l'animation part de son icone
             Transform t = app.AnimRoot;
             RectTransform icon;
             iconOf.TryGetValue(app, out icon);
@@ -688,7 +719,9 @@ namespace AR6DoF
             }
             if (app is KeyboardApp || app == settingsApp) PlayerPrefs.SetInt("ar6dof_dock_open_" + app.title, app.open ? 1 : 0);
             animating.Remove(app);
-            if (inCatalog && !show) RebuildIcons();   // rangee : son icone quitte la barre (elle reste dans Apps)
+            if (inCatalog && !show && closing.Remove(app)) FinishClose(app);
+            else if (inCatalog) RebuildIcons();
+            if (win != null && inCatalog) AudioSync();
         }
 
         // ------------------------------------------------------------------ placement
@@ -723,7 +756,7 @@ namespace AR6DoF
         /// <summary>L'application est-elle affichee ?</summary>
         public bool IsOpen(string id)
         {
-            foreach (var w in windows) if (w.id == id) return w.open;
+            foreach (var w in windows) if (w.id == id) return w.open || w.docked;
             return false;
         }
 
@@ -737,12 +770,52 @@ namespace AR6DoF
             Toggle(m);
         }
 
-        public void ToggleDeviceMenu(DeviceMenu m) { Toggle(m); }
+        public void ToggleDeviceMenu(DeviceMenu m) { TileToggle(m); }
 
-        /// <summary>Ouvre l'application si elle est rangee, la range si elle est ouverte.</summary>
+        /// <summary>Dans Apps : ouvre l'application si elle est fermee ou reduite, la ferme (retiree de la barre, arretee) si elle est affichee.</summary>
         public void ToggleApp(string id)
         {
-            foreach (var w in windows) if (w.id == id) { Toggle(w); return; }
+            foreach (var w in windows) if (w.id == id) { TileToggle(w); return; }
+        }
+
+        public void TileToggle(Ar6dofDockApp a)
+        {
+            if (a == null || animating.Contains(a)) return;
+            if (a.open) CloseApp(a); else Toggle(a);
+        }
+
+        /// <summary>L'application est-elle dans la barre (affichee ou reduite) ?</summary>
+        public bool IsDocked(Ar6dofDockApp a) { return a != null && (a.open || a.docked); }
+
+        /// <summary>Ferme une application ou un menu d'appareil : retire de la barre et arrete ce qu'il faisait (son, apercu...). Reduire, lui, ne fait que cacher la fenetre.</summary>
+        public void CloseApp(Ar6dofDockApp app)
+        {
+            if (app == null || !built || animating.Contains(app)) return;
+            var win = app as Ar6dofAppWindow;
+            bool dynamic = (win != null && windows.Contains(win)) || app is DeviceMenu;
+            if (!dynamic) { if (app.open) Toggle(app); return; }
+            if (app.open) { closing.Add(app); StartCoroutine(Animate(app, false)); }
+            else FinishClose(app);
+        }
+
+        void FinishClose(Ar6dofDockApp app)
+        {
+            app.docked = false;
+            var win = app as Ar6dofAppWindow;
+            if (win != null) win.OnClosed();
+            RebuildIcons();
+            AudioSync();
+        }
+
+        static bool IsAudioApp(string id) { return id == "voice" || id == "soundboard" || id == "mixer"; }
+
+        /// <summary>Le moteur audio ne tourne que tant qu'une application audio est dans la barre (affichee ou reduite).</summary>
+        void AudioSync()
+        {
+            if (audioEngine == null) return;
+            bool any = false;
+            foreach (var w in windows) if (IsAudioApp(w.id) && (w.open || w.docked)) any = true;
+            if (any) audioEngine.Resume(); else audioEngine.Suspend();
         }
 
         /// <summary>Affiche une application (sans effet si elle l'est deja).</summary>
@@ -755,7 +828,7 @@ namespace AR6DoF
         void AdoptWindow(Ar6dofAppWindow w, float yawDeg)
         {
             if (pointer != null) pointer.AddCanvas(w.canvas);
-            AddChrome(w.canvas, w.title);
+            AddChrome(w.canvas, w.title, w);
             w.place = t => PlaceBeside(t, yawDeg, 0.2f);
         }
 

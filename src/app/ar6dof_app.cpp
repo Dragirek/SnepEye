@@ -89,10 +89,10 @@ enum {
   ID_UDP, ID_SHARE, ID_BLE, ID_AUTOTRACK,
   ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK, ID_EYE_CAL, ID_EYE_RECENTER, ID_EYE_CLEAR, ID_EYE_FOV, ID_EYESTAT,
   ID_MOUTH, ID_MOUTHCAM, ID_MOUTHFPS, ID_MOUTHBACK, ID_MC_NEUTRAL, ID_MC_OPEN, ID_MC_WIDE, ID_MC_NARROW, ID_MC_CLEAR, ID_MOUTHSTAT,
-  ID_PV_CAM, ID_PV_EYE, ID_PV_MOUTH, ID_PVW_CAM, ID_PVW_EYE, ID_PVW_MOUTH,
+  ID_PV_CAM, ID_PV_EYE, ID_PV_MOUTH, ID_PVW_CAM, ID_PVW_EYE, ID_PVW_MOUTH, ID_PVW_IMU,
   ID_THREADS, ID_KEEP,
   ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK,
-  ID_M_STEP1, ID_M_STEP2, ID_M_RESET, ID_M_NOSEUP,
+  ID_M_STEP1, ID_M_STEP2, ID_M_RESET, ID_M_FLIP,
   ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS,
   ID_NAV0 = 300   // 7 pages : ID_NAV0 .. ID_NAV0 + 6
 };
@@ -466,7 +466,6 @@ void ConfigToFields() {
   RebuildModes(g_cfg.find("width") == g_cfg.end());   // première utilisation : on propose un mode que la caméra a vraiment
   SetSel(ID_BACKEND, CfgInt("backend", 0) == 1 ? 1 : 0);
   SetChecked(ID_MFDIRECT, CfgInt("mfdirect", 0) != 0);
-  SetChecked(ID_M_NOSEUP, CfgInt("mountup", 1) != 0);
 
   std::string pn = CfgStr("portname", "");
   int pi = 0;
@@ -550,7 +549,6 @@ bool SaveFields() {
   g_cfg["fps"] = std::to_string(f);
   g_cfg["backend"] = std::to_string(GetSel(ID_BACKEND) == 1 ? 1 : 0);
   g_cfg["mfdirect"] = IsChecked(ID_MFDIRECT) ? "1" : "0";
-  g_cfg["mountup"] = IsChecked(ID_M_NOSEUP) ? "1" : "0";
   std::string cd = W2A(GetText(ID_CALDIR));
   g_cfg["calibdir"] = cd.empty() ? "-" : cd;
   std::string base = W2A(GetText(ID_BASE));
@@ -1036,10 +1034,11 @@ int WantedSource() {
   if (g_page == PG_CAM && g_pvOn[0]) return 1;
   if (g_page == PG_EYES && g_pvOn[1]) return 2;
   if (g_page == PG_MOUTH && g_pvOn[2]) return 3;
+  if (g_page == PG_SENSORS && GetSel(ID_PORT) > 0) return 4;   // graphique de l'IMU : automatique dans la page Capteurs
   return 0;
 }
 
-HWND PvWindow(int src) { return H(src == 1 ? ID_PVW_CAM : src == 2 ? ID_PVW_EYE : ID_PVW_MOUTH); }
+HWND PvWindow(int src) { return H(src == 1 ? ID_PVW_CAM : src == 2 ? ID_PVW_EYE : src == 3 ? ID_PVW_MOUTH : ID_PVW_IMU); }
 
 bool OpenPreview() {
   if (g_pvBase) return true;
@@ -1090,7 +1089,7 @@ void OnFastTick() {
   if (want != g_pvActive) {
     if (want == 0 && g_pvActive != 0) { SendUdp(9877, "PV 0"); ClosePreview(); }
     g_pvHave = false;
-    for (int s = 1; s <= 3; s++) InvalidateRect(PvWindow(s), nullptr, FALSE);
+    for (int s = 1; s <= 4; s++) InvalidateRect(PvWindow(s), nullptr, FALSE);
     g_pvActive = want;
     g_pvLastReq = 0;
   }
@@ -1129,7 +1128,7 @@ LRESULT CALLBACK PvProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       SetBkMode(dc, TRANSPARENT);
       SetTextColor(dc, RGB(160, 160, 160));
       SelectObject(dc, g_font);
-      const wchar_t* msg = WantedSource() == src ? Tr(L"En attente de la caméra…", L"Waiting for the camera…") : Tr(L"Aperçu désactivé", L"Preview off");
+      const wchar_t* msg = WantedSource() == src ? (src == 4 ? Tr(L"En attente de l'IMU…", L"Waiting for the IMU…") : Tr(L"En attente de la caméra…", L"Waiting for the camera…")) : Tr(L"Aperçu désactivé", L"Preview off");
       DrawTextW(dc, msg, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
     EndPaint(h, &ps);
@@ -1533,20 +1532,21 @@ void CreateControls() {
 
   // ---- page 1 : Capteurs
   g_buildPage = PG_SENSORS;
-  CardBox(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", X, 62, CWd, 170);
-  Label(L"Port série", L"Serial port", X + PAD, 110, 160);
-  Combo(X + C0, 106, CR - 90, ID_PORT);
-  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 105, 80, 28, ID_PORT_REFRESH);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 152, CWd - 2 * PAD, 68, ID_IMUSTAT);
+  CardBox(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", X, 62, CWd, 136);
+  Label(L"Port série", L"Serial port", X + PAD, 108, 160);
+  Combo(X + C0, 104, CR - 90, ID_PORT);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 103, 80, 28, ID_PORT_REFRESH);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 146, CWd - 2 * PAD, 46, ID_IMUSTAT);
 
-  CardBox(L"Montage de l'IMU (une seule fois, sans lancer le suivi)", L"IMU mounting (once, without starting tracking)", X, 246, CWd, 296);
-  Label(L"Un seul bouton : clique, puis suis les consignes (compte à rebours, bip à chaque mesure). Tu as le temps de lâcher le casque : d'abord à plat, à l'endroit ; ensuite incliné d'environ 30° vers l'arrière (visière vers le haut) ou vers l'avant (visière vers le bas), selon la case ci-dessous. Chaque pose est mesurée sur 1 s.",
-        L"One button: click, then follow the prompts (countdown, a beep at each measurement). You have time to let go of the headset: first flat and the right way up, then tilted about 30 degrees backward (visor up) or forward (visor down), depending on the box below. Each pose is averaged over 1 s.", X + PAD, 286, CWd - 2 * PAD, 84);
-  Check(L"2e pose : visière vers le HAUT (décoche : visière vers le BAS)", L"2nd pose: visor UP (untick: visor DOWN)", X + PAD, 376, CWd - 2 * PAD, ID_M_NOSEUP);
-  Button(L"Calibrer le montage", L"Calibrate the mounting", X + PAD, 410, 316, 34, ID_M_STEP1);
-  Button(L"Annuler", L"Cancel", X + PAD + 328, 410, 316, 34, ID_M_STEP2);
-  Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 454, 644, 34, ID_M_RESET);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 496, CWd - 2 * PAD, 40, ID_MOUNTMSG);
+  CardBox(L"Montage de l'IMU (une seule fois, sans lancer le suivi)", L"IMU mounting (once, without starting tracking)", X, 206, CWd, 340);
+  Label(L"Clique sur Calibrer, puis suis les consignes (compte à rebours, un bip à chaque mesure) : d'abord le casque à plat, à l'endroit ; ensuite incliné d'environ 30° vers l'AVANT (comme pour regarder tes pieds). Chaque pose est mesurée sur 1 s. Contrôle ensuite avec le modèle : il doit pencher comme ton casque.",
+        L"Click Calibrate, then follow the prompts (countdown, a beep at each measurement): first the headset flat and the right way up, then tilted about 30 degrees FORWARD (as if looking at your feet). Each pose is averaged over 1 s. Then check with the model: it must tilt like your headset.", X + PAD, 244, CWd - 2 * PAD, 66);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + PVX, 318, PVW, PVH, ID_PVW_IMU);
+  Button(L"Calibrer le montage", L"Calibrate the mounting", X + COLX, 318, COLW, 34, ID_M_STEP1);
+  Button(L"Annuler", L"Cancel", X + COLX, 360, COLW, 34, ID_M_STEP2);
+  Button(L"Inverser avant / arrière", L"Swap front / back", X + COLX, 402, COLW, 34, ID_M_FLIP);
+  Button(L"Réinitialiser", L"Reset", X + COLX, 444, COLW, 34, ID_M_RESET);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 502, CWd - 2 * PAD, 38, ID_MOUNTMSG);
 
   CardBox(L"Calibration de la caméra", L"Camera calibration", X, 556, CWd, 138);
   Label(L"Dossier", L"Folder", X + PAD, 604, 160);
@@ -1765,9 +1765,10 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_A_YAW: SendCmd('Z'); break;
         case ID_A_SWAP: SendCmd('x'); break;
         case ID_A_CHECK: SendCmd('c'); break;
-        case ID_M_STEP1: QueueUdp(9877, IsChecked(ID_M_NOSEUP) ? "MOUNTU" : "MOUNT", EnsureProbe()); break;    // fonctionne sans suivi : le mode services lit l'IMU
+        case ID_M_STEP1: QueueUdp(9877, "MOUNT", EnsureProbe()); break;    // fonctionne sans suivi : le mode services lit l'IMU
         case ID_M_STEP2: QueueUdp(9877, "MOUNTX", EnsureProbe()); break;
         case ID_M_RESET: QueueUdp(9877, "0", EnsureProbe()); break;
+        case ID_M_FLIP: QueueUdp(9877, "MOUNTFLIP", EnsureProbe()); break;
       }
       return 0;
     }
@@ -1887,6 +1888,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   SetWindowLongPtrW(H(ID_PVW_CAM), GWLP_USERDATA, 1);
   SetWindowLongPtrW(H(ID_PVW_EYE), GWLP_USERDATA, 2);
   SetWindowLongPtrW(H(ID_PVW_MOUTH), GWLP_USERDATA, 3);
+  SetWindowLongPtrW(H(ID_PVW_IMU), GWLP_USERDATA, 4);
   ApplyTheme();
   ShowPage(0);
   // liste de langue

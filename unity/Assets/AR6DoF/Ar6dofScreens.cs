@@ -163,7 +163,7 @@ namespace AR6DoF
             float yaw = k == 0 ? 0f : ((k % 2 == 1) ? 1f : -1f) * 80f * ((k + 1) / 2);
             Vector3 d = Quaternion.Euler(0f, yaw, 0f) * FlatForward(h);
             Vector3 pos = h.position + d * startDistance;
-            pos.y = Mathf.Max(h.position.y + heightOffset, 0.9f) + row * (p.Height + 0.12f);
+            pos.y = Mathf.Max(h.position.y + heightOffset, Ar6dofSettings.Current.seated ? 0.4f : 0.9f) + row * (p.Height + 0.12f);
             p.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(d));
         }
 
@@ -174,7 +174,7 @@ namespace AR6DoF
             if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
             f.Normalize();
             Vector3 pos = h.position + f * startDistance;
-            pos.y = Mathf.Max(h.position.y + heightOffset, 0.9f);
+            pos.y = Mathf.Max(h.position.y + heightOffset, Ar6dofSettings.Current.seated ? 0.4f : 0.9f);
             p.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(f));
         }
 

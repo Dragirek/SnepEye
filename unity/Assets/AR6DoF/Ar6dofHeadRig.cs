@@ -17,6 +17,7 @@ namespace AR6DoF
         public bool useDetectedFloor = true;
         [Tooltip("Hauteur des yeux au-dessus du sol si le tracker n'a pas détecté le sol")]
         public float assumedEyeHeight = 1.65f;
+        public const float StandingEyeHeight = 1.65f, SeatedEyeHeight = 1.2f;
         [Header("Prédiction")]
         public bool predictToRenderTime = true;
         public float maxPredictSeconds = 0.1f;
@@ -56,6 +57,15 @@ namespace AR6DoF
         float assumedFloorG;
 
         public void Recenter() { wantRecenter = true; }
+
+        /// <summary>Mode assis : sans sol detecte, la hauteur des yeux supposee passe de debout (1,65 m) a assis (1,2 m) ; le sol est recalcule a partir de la tete maintenant.</summary>
+        public void SetSeated(bool seated)
+        {
+            float h = seated ? SeatedEyeHeight : StandingEyeHeight;
+            if (Mathf.Abs(assumedEyeHeight - h) < 1e-4f) return;
+            assumedEyeHeight = h;
+            haveAssumed = false;
+        }
 
         void OnEnable() { Application.onBeforeRender += Apply; }
         void OnDisable() { Application.onBeforeRender -= Apply; }

@@ -22,6 +22,8 @@ namespace AR6DoF
 
         protected override void OnRebuildStart() { padTexts.Clear(); }
 
+        public override void OnClosed() { var a = Ar6dofAudio.Instance; if (a != null) a.StopAllSounds(); }
+
         protected override void OnVisible(bool on) { if (!on) { edit = false; editing = null; confirmDel = false; } }
 
         protected override void BuildMain()

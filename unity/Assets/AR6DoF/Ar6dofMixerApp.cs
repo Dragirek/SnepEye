@@ -26,6 +26,8 @@ namespace AR6DoF
 
         public Ar6dofMixerApp(Ar6dofDock d) : base(d, "mixer", "Table de mixage", "mixer", "Volumes, muets, niveaux, spectre et lecteur de musique", 720f) { }
 
+        public override void OnClosed() { var a = Ar6dofAudio.Instance; if (a != null) a.StopMusic(); }
+
         protected override void OnRebuildStart() { bars.Clear(); barSel.Clear(); spec = null; seek = null; timeLbl = null; }
 
         protected override void BuildMain()

@@ -91,7 +91,7 @@ namespace AR6DoF
             foreach (var m in menus)
             {
                 var mm = m;
-                Tile(k++, tileW, "bluetooth", m.DisplayName, "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger.", () => dock.ToggleDeviceMenu(mm), () => mm.open, false);
+                Tile(k++, tileW, "bluetooth", m.DisplayName, "Menu de cet appareil Bluetooth : touche pour l'afficher ou le ranger.", () => dock.ToggleDeviceMenu(mm), () => dock.IsDocked(mm), false);
             }
             Tile(k, tileW, "plus", "Nouvel appareil", "Cree un menu pour un appareil Bluetooth (ventilateur, LED, telecommande...) : tu choisis l'appareil et ses boutons.", () => dock.NewDeviceMenu(), null, true);
 

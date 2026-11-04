@@ -48,6 +48,7 @@
 #include "mf_camera.h"
 #include "mount_auto.h"
 #include "mouth_tracker.h"
+#include "imu_view.h"
 #include "preview_share.h"
 #include "frame_share_win.h"
 #include "fusion.h"
@@ -483,11 +484,31 @@ struct MountCal {
   MountAuto au;   // calibration en un geste (commande MOUNT) : mesures moyennees, sans besoin de cliquer au bon moment
 };
 
+// Vue de l'IMU pour l'application (aperçu « IMU ») : pointeurs posés par le mode qui lit l'IMU, dernier message de calibration copié sous verrou.
+static ImuState* g_imuView = nullptr;
+static std::mutex g_viewMx;
+static std::string g_viewMsg;
+static std::atomic<bool> g_viewCal{false};
+static void SetViewMsg(const std::string& m, bool calibrating) { std::lock_guard<std::mutex> l(g_viewMx); g_viewMsg = m; g_viewCal = calibrating; }
+
+// Inverse l'avant et la gauche (rotation de 180 deg autour du haut) : pour corriger un montage pris dans le mauvais sens.
+static void FlipForward(MountCal& mc) {
+  if (!g_imuView) { mc.msg = "montage : IMU indisponible"; return; }
+  std::lock_guard<std::mutex> l(g_imuView->m);
+  Mat3 F;
+  F.m[0][0] = -1; F.m[1][1] = -1;   // avant -> arriere, gauche -> droite, haut inchange
+  g_imuView->mount = F * g_imuView->mount;
+  g_imuView->reinit = true;
+  SaveMount(g_imuView->mount);
+  mc.msg = "montage : avant et gauche inverses (sauvegarde). Penche le casque : le modele doit pencher comme lui.";
+}
+
 // Commandes texte MOUNT / MOUNTU (demarrent la calibration en un geste ; 2e pose visiere vers le bas / vers le haut) et MOUNTX (l'annule). Vrai si la ligne a ete traitee.
 static bool HandleMountLine(const std::string& line, MountCal& mc) {
   if (line == "MOUNT") { mc.au.Start(NowS(), mc.msg, false); mc.havePendingUp = false; return true; }    // pose 2 : visiere vers le bas
   if (line == "MOUNTU") { mc.au.Start(NowS(), mc.msg, true); mc.havePendingUp = false; return true; }    // pose 2 : visiere vers le haut
   if (line == "MOUNTX") { mc.au.Cancel(mc.msg); return true; }
+  if (line == "MOUNTFLIP") { FlipForward(mc); return true; }
   return false;
 }
 
@@ -564,8 +585,19 @@ static void PreviewPump(bool manage) {
     } else if (w == ar6pv::kMouth) {
       if (ar6mouth::Running() && ar6mouth::GetPreview(&m)) ar6pv::Shared().Publish(m);
       else ar6pv::Shared().PublishText("mouth tracking non configure : choisis la camera de bouche");
+    } else if (w == ar6pv::kImu) {
+      if (g_imuView) {
+        Quat q;
+        bool qok = false;
+        { std::lock_guard<std::mutex> l(g_imuView->m); q = g_imuView->q; qok = g_imuView->q_ok; }
+        std::string msg;
+        { std::lock_guard<std::mutex> l(g_viewMx); msg = g_viewMsg; }
+        ar6pv::Shared().Publish(ar6imu::Draw(q, qok, msg, g_viewCal));
+      } else {
+        ar6pv::Shared().PublishText("IMU non selectionnee");
+      }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds((w == ar6pv::kEyes || w == ar6pv::kMouth) ? 40 : 200));
+    std::this_thread::sleep_for(std::chrono::milliseconds((w == ar6pv::kEyes || w == ar6pv::kMouth || w == ar6pv::kImu) ? 40 : 200));
   }
   if (eyeAuto) send(eyeCmd, "EYE 0\n");
   if (mouthAuto) send(mouthCmd, "MOUTH 0\n");
@@ -630,6 +662,7 @@ static int RunServices() {
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");   // sinon l'ouverture d'une camera MSMF peut prendre plusieurs dizaines de secondes
   ImuState imu;
   imu.mount = LoadMount();
+  g_imuView = &imu;
   std::thread th;
   int pi = -1;
   auto ports = ListComPorts();
@@ -691,6 +724,7 @@ static int RunServices() {
     }
     TickMountAuto(imu, mcal);
     if (mcal.msg != lastMsg) { lastMsg = mcal.msg; std::cout << "[montage] " << mcal.msg << std::endl; }
+    SetViewMsg(mcal.msg, mcal.au.Active());
     const double now = NowS();
     if (now - lastStat >= 1.0) {
       lastStat = now;
@@ -940,6 +974,7 @@ int main(int argc, char** argv) {
 
   ImuState imu;
   imu.mount = LoadMount();
+  g_imuView = &imu;
   std::thread th;
 
   int frames = 0, fails = 0;
@@ -1284,6 +1319,7 @@ int main(int argc, char** argv) {
     }
     TickMountAuto(imu, mc);
     if (mc.msg != lastMountMsg) { lastMountMsg = mc.msg; std::cout << "[montage] " << mc.msg << std::endl; }
+    SetViewMsg(mc.msg, mc.au.Active());
     if (trackMsg != lastTrackMsg) { lastTrackMsg = trackMsg; std::cout << "[suivi] " << trackMsg << std::endl; }
     if (checkMsg != lastCheckMsg) { lastCheckMsg = checkMsg; std::cout << "[calibration] " << checkMsg << std::endl; }
   }

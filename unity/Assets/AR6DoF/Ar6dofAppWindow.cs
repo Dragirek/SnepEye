@@ -137,6 +137,8 @@ namespace AR6DoF
         public virtual void Destroy() { if (canvas != null) UnityEngine.Object.Destroy(canvas.gameObject); }
 
         protected virtual void OnVisible(bool on) { }
+        /// <summary>Appele quand l'application est fermee (pas seulement reduite) : arreter ici ce qu'elle faisait.</summary>
+        public virtual void OnClosed() { }
         protected virtual void OnTick() { }
         protected abstract void BuildMain();
 
@@ -172,8 +174,12 @@ namespace AR6DoF
                     break;
             }
             Ar6dofVrUi.FitHeight(canvas, y + 10f);
+            OnRebuilt();
             Refresh();
         }
+
+        /// <summary>Appele apres chaque reconstruction de la fenetre (tous ses elements sont crees).</summary>
+        protected virtual void OnRebuilt() { }
 
         /// <summary>Appelé juste avant la reconstruction : les classes dérivées oublient leurs références vers l'ancienne vue.</summary>
         protected virtual void OnRebuildStart() { }
