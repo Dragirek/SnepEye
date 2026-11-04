@@ -246,6 +246,22 @@ Même principe que les yeux : **désactivé par défaut**, une seule caméra (in
    - Coût nul tant que l'affichage n'est pas activé : aucune caméra, aucun maillage, aucun écran supplémentaire. Activé, il dessine un petit maillage par écran à chaque image.
 7. Les aperçus des yeux et de la bouche sont aussi dans le menu Unity (pages *Yeux* et *Bouche*), à la demande : rien n'est envoyé ni copié tant qu'on ne clique pas, et ça s'arrête en quittant la page ou en fermant le menu.
 
+## 11 ter. Store d'applications, audio, soundboard, table de mixage
+1. Dans le dock, l'icône **Store** (juste à gauche de la roue des réglages) liste les applications : *Ajouter* la place dans la barre, *Ouvrir* l'affiche, *Retirer* l'enlève. Une application fermée est désactivée (aucun calcul).
+2. Place `ar6dof_audio.exe` (livré avec `ar6dof_probe.exe` par le workflow) à côté de `ar6dof_probe.exe`. Rien d'autre à installer : le son passe par WASAPI et Media Foundation, déjà dans Windows.
+3. **Voix** : bouton *Moteur audio* (lance l'exe), onglet *General* : choisis le micro et **les enceintes externes** (pas le casque : il garde le son de Windows et de la RA). Onglets *Base* (gain, porte de bruit, compresseur), *Voix* (hauteur, robot, distorsion), *Espace* (écho, réverbération), *Filtres* (coupe-bas / haut, graves / medium / aigus), et des préselections. Le spectre montre le micro et ce qui sort.
+4. **Soundboard** : *Ajouter des sons* ouvre un navigateur de fichiers intégré (raccourcis, disques, dossiers ; plusieurs fichiers à la fois). *Edition* : touche un bouton pour régler nom, fichier, couleur, volume, vitesse, panoramique, boucle et taille en cases ; choisis la disposition (grille, liste, flux, cercle), le nombre de colonnes et la taille des boutons. Hors édition, un appui lance le son, sans couper ceux déjà en cours ; *Tout arrêter* les coupe.
+5. **Table de mixage** : volumes et muets de la voix, des sons, de la musique et du général avec leurs niveaux, spectre de la sortie ; onglet *Musique* : liste de lecture, lecture / pause, précédent / suivant, barre de position, répéter, aléatoire.
+6. Tout est enregistré dans `ar6dof_audio.json` (à côté de `Assets`) et dans les PlayerPrefs (applications installées).
+7. Si l'état reste « Le moteur audio ne répond pas » : `ar6dof_audio.exe` absent du dossier d'`ar6dof_probe.exe`, ou ports UDP 9890-9892 déjà pris.
+
+## 11 quater. Appareil photo, objets 3D et stickers
+Ces deux applications s'ajoutent depuis le **Store** (aucun nouveau réglage de scène). Le shader des objets est dans `Assets/AR6DoF/Resources/` : Unity l'ajoute tout seul au build, il n'y a rien à relancer dans le constructeur de scène.
+1. **Appareil photo** : choisis *Avec interfaces*, *Sans interfaces* ou *Les deux*, le minuteur, la qualité, le format (carré, 4:3, 16:9), *Les deux yeux (3D)* si tu veux les deux images côte à côte. *Prendre la photo* : la fenêtre disparaît une fraction de seconde, puis les PNG sont écrits dans `Images\AR6DoF\Photos` (bouton *Ouvrir le dossier*). La photo reprend l'image de la caméra **sans** la pré-déformation des lentilles du casque (comme une photo normale) ; « sans interfaces » = rien de virtuel du tout (ni fenêtres, ni objets 3D). Si la photo sort à l'envers, active *Retourner la photo* (dépend de ta carte graphique / de l'option *Inverser verticalement le rendu*).
+2. **Objets 3D** : *+ Modèle 3D* (`.obj`, avec son `.mtl` et ses textures dans le même dossier), *+ Sticker* (png / jpg), *+ Forme*. L'objet apparaît à 90 cm devant toi. *Déplacer au laser* : vise l'objet et garde le bouton appuyé. *Modifier* : onglet *Aspect* (fichier, teinte, taille, opacité, visible, éclairage, face à moi) et onglet *Position* (X / Y / Z, cap, inclinaison, roulis, plus près / plus loin). Tout est enregistré dans `%APPDATA%\AR6DoF\objects.json`.
+3. Les positions sont celles du **monde Unity de la session** (le suivi 6DoF repart de son point de départ à chaque lancement) : pour retrouver tes objets au même endroit, démarre le suivi depuis le même endroit.
+4. Modèles : l'axe X est inversé à la lecture (Blender → Unity), la taille est normalisée (la plus grande dimension vaut *Taille*). Fichiers de plus de 300 Mo refusés. Formats `.fbx`, `.glb` : à convertir en `.obj` pour l'instant.
+
 ## 12. Dépannage
 | Symptôme | Cause / remède |
 |---|---|

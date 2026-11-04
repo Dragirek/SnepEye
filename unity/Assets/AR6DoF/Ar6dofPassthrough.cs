@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
@@ -290,6 +292,136 @@ namespace AR6DoF
             if (settings.autoDelay && receiver != null && receiver.TryGetLatest(out var pd, out _) && pd.camDelay > 0.001f) d = pd.camDelay;
             DelayUsedMs = d * 1000.0;
             return d;
+        }
+
+        // ------------------------------------------------------------------ appareil photo
+        /// <summary>Réglages d'une photo (voir Ar6dofCameraApp).</summary>
+        public class PhotoOptions
+        {
+            public bool withUi = true, withoutUi = true;   // une photo avec les interfaces, une sans (ou les deux)
+            public bool stereo;                            // les deux yeux côte à côte (sinon : oeil gauche seul)
+            public bool flipV;                             // retourne la photo si elle sort à l'envers
+            public int size = 1440;                        // côté d'un oeil, en pixels
+            public float aspect = 1f;                      // largeur / hauteur (1, 4/3, 16/9) : rognage au centre
+            public string folder = "";
+        }
+
+        /// <summary>Dossier des photos : Images\AR6DoF\Photos (un sous-dossier, pour ne pas les melanger aux images de fond des styles).</summary>
+        public static string PhotosFolder { get { return Path.Combine(Ar6dofTheme.PicturesFolder, "Photos"); } }
+
+        public bool PhotoBusy { get; private set; }
+        Texture2D clearTex;
+
+        /// <summary>
+        /// Prend une photo de ce que tu vois : l'image de la caméra corrigée (sans la déformation des lentilles du casque, comme une vraie photo)
+        /// et, au choix, les interfaces par-dessus. 'delaySec' : minuteur. 'count' reçoit les secondes restantes, 'hideUi(true)' demande de masquer
+        /// les fenêtres juste avant la prise de vue (puis 'hideUi(false)' pour les remettre). 'done' reçoit les fichiers, une vignette et un éventuel message d'erreur.
+        /// </summary>
+        public void TakePhoto(PhotoOptions o, float delaySec, Action<int> count, Action<bool> hideUi, Action<List<string>, Texture2D, string> done)
+        {
+            if (PhotoBusy) return;
+            StartCoroutine(PhotoRoutine(o, delaySec, count, hideUi, done));
+        }
+
+        public void CancelPhoto() { cancelPhoto = true; }
+        bool cancelPhoto;
+
+        IEnumerator PhotoRoutine(PhotoOptions o, float delaySec, Action<int> count, Action<bool> hideUi, Action<List<string>, Texture2D, string> done)
+        {
+            PhotoBusy = true;
+            cancelPhoto = false;
+            float end = Time.unscaledTime + Mathf.Max(0f, delaySec);
+            while (Time.unscaledTime < end && !cancelPhoto)
+            {
+                if (count != null) count(Mathf.CeilToInt(end - Time.unscaledTime));
+                yield return null;
+            }
+            if (count != null) count(0);
+            if (cancelPhoto)
+            {
+                PhotoBusy = false;
+                if (done != null) done(new List<string>(), null, "Annule");
+                yield break;
+            }
+            if (hideUi != null) hideUi(true);
+            yield return null;
+            yield return null;                 // la scène est redessinée sans la fenêtre de l'appareil photo
+            yield return new WaitForEndOfFrame();
+
+            var files = new List<string>();
+            Texture2D thumb = null;
+            string err = null;
+            try
+            {
+                if (mat == null || compositeCam == null) throw new Exception("Passthrough pas pret");
+                string dir = string.IsNullOrEmpty(o.folder) ? PhotosFolder : o.folder;
+                Directory.CreateDirectory(dir);
+                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    bool ui = pass == 0;
+                    if (ui ? !o.withUi : !o.withoutUi) continue;
+                    Texture2D tex = Shoot(ui, o);
+                    string path = Path.Combine(dir, "ar6dof_" + stamp + (ui ? "_avec" : "_sans") + (o.stereo ? "_3d" : "") + ".png");
+                    File.WriteAllBytes(path, tex.EncodeToPNG());
+                    files.Add(path);
+                    if (thumb == null) thumb = tex; else Destroy(tex);
+                }
+            }
+            catch (Exception e) { err = e.Message; }
+            if (hideUi != null) hideUi(false);
+            PhotoBusy = false;
+            if (done != null) done(files, thumb, err);
+            else if (thumb != null) Destroy(thumb);
+        }
+
+        // Dessine une fois la composition dans une texture, sans les lentilles du casque (décalage, centre et distorsion à zéro).
+        Texture2D Shoot(bool withUi, PhotoOptions o)
+        {
+            int s = Mathf.Clamp(o.size, 256, 4096);
+            var rt = RenderTexture.GetTemporary(2 * s, s, 0, RenderTextureFormat.ARGB32);
+            var tmp = (Vector4[])U.Clone();
+            for (int e = 0; e < 2; e++)
+            {
+                int b = e * 10;
+                tmp[b + 0] = Vector4.zero;
+                tmp[b + 1] = new Vector4(0f, 0f, 0f, U[b + 1].w);
+            }
+            if (clearTex == null)
+            {
+                clearTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                clearTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 0f));
+                clearTex.Apply(false, false);
+            }
+            Texture2D res = null;
+            var prevActive = RenderTexture.active;
+            try
+            {
+                mat.SetVectorArray("_U", tmp);
+                mat.SetFloat("_Flip", o.flipV ? -1f : 1f);
+                if (!withUi) { mat.SetTexture("_SceneL", clearTex); mat.SetTexture("_SceneR", clearTex); }
+                compositeCam.targetTexture = rt;
+                compositeCam.Render();
+                compositeCam.targetTexture = null;
+
+                int h = Mathf.Clamp(Mathf.RoundToInt(s / Mathf.Max(1f, o.aspect)), 64, s);
+                int w = o.stereo ? 2 * s : s;
+                RenderTexture.active = rt;
+                res = new Texture2D(w, h, TextureFormat.RGB24, false);
+                res.ReadPixels(new Rect(0, (s - h) / 2, w, h), 0, 0, false);
+                res.Apply(false, false);
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                compositeCam.targetTexture = null;
+                mat.SetVectorArray("_U", U);
+                mat.SetFloat("_Flip", settings.flipComposite ? -1f : 1f);
+                mat.SetTexture("_SceneL", rtL);
+                mat.SetTexture("_SceneR", rtR);
+                RenderTexture.ReleaseTemporary(rt);
+            }
+            return res;
         }
 
         void UpdateRendering()

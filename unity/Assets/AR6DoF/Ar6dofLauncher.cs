@@ -39,6 +39,9 @@ namespace AR6DoF
             return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64", "ar6dof_probe.exe"));
         }
 
+        /// <summary>Dossier d'ar6dof_probe.exe (ar6dof_audio.exe doit être à côté).</summary>
+        public string ExeDirectory() { try { return Path.GetDirectoryName(ResolveExe()); } catch (System.Exception) { return ""; } }
+
         void Start() { if (launchOnStart) Launch(); }
 
         public void Launch()

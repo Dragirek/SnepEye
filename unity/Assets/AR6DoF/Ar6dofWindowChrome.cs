@@ -89,6 +89,63 @@ namespace AR6DoF
                             if (fx > 19f && fx < 45f && fy > 21.5f && fy < 25.5f) a = 1f;
                             break;
                         }
+                        case "store":
+                        {
+                            // sac de courses : corps arrondi et anse
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 26f, 22f, 17f, 6f)));
+                            float dh = Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 41f) * (fy - 41f));
+                            if (fy > 41f) a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dh - 11f)));
+                            break;
+                        }
+                        case "mic":
+                        {
+                            // micro : capsule, arceau et pied
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(SegDist(fx, fy, 32f, 38f, 32f, 44f) - 8f));
+                            float dc = Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 38f) * (fy - 38f));
+                            if (fy < 38f) a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dc - 14f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 32f, 24f, 32f, 12f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 22f, 11f, 42f, 11f)));
+                            break;
+                        }
+                        case "pads":
+                        {
+                            // quatre boutons de soundboard
+                            float[] cxs = { 19f, 45f, 19f, 45f }, cys = { 19f, 19f, 45f, 45f };
+                            for (int k = 0; k < 4; k++) a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, cxs[k], cys[k], 11f, 11f, 4f))));
+                            break;
+                        }
+                        case "mixer":
+                        {
+                            // table de mixage : trois glissieres et leurs curseurs
+                            float[] xs = { 16f, 32f, 48f }, ys = { 40f, 24f, 34f };
+                            for (int k = 0; k < 3; k++)
+                            {
+                                a = Mathf.Max(a, Mathf.Clamp01(2.6f - SegDist(fx, fy, xs[k], 10f, xs[k], 54f)));
+                                a = Mathf.Max(a, Mathf.Clamp01(2.0f - RRect(fx, fy, xs[k], ys[k], 7f, 4f, 2f)));
+                            }
+                            break;
+                        }
+                        case "camera":
+                        {
+                            // appareil photo : boitier, objectif et petite bosse
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 29f, 27f, 18f, 6f)));
+                            float dl = Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 29f) * (fy - 29f));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dl - 9f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 20f, 51f, 32f, 51f)));
+                            break;
+                        }
+                        case "cube":
+                        {
+                            // cube vu en perspective
+                            float[] px6 = { 32f, 54f, 54f, 32f, 10f, 10f }, py6 = { 57f, 44f, 20f, 7f, 20f, 44f };
+                            float md = 99f;
+                            for (int k = 0; k < 6; k++) md = Mathf.Min(md, SegDist(fx, fy, px6[k], py6[k], px6[(k + 1) % 6], py6[(k + 1) % 6]));
+                            md = Mathf.Min(md, SegDist(fx, fy, 32f, 32f, 54f, 44f));
+                            md = Mathf.Min(md, SegDist(fx, fy, 32f, 32f, 10f, 44f));
+                            md = Mathf.Min(md, SegDist(fx, fy, 32f, 32f, 32f, 7f));
+                            a = Mathf.Clamp01(2.6f - md);
+                            break;
+                        }
                         case "resize":
                         {
                             // 3 traits en diagonale dans le coin bas droit (le plus long est le plus loin du coin)

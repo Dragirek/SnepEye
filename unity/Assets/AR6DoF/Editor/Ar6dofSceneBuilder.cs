@@ -205,6 +205,7 @@ namespace AR6DoF
             var shScreen = Find<Shader>("Ar6dofScreen");
             var shFlat = Find<Shader>("Ar6dofFlat");
             var shRounded = Find<Shader>("Ar6dofRounded");
+            var shObject = Find<Shader>("Ar6dofObject");
             var model = Find<TextAsset>("camera_model");
             if (shComposite == null || shScreen == null) todo.Add("Les fichiers .shader d'AR6DoF sont introuvables : copie bien tout le dossier AR6DoF dans Assets.");
             if (model == null) todo.Add("Copie camera_model.json (a cote de ar6dof_probe.exe) dans Assets, puis glisse-le dans Rig > Ar6dof Passthrough > Camera Model Json.");
@@ -270,6 +271,7 @@ namespace AR6DoF
             AlwaysInclude(shScreen);
             AlwaysInclude(shFlat);
             if (shRounded != null) AlwaysInclude(shRounded);
+            if (shObject != null) AlwaysInclude(shObject);
             PlayerSettings.runInBackground = true;
             OptimizeGraphics();
             if (ForceD3D11()) todo.Insert(0, "REDEMARRE UNITY : l'API graphique a ete reglee sur Direct3D11 (obligatoire, sinon les ecrans virtuels font planter Unity).");
