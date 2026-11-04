@@ -68,6 +68,7 @@ namespace AR6DoF
         readonly List<Button> chipButtons = new List<Button>();
         readonly List<Image> chipSwatches = new List<Image>();
         readonly List<Button> subButtons = new List<Button>();
+        readonly List<GameObject> styleDots = new List<GameObject>();   // un point par catégorie de Style (Couleurs, Forme, Fenetres, Clavier)
         readonly List<Button> chromeStyleButtons = new List<Button>();
         readonly List<Button> chromeCornerButtons = new List<Button>();
         readonly List<Button> fpsBtns = new List<Button>();
@@ -594,6 +595,51 @@ namespace AR6DoF
             return ScopeDirty(pg);
         }
 
+        static readonly string[] StyleElemFields = { "global", "dock", "menus", "keyboard", "screens", "laser" };
+
+        // 'global' est un style ; dock, menus, clavier, ecrans et laser sont des Ar6dofElemStyle qui contiennent le leur
+        static Ar6dofStyle StyleOf(object o)
+        {
+            var st = o as Ar6dofStyle;
+            if (st != null) return st;
+            var es = o as Ar6dofElemStyle;
+            return es != null ? es.style : null;
+        }
+
+        static string StyleSig(Ar6dofStyle s, bool colors)
+        {
+            if (s == null) return "";
+            if (colors)
+                return ColorUtility.ToHtmlStringRGBA(s.bg) + ColorUtility.ToHtmlStringRGBA(s.button) + ColorUtility.ToHtmlStringRGBA(s.accent) + ColorUtility.ToHtmlStringRGBA(s.text) + "|" + s.alpha.ToString("0.000");
+            return s.corner + "|" + s.texture + "|" + s.texAlpha.ToString("0.000") + "|" + s.texMode + "|" + s.texScale.ToString("0.000") + "|" + s.lineWidth.ToString("0.0000");
+        }
+
+        /// <summary>Une catégorie de Style a-t-elle des changements non enregistrés ? (0 Couleurs, 1 Forme, 2 Fenetres, 3 Clavier)</summary>
+        bool StyleSubDirty(int k)
+        {
+            if (k >= 3) return Ar6dofSettings.DirtyFields(KbFields);
+            if (k == 2) return Ar6dofSettings.DirtyFields(ChromeFields);
+            var cur = Ar6dofSettings.Current;
+            var sv = Ar6dofSettings.SavedSnapshot();
+            var t = typeof(Ar6dofSettingsData);
+            foreach (string name in StyleElemFields)
+            {
+                var fi = t.GetField(name);
+                if (fi == null) continue;
+                if (StyleSig(StyleOf(fi.GetValue(cur)), k == 0) != StyleSig(StyleOf(fi.GetValue(sv)), k == 0)) return true;
+            }
+            if (k == 0 && Ar6dofSettings.DirtyFields(new[] { "customStyles" })) return true;
+            // « separate » (un element a son propre style) : dans Couleurs
+            if (k == 0)
+                foreach (string name in StyleElemFields)
+                {
+                    var a = t.GetField(name).GetValue(cur) as Ar6dofElemStyle;
+                    var b = t.GetField(name).GetValue(sv) as Ar6dofElemStyle;
+                    if (a != null && b != null && a.separate != b.separate) return true;
+                }
+            return false;   // « Mes styles » : dans Couleurs
+        }
+
         /// <summary>Modifications non enregistrées dans la portée de cette page (pour Style : la sous-page affichée).</summary>
         bool ScopeDirty(int pg)
         {
@@ -611,6 +657,7 @@ namespace AR6DoF
             bool anyDirty = false;
             var dirtyPage = new bool[PageCount];
             for (int p = 0; p < PageCount; p++) { dirtyPage[p] = PageDirty(p); anyDirty |= dirtyPage[p]; }
+            for (int i = 0; i < styleDots.Count; i++) if (styleDots[i] != null) styleDots[i].SetActive(StyleSubDirty(i));   // Style : la catégorie concernée
             // les points : un par bouton de sous-page, un par onglet
             foreach (var kv in subDots) if (kv.Value != null) kv.Value.SetActive(dirtyPage[kv.Key]);
             for (int t = 0; t < tabDots.Count; t++)
@@ -1402,7 +1449,9 @@ namespace AR6DoF
             for (int i = 0; i < cats.Length; i++)
             {
                 int k = i;
-                subButtons.Add(Btn(page, Col4(i), Start - 23f, 156f, cats[i], () => SelectSub(k), 22, 46f));
+                var sb = Btn(page, Col4(i), Start - 23f, 156f, cats[i], () => SelectSub(k), 22, 46f);
+                subButtons.Add(sb);
+                styleDots.Add(Dot(sb.transform, new Vector2(60f, 15f)));
             }
 
             // ---- à quoi ça s'applique (Couleurs et Forme)

@@ -89,12 +89,12 @@ namespace AR6DoF
                             if (fx > 19f && fx < 45f && fy > 21.5f && fy < 25.5f) a = 1f;
                             break;
                         }
-                        case "store":
+                        case "apps":
                         {
-                            // sac de courses : corps arrondi et anse
-                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 26f, 22f, 17f, 6f)));
-                            float dh = Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 41f) * (fy - 41f));
-                            if (fy > 41f) a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dh - 11f)));
+                            // grille de neuf carres : toutes les applications
+                            for (int gy = 0; gy < 3; gy++)
+                                for (int gx = 0; gx < 3; gx++)
+                                    a = Mathf.Max(a, Mathf.Clamp01(2.0f - RRect(fx, fy, 14f + gx * 18f, 14f + gy * 18f, 7f, 7f, 2.5f)));
                             break;
                         }
                         case "mic":
@@ -394,7 +394,16 @@ namespace AR6DoF
             var d = Ar6dofSettings.Current;
             bool mac = d.chromeStyle == 1;
             Vector2 hs = halfSize();
-            transform.SetPositionAndRotation(target.position, target.rotation);
+            // Un menu dont le pivot n'est pas au centre (pivot en haut : le haut reste en place quand la hauteur change) : les boutons se placent
+            // autour du CENTRE de la fenetre, pas autour de son pivot. Sans ce decalage ils flottent loin de la fenetre.
+            Vector3 centre = Vector3.zero;
+            var trt = target as RectTransform;
+            if (trt != null && trt.GetComponent<Canvas>() != null)
+            {
+                Vector2 full = trt.rect.size * target.lossyScale.x;
+                centre = new Vector3((0.5f - trt.pivot.x) * full.x, (0.5f - trt.pivot.y) * full.y, 0f);
+            }
+            transform.SetPositionAndRotation(target.position + target.rotation * centre, target.rotation);
             int corner = Mathf.Clamp(d.chromeCorner, 0, 3);
             bool right = corner == 1 || corner == 3;
             bool top = corner == 0 || corner == 1;

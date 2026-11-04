@@ -747,6 +747,9 @@ namespace AR6DoF
             "Modele illisible => Unreadable model",
             "Image illisible => Unreadable image",
             "Apprentissage guide de la bouche, matrice de LED sur ESP32, servomoteurs. => Guided mouth learning, LED matrix on ESP32, servo motors.",
+            "Apps => Apps",
+            "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => All applications: touch one to open or put it away",
+            "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Touch an application to open it; it then takes its place in the bar. Touch it again to put it away: a stored application uses nothing.",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -1484,6 +1487,9 @@ namespace AR6DoF
             "Modele illisible => Modelo ilegible",
             "Image illisible => Imagen ilegible",
             "Apprentissage guide de la bouche, matrice de LED sur ESP32, servomoteurs. => Aprendizaje guiado de la boca, matriz de LED en ESP32, servomotores.",
+            "Apps => Apps",
+            "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Todas las aplicaciones: toca una para abrirla o guardarla",
+            "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Toca una aplicacion para abrirla; ocupa entonces su lugar en la barra. Tocala de nuevo para guardarla: una aplicacion guardada no consume nada.",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -2228,6 +2234,9 @@ namespace AR6DoF
             "Modele illisible => Modell nicht lesbar",
             "Image illisible => Bild nicht lesbar",
             "Apprentissage guide de la bouche, matrice de LED sur ESP32, servomoteurs. => Gefuehrtes Mund-Lernen, LED-Matrix am ESP32, Servomotoren.",
+            "Apps => Apps",
+            "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Alle Anwendungen: tippe eine an, um sie zu oeffnen oder wegzulegen",
+            "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Tippe eine Anwendung an, um sie zu oeffnen; sie erscheint dann in der Leiste. Erneut antippen legt sie weg: eine weggelegte Anwendung verbraucht nichts.",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -2972,6 +2981,9 @@ namespace AR6DoF
             "Modele illisible => Modello illeggibile",
             "Image illisible => Immagine illeggibile",
             "Apprentissage guide de la bouche, matrice de LED sur ESP32, servomoteurs. => Apprendimento guidato della bocca, matrice LED su ESP32, servomotori.",
+            "Apps => App",
+            "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Tutte le applicazioni: tocca per aprirla o riporla",
+            "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Tocca un'applicazione per aprirla: prende posto nella barra. Toccala di nuovo per riporla: un'applicazione riposta non consuma nulla.",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -3715,6 +3727,9 @@ namespace AR6DoF
             "Modele illisible => Modelo ilegivel",
             "Image illisible => Imagem ilegivel",
             "Apprentissage guide de la bouche, matrice de LED sur ESP32, servomoteurs. => Aprendizado guiado da boca, matriz de LED no ESP32, servomotores.",
+            "Apps => Apps",
+            "Toutes les applications : touche-en une pour l'ouvrir ou la ranger => Todos os aplicativos: toque em um para abrir ou guardar",
+            "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien. => Toque em um aplicativo para abri-lo; ele ocupa seu lugar na barra. Toque de novo para guarda-lo: um aplicativo guardado nao consome nada.",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

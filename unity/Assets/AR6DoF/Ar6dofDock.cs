@@ -91,9 +91,8 @@ namespace AR6DoF
         KeyboardApp kbApp;
         CanvasApp settingsApp;
         Ar6dofVrSettings vrSettings;
-        readonly List<Ar6dofAppWindow> windows = new List<Ar6dofAppWindow>();     // applications ajoutees depuis le Store
-        readonly HashSet<string> installed = new HashSet<string>();
-        Ar6dofStoreApp storeApp;
+        readonly List<Ar6dofAppWindow> windows = new List<Ar6dofAppWindow>();     // toutes les applications du catalogue (Ar6dofCatalog) : dans la barre seulement quand elles sont ouvertes
+        Ar6dofAppsApp appsApp;
         bool built;
         float waitStart = -1f;
         int lastSig = -1;
@@ -144,7 +143,7 @@ namespace AR6DoF
             foreach (var a in apps) if (a.statusDot != null) a.statusDot.color = a.StatusColor;
             if (vrSettings != null) vrSettings.Tick();
             for (int i = 0; i < windows.Count; i++) if (windows[i].open) windows[i].Tick();
-            if (storeApp != null && storeApp.open) storeApp.Tick();
+            if (appsApp != null && appsApp.open) appsApp.Tick();
         }
 
         const float BarHeight = 200f;
@@ -217,7 +216,7 @@ namespace AR6DoF
             else canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
             foreach (var a in apps) SetIndicator(a);
             SetIndicator(settingsApp);
-            if (storeApp != null) SetIndicator(storeApp);
+            if (appsApp != null) SetIndicator(appsApp);
             UpdateGearLook();
         }
 
@@ -281,12 +280,17 @@ namespace AR6DoF
             devMenus.dock = this;
             devMenus.Load();
 
-            // moteur audio (inactif tant qu'il n'est pas active), Store et applications installees
+            // moteur audio (inactif tant qu'il n'est pas active), hub Apps et toutes les applications (fermees : une icone dans Apps, rien d'autre)
             audioEngine = GetComponent<Ar6dofAudio>();
             if (audioEngine == null) audioEngine = gameObject.AddComponent<Ar6dofAudio>();
-            storeApp = new Ar6dofStoreApp(this);
-            AdoptWindow(storeApp, 0f);
-            LoadInstalled();
+            appsApp = new Ar6dofAppsApp(this);
+            AdoptWindow(appsApp, 0f);
+            foreach (var e in Ar6dofCatalog.Entries)
+            {
+                var w = e.make(this);
+                AdoptWindow(w, e.yaw);
+                windows.Add(w);
+            }
 
             Place();
             ApplyReveal();
@@ -311,7 +315,7 @@ namespace AR6DoF
             if (kbApp != null) yield return kbApp;
             foreach (var m in devMenus.menus) yield return m;
             foreach (var w in windows) yield return w;
-            if (storeApp != null) yield return storeApp;
+            if (appsApp != null) yield return appsApp;
             yield return settingsApp;
         }
 
@@ -410,7 +414,7 @@ namespace AR6DoF
             }
             if (kbApp != null) groups.Add(new List<Ar6dofDockApp> { kbApp });
             foreach (var m in devMenus.menus) groups.Add(new List<Ar6dofDockApp> { m });
-            foreach (var w in windows) groups.Add(new List<Ar6dofDockApp> { w });
+            foreach (var w in windows) if (w.open) groups.Add(new List<Ar6dofDockApp> { w });   // une application fermee n'est que dans Apps
             foreach (var g in groups) apps.AddRange(g);
 
             const float size = 96f, inCluster = 102f, between = 116f, gearSize = 116f;
@@ -426,8 +430,9 @@ namespace AR6DoF
                     xs.Add(cx);
                 }
             float addX = (first ? size * 0.5f : cx + between);
-            float storeX = addX + between;                                         // le Store est juste à gauche des réglages
-            float gearX = storeX + between * 0.5f + 34f + gearSize * 0.5f;      // la roue est séparée de tout le reste
+            float sepX = addX + size * 0.5f + 26f;                                 // le separateur isole le groupe de droite : Apps et reglages
+            float appsX = sepX + 26f + size * 0.5f;                                // Apps : juste a gauche de la roue des reglages
+            float gearX = appsX + size * 0.5f + 12f + gearSize * 0.5f;
             float total = gearX + gearSize * 0.5f;
             float barW = Mathf.Max(680f, total + 60f);
             barRt.sizeDelta = new Vector2(barW, BarHeight);
@@ -451,13 +456,13 @@ namespace AR6DoF
             xi = 0;
             foreach (var g in groups) foreach (var a in g) { MakeIcon(a, xs[xi] + shift, size, false); xi++; }
             MakeAddButton(addX + shift, size);
-            if (storeApp != null) MakeIcon(storeApp, storeX + shift, size, false);
+            if (appsApp != null) MakeIcon(appsApp, appsX + shift, size, false);
 
             // séparateur + roue des réglages : plus grande, en couleur d'accent, à part
             var sep = new GameObject("Separateur", typeof(RectTransform));
             sep.transform.SetParent(iconsRoot, false);
             var srt = (RectTransform)sep.transform;
-            srt.anchoredPosition = new Vector2((storeX + size * 0.5f + gearX - gearSize * 0.5f) * 0.5f + shift + 4f, -26f);
+            srt.anchoredPosition = new Vector2(sepX + shift, -26f);
             srt.sizeDelta = new Vector2(4f, 120f);
             var simg = sep.AddComponent<Image>();
             simg.raycastTarget = false;
@@ -605,7 +610,7 @@ namespace AR6DoF
             }
             else if (a is Ar6dofAppWindow)
             {
-                // application du Store : son dessin et son nom
+                // application (Apps, camera...) : son dessin et son nom
                 var aw = (Ar6dofAppWindow)a;
                 var g = new GameObject("Glyphe", typeof(RectTransform));
                 g.transform.SetParent(rt, false);
@@ -670,6 +675,9 @@ namespace AR6DoF
         IEnumerator Animate(Ar6dofDockApp app, bool show)
         {
             animating.Add(app);
+            var win = app as Ar6dofAppWindow;
+            bool inCatalog = win != null && windows.Contains(win);
+            if (show && inCatalog) { app.open = true; RebuildIcons(); }   // l'application ouverte prend sa place dans la barre : l'animation part de son icone
             Transform t = app.AnimRoot;
             RectTransform icon;
             iconOf.TryGetValue(app, out icon);
@@ -695,6 +703,7 @@ namespace AR6DoF
             }
             if (app is KeyboardApp || app == settingsApp) PlayerPrefs.SetInt("ar6dof_dock_open_" + app.title, app.open ? 1 : 0);
             animating.Remove(app);
+            if (inCatalog && !show) RebuildIcons();   // rangee : son icone quitte la barre (elle reste dans Apps)
         }
 
         // ------------------------------------------------------------------ placement
@@ -725,61 +734,21 @@ namespace AR6DoF
             canvas.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(dir) * Quaternion.Euler(20f, 0f, 0f));   // légèrement inclinée vers tes yeux
         }
 
-        // ------------------------------------------------------------------ Store : applications installées
-        const string InstalledKey = "ar6dof_store_installed";
-
-        void LoadInstalled()
+        // ------------------------------------------------------------------ Apps : toutes les applications
+        /// <summary>L'application est-elle affichee ?</summary>
+        public bool IsOpen(string id)
         {
-            string csv = "";
-            try { csv = PlayerPrefs.GetString(InstalledKey, ""); } catch (Exception) { }
-            foreach (var id in csv.Split(','))
-            {
-                if (id.Length == 0 || installed.Contains(id)) continue;
-                var e = Ar6dofCatalog.Find(id);
-                if (e == null) continue;
-                var w = e.make(this);
-                AdoptWindow(w, e.yaw);
-                windows.Add(w);
-                installed.Add(id);
-            }
+            foreach (var w in windows) if (w.id == id) return w.open;
+            return false;
         }
 
-        void SaveInstalled()
+        /// <summary>Ouvre l'application si elle est rangee, la range si elle est ouverte.</summary>
+        public void ToggleApp(string id)
         {
-            try { PlayerPrefs.SetString(InstalledKey, string.Join(",", new List<string>(installed).ToArray())); PlayerPrefs.Save(); } catch (Exception) { }
+            foreach (var w in windows) if (w.id == id) { Toggle(w); return; }
         }
 
-        public bool IsInstalled(string id) { return installed.Contains(id); }
-
-        public void SetInstalled(string id, bool on)
-        {
-            if (on == installed.Contains(id)) return;
-            if (on)
-            {
-                var e = Ar6dofCatalog.Find(id);
-                if (e == null) return;
-                var w = e.make(this);
-                AdoptWindow(w, e.yaw);
-                windows.Add(w);
-                installed.Add(id);
-            }
-            else
-            {
-                Ar6dofAppWindow w = null;
-                foreach (var x in windows) if (x.id == id) w = x;
-                if (w != null)
-                {
-                    if (w.open) { w.Activate(false); w.open = false; }
-                    windows.Remove(w);
-                    w.Destroy();
-                }
-                installed.Remove(id);
-            }
-            SaveInstalled();
-            RebuildIcons();
-        }
-
-        /// <summary>Affiche une application installée (sans effet si elle l'est déjà).</summary>
+        /// <summary>Affiche une application (sans effet si elle l'est deja).</summary>
         public void OpenApp(string id)
         {
             foreach (var w in windows) if (w.id == id && !w.open) { Toggle(w); return; }

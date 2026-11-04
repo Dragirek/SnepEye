@@ -202,6 +202,9 @@ namespace AR6DoF
             return d;
         }
 
+        /// <summary>Copie des réglages tels qu'enregistrés (pour comparer avec les réglages en aperçu).</summary>
+        public static Ar6dofSettingsData SavedSnapshot() { return SavedCopy(); }
+
         /// <summary>Vrai si l'un de ces champs a été modifié depuis le dernier enregistrement.</summary>
         public static bool DirtyFields(string[] fields)
         {

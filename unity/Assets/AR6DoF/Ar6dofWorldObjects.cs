@@ -158,7 +158,7 @@ namespace AR6DoF
                         {
                             int vi, ti, ni;
                             if (!ParseIdx(t[k], P.Count, T.Count, N.Count, out vi, out ti, out ni)) { poly.Clear(); break; }
-                            ulong key = (ulong)(vi + 1) | ((ulong)(ti + 1) << 21) | ((ulong)(ni + 1) << 42);
+                            ulong key = (ulong)(uint)(vi + 1) | ((ulong)(uint)(ti + 1) << 21) | ((ulong)(uint)(ni + 1) << 42);
                             int mi;
                             if (!cache.TryGetValue(key, out mi))
                             {
