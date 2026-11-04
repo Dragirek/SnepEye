@@ -36,10 +36,10 @@ Lance **`ar6dof_app.exe`** (double-clic, dans le même dossier qu'`ar6dof_probe.
 - **Langue** : français ou English (liste en bas à droite ; par défaut la langue de Windows).
 - **Caméra** : **Type** = *un module double* (une seule caméra qui donne l'image gauche | droite, comme une ELP) ou *deux caméras séparées* (tu choisis la gauche et la droite ; leurs images sont collées côte à côte, et comme elles ne sont pas synchronisées par le matériel, le suivi sera un peu moins précis qu'avec un module). La liste **Mode** est lue **sur la caméra** (modes MJPEG que Windows lui voit : taille et cadence réelles) ; avec deux caméras, seuls les modes communs aux deux sont proposés. Si la caméra ne répond pas (déjà utilisée par le suivi), des modes courants sont affichés à la place : arrête le suivi puis *Actualiser*. Ta taille perso reste possible (entrée *Personnalisé*). **Port de l'IMU** dans une liste (*Actualiser* si tu viens de brancher quelque chose) ; **cases à cocher** pour le reste (partage de l'image, télécommande Bluetooth, démarrage automatique du suivi, lecteur direct Media Foundation, eye tracking avec ses deux caméras...). *Parcourir…* pour le dossier de calibration, et la base réelle entre les objectifs en mm.
 - **Enregistrer** écrit `ar6dof_config.txt` (le fichier qu'Unity et `ar6dof_probe --auto` rejouent). **Démarrer le suivi** enregistre puis lance `ar6dof_probe.exe` **sans console ni fenêtres flottantes** ; le même bouton devient **Arrêter**. En bas : le journal du programme et ses statistiques en direct (caméra, suivi, délai, CPU).
-- **Montage de l'IMU** (une seule fois) : bouton *1* casque à plat, puis bouton *2* casque penché en avant. **Pendant le suivi**, des boutons remplacent les touches du clavier : redémarrer le suivi (T), verrouiller le sol (V), cap à zéro (Z), inverser gauche / droite (X), vérifier la calibration (C).
-- *Fenêtres de diagnostic OpenCV* (décoché par défaut) rouvre les anciennes fenêtres de contrôle si tu en as besoin ; elles utilisent plus de CPU.
+- **Montage de l'IMU** (une seule fois) : bouton *1* casque à plat, puis bouton *2* casque penché en avant. **Sans lancer le suivi** : l'application démarre alors `ar6dof_probe --services`, un mode léger (pas de caméra stéréo, pas de Bluetooth, pas de passthrough, seulement l'IMU) qui s'arrête tout seul quand tu n'en as plus besoin. **Pendant le suivi**, des boutons remplacent les touches du clavier : redémarrer le suivi, verrouiller le sol, cap à zéro, inverser gauche / droite, vérifier la calibration.
+- **Aperçus des caméras** dans l'application (pages *Caméra* et *Yeux*) : image stéréo, caméras d'oeil, caméra de bouche, dans la fenêtre même (plus de fenêtres OpenCV flottantes). L'aperçu n'existe que tant que tu le regardes : `ar6dof_probe` ne copie et n'écrit aucune image sans demande (`PV n` en UDP 9877, renouvelé chaque demi-seconde, expire après 3 s ; mémoire partagée `Local\ar6dof_preview`, 800x300).
+- **Étalonnage des yeux et de la bouche sans lancer le suivi** : boutons dans les pages *Yeux* et *Bouche*. L'étalonnage des yeux se fait en plein écran (9 points) ; il utilise un champ de vision d'écran approximatif (réglable, 60° par défaut) : celui fait dans Unity, dans le casque, est plus fidèle. Les anciennes touches du clavier et les fenêtres OpenCV (`--no-windows` ne sert plus à rien, il est accepté sans effet) ont été retirées.
 - La fenêtre arrête le programme qu'elle a lancé quand tu la fermes (sauf *Laisser tourner quand je ferme cette fenêtre*). Quand Unity lance lui-même `ar6dof_probe.exe` (Launcher), l'application peut rester ouverte : ses boutons d'action fonctionnent aussi.
-- L'ancienne méthode (double-clic sur `ar6dof_probe.exe`, questions dans la console) fonctionne toujours.
 - **Deux .exe, c'est normal** : `ar6dof_probe.exe` est le **moteur** (caméra, IMU, suivi 6DoF, envoi vers Unity, télécommande) ; `ar6dof_app.exe` est la **fenêtre de contrôle** qui le règle et le lance. Garde-les dans le même dossier. Unity n'a besoin que du moteur (le Launcher le démarre avec la configuration enregistrée).
 - Look **Windows 11** : navigation à gauche par pages (*Caméra, Capteurs, Unity, Yeux, Suivi, Avancé*), réglages dans des cartes arrondies, cases à cocher et bouton principal à la **couleur d'accentuation de Windows**. La fenêtre suit le **thème de Windows** (mode sombre ou clair, barre de titre comprise) et change toute seule si tu modifies le réglage pendant qu'elle est ouverte.
 - **Suivi démarré tout seul** (case cochée par défaut) : sans suivi, Unity n'a pas de position, mais le dock et les écrans s'affichent quand même (devant toi) après 2 secondes ; le dock reste alors visible en permanence.
@@ -219,7 +219,7 @@ Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit
 
 ## 11. Eye tracking (2 caméras d'oeil infrarouges)
 **Désactivé par défaut** : aucun port, aucun thread, caméras arrêtées.
-1. Dans ar6dof_probe (à la main, une fois) : *Eye tracking* = **1**, puis les numéros des caméras gauche et droite (ceux de la liste affichée au démarrage).
+1. Dans `ar6dof_app.exe`, page *Yeux* : coche *Eye tracking*, choisis les caméras gauche et droite, *Enregistrer*. Tu peux y étalonner et voir les caméras sans lancer le suivi.
 2. Roue > onglet **Appareils** > *Eye tracking* > *Eye tracking actif*. L'onglet montre l'état (programme en ligne, cadence, pupille vue ou non).
 3. **Etalonner (9 points)** : garde la tête immobile et suis des yeux le point noir au centre de la cible (orange = attends, vert = mesure). A la fin : l'erreur en degrés
    (bon : moins de 1,5) et un point vert qui suit ton regard. Enregistré dans `ar6dof_eye_cal.txt` ; à refaire si le casque bouge sur ta tête.
@@ -229,6 +229,16 @@ Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit
 6. Réglages de détection et de lissage : `ar6dof_eye.txt` à côté de l'exe.
 
 ---
+
+## 11 bis. Mouth tracking (caméra de bouche)
+Même principe que les yeux : **désactivé par défaut**, une seule caméra (indice `mouthcam` dans `ar6dof_config.txt`, -1 = aucune), rien ne tourne tant qu'il n'est pas activé.
+1. Dans l'application : page *Bouche* (numéro de caméra, cadence), *Enregistrer*. Ou dans Unity : roue > **Appareils** > **Bouche** > *Mouth tracking actif*.
+2. **Aperçu** (bouton *Voir l'apercu*) : la caméra ne tourne que pendant l'aperçu si le suivi n'était pas activé ; en quittant la page, tout est remis comme avant.
+3. **Étalonnage** : 4 étapes (bouche neutre, grande ouverture, sourire large, bouche serrée ; 1 s pour prendre la pose puis 1,5 s de mesure). Les étapes 1 et 2 suffisent pour l'ouverture. Enregistré dans `ar6dof_mouth_cal.txt`.
+4. Pour tes animations : `Ar6dofMouthTracker.Instance.Mouth` à chaque image : `jawOpen` (0 fermée, 1 ouverte), `wide` (-1 serrée, +1 sourire), `side` (mâchoire gauche / droite), `vert`, `valid`, `calibrated`.
+5. Ports UDP locaux : 9886 données (36 octets, `MTH1`), 9887 commandes (`MOUTH 1|0`, `MCAL neutral|open|wide|narrow`, `MCAL_CLEAR`), 9888 évènements. Réglages de détection : `ar6dof_mouth.txt` (`dark_ratio`, `min_area`, `max_area`, `smooth`, `reactivity`, `roi`, `fourcc`).
+6. Méthode : vision classique (cavité sombre de la bouche au seuil adaptatif + lissage One Euro), donc **approximative** : il faut un bon éclairage (ou de l'IR) et une caméra qui voit bien la bouche ; ajuste `dark_ratio` si la détection décroche.
+7. Les aperçus des yeux et de la bouche sont aussi dans le menu Unity (pages *Yeux* et *Bouche*), à la demande : rien n'est envoyé ni copié tant qu'on ne clique pas, et ça s'arrête en quittant la page ou en fermant le menu.
 
 ## 12. Dépannage
 | Symptôme | Cause / remède |

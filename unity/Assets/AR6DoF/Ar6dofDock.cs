@@ -68,6 +68,7 @@ namespace AR6DoF
         public Ar6dofLauncher launcher;
         [HideInInspector] public Ar6dofEyeTracker eyes;           // eye tracking (créé automatiquement, inactif tant qu'on ne l'active pas)
         [HideInInspector] public Ar6dofEyeCalibration eyeCal;
+        [HideInInspector] public Ar6dofMouthTracker mouth;       // mouth tracking (créé automatiquement, inactif tant qu'on ne l'active pas)
         public float animSeconds = 0.25f;
         public float distance = 1.0f;
 
@@ -251,6 +252,8 @@ namespace AR6DoF
             }
             if (eyes == null) eyes = GetComponent<Ar6dofEyeTracker>();
             if (eyes == null) eyes = gameObject.AddComponent<Ar6dofEyeTracker>();
+            if (mouth == null) mouth = GetComponent<Ar6dofMouthTracker>();
+            if (mouth == null) mouth = gameObject.AddComponent<Ar6dofMouthTracker>();
             if (eyeCal == null) eyeCal = GetComponent<Ar6dofEyeCalibration>();
             if (eyeCal == null) eyeCal = gameObject.AddComponent<Ar6dofEyeCalibration>();
             vrSettings = new Ar6dofVrSettings(this);

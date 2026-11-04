@@ -176,7 +176,7 @@ inline bool MountStep1(const Vec3& acc, const Vec3& gyr, Vec3& up_s, std::string
   int i = MaxAxis(acc);
   if (std::abs(Comp(acc, i)) / n < 0.9) { msg = "etape 1 : pose le casque bien a plat (< 25 deg d'inclinaison)"; return false; }
   up_s = AxisVec(i, Comp(acc, i));
-  msg = "etape 1 OK : haut = " + AxisName(up_s) + ". Penche maintenant le casque vers l'avant (~30 deg), immobile, puis touche f";
+  msg = "etape 1 OK : haut = " + AxisName(up_s) + ". Penche maintenant le casque vers l'avant (~30 deg), immobile, puis clique sur Etape 2";
   return true;
 }
 

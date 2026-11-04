@@ -18,6 +18,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <future>
@@ -44,6 +46,8 @@
 #include "floor.h"
 #include "frame_clock.h"
 #include "mf_camera.h"
+#include "mouth_tracker.h"
+#include "preview_share.h"
 #include "frame_share_win.h"
 #include "fusion.h"
 #include "imu_parser.h"
@@ -367,62 +371,6 @@ static void CaptureThread(std::function<bool(cv::Mat&)> grab, Mailbox* mb, Frame
   }
 }
 
-// Modèle 3D "casque" + axes + sol, dessiné avec OpenCV (pas de dépendance 3D).
-static void DrawOrientation(cv::Mat& img, const Quat& q, bool ok) {
-  img.setTo(cv::Scalar(32, 32, 32));
-  const double focal = 560, cx = img.cols * 0.5, cy = img.rows * 0.5 + 10;
-  View v = MakeView(-35, 22, 1.1);
-  auto line3 = [&](Vec3 a, Vec3 b, cv::Scalar col, int th) {
-    double x1, y1, x2, y2;
-    if (Project(v, a, focal, cx, cy, x1, y1) && Project(v, b, focal, cx, cy, x2, y2))
-      cv::line(img, cv::Point((int)x1, (int)y1), cv::Point((int)x2, (int)y2), col, th, cv::LINE_AA);
-  };
-  // Sol fixe (aligné sur la gravité) : repère de ce qui est "à plat"
-  for (int i = -3; i <= 3; i++) {
-    double t = i * 0.1;
-    line3({-0.3, t, -0.14}, {0.3, t, -0.14}, cv::Scalar(70, 70, 70), 1);
-    line3({t, -0.3, -0.14}, {t, 0.3, -0.14}, cv::Scalar(70, 70, 70), 1);
-  }
-  line3({0, 0, 0}, {0, 0, 0.3}, cv::Scalar(200, 200, 200), 1);  // verticale du monde
-  if (!ok) {
-    cv::putText(img, "en attente de l'IMU...", {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 0.7, {0, 165, 255}, 2);
-    return;
-  }
-  Mat3 R = ToMat3(q);
-  const double hx = 0.09, hy = 0.16, hz = 0.06;
-  Vec3 P[8];
-  for (int i = 0; i < 8; i++) {
-    Vec3 b{(i & 1) ? hx : -hx, (i & 2) ? hy : -hy, (i & 4) ? hz : -hz};
-    P[i] = R * b;
-  }
-  const int bits[3] = {1, 2, 4};
-  for (int i = 0; i < 8; i++)
-    for (int bit : bits) {
-      if (i & bit) continue;
-      int j = i | bit;
-      bool front = (bit != 1) && (i & 1);  // arête de la face avant (x = +hx)
-      line3(P[i], P[j], front ? cv::Scalar(0, 220, 255) : cv::Scalar(200, 200, 200), front ? 3 : 1);
-    }
-  // Deux "yeux" sur la face avant
-  for (int s = -1; s <= 1; s += 2) {
-    double x, y;
-    if (Project(v, R * Vec3{hx, 0.07 * s, 0}, focal, cx, cy, x, y))
-      cv::circle(img, cv::Point((int)x, (int)y), 7, cv::Scalar(0, 220, 255), 2, cv::LINE_AA);
-  }
-  // Axes du casque
-  struct Ax { Vec3 d; cv::Scalar c; const char* name; };
-  Ax axes[3] = {{{0.25, 0, 0}, cv::Scalar(0, 0, 255), "X avant"},
-                {{0, 0.22, 0}, cv::Scalar(0, 200, 0), "Y gauche"},
-                {{0, 0, 0.22}, cv::Scalar(255, 120, 0), "Z haut"}};
-  for (auto& a : axes) {
-    Vec3 tip = R * a.d;
-    line3({0, 0, 0}, tip, a.c, 3);
-    double x, y;
-    if (Project(v, tip * 1.1, focal, cx, cy, x, y))
-      cv::putText(img, a.name, cv::Point((int)x + 4, (int)y), cv::FONT_HERSHEY_SIMPLEX, 0.55, a.c, 1, cv::LINE_AA);
-  }
-}
-
 static Mat3 FromCv(const cv::Matx33d& a) {
   Mat3 r;
   for (int i = 0; i < 3; i++)
@@ -480,93 +428,6 @@ static double MeasureFps(cv::VideoCapture& cap, double seconds) {
   return el > 0 ? n / el : 0;
 }
 
-static std::string Lab(double v) {
-  char b[32];
-  if (std::abs(v) < 1e-9) return "0";
-  if (std::abs(v) < 0.995) std::snprintf(b, sizeof(b), "%+d cm", (int)std::lround(v * 100));
-  else std::snprintf(b, sizeof(b), "%+.1f m", v);
-  return b;
-}
-
-// Trajectoire : vue de dessus (gauche) et de côté (droite), monde G, avec GRILLE GRADUÉE.
-// zoom = pixels par mètre (0 = automatique). Le repère (m) est tracé en magenta.
-static void DrawTrajectory(cv::Mat& img, const std::vector<Vec3>& trail, const Vec3& pos, const Mat3& R, bool valid,
-                           double zoom, bool haveMark, const Vec3& mark, double* outPxPerM,
-                           bool floorValid, double floorZ) {
-  img.setTo(cv::Scalar(32, 32, 32));
-  const int pw = img.cols / 2, top0 = 92, bot = img.rows - 76;
-  double sc = zoom;
-  if (sc <= 0) {
-    double ext = 0.3;
-    for (const auto& p : trail)
-      ext = std::max(ext, std::max(std::abs(p.x), std::max(std::abs(p.y), std::abs(p.z))));
-    sc = 120.0 / ext;
-  }
-  if (outPxPerM) *outPxPerM = sc;
-  const cv::Rect ra(4, top0, pw - 8, bot - top0), rb(pw + 4, top0, pw - 8, bot - top0);
-  cv::Mat A = img(ra), Bm = img(rb);  // dessiner dans ces vues = découpage automatique
-  A.setTo(cv::Scalar(38, 38, 38));
-  Bm.setTo(cv::Scalar(38, 38, 38));
-  const cv::Point c1(ra.width / 2, ra.height / 2), c2(rb.width / 2, rb.height / 2);
-
-  const double steps[9] = {0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0};
-  double step = steps[8];
-  for (int i = 0; i < 9; i++)
-    if (steps[i] * sc >= 40.0) { step = steps[i]; break; }
-  const double gp = step * sc;  // pixels entre deux lignes de grille
-  auto grid = [&](cv::Mat& M, const cv::Point& c, bool topView) {
-    int nx = (int)(M.cols / 2 / gp) + 1, ny = (int)(M.rows / 2 / gp) + 1;
-    for (int i = -nx; i <= nx; i++) {
-      int x = c.x + (int)std::lround(i * gp);
-      cv::line(M, cv::Point(x, 0), cv::Point(x, M.rows), i == 0 ? cv::Scalar(100, 100, 100) : cv::Scalar(58, 58, 58), 1);
-      double v = topView ? -i * step : i * step;  // dessus : y (gauche +) ; côté : x (avant +)
-      cv::putText(M, Lab(v), cv::Point(x + 2, M.rows - 4), cv::FONT_HERSHEY_SIMPLEX, 0.32, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
-    }
-    for (int j = -ny; j <= ny; j++) {
-      int y = c.y + (int)std::lround(j * gp);
-      cv::line(M, cv::Point(0, y), cv::Point(M.cols, y), j == 0 ? cv::Scalar(100, 100, 100) : cv::Scalar(58, 58, 58), 1);
-      double v = -j * step;  // dessus : x (avant +) ; côté : z (haut +)
-      cv::putText(M, Lab(v), cv::Point(2, y - 2), cv::FONT_HERSHEY_SIMPLEX, 0.32, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
-    }
-  };
-  grid(A, c1, true);
-  grid(Bm, c2, false);
-  cv::rectangle(img, ra, cv::Scalar(90, 90, 90), 1);
-  cv::rectangle(img, rb, cv::Scalar(90, 90, 90), 1);
-  cv::putText(img, "dessus : avant en haut, gauche a gauche", cv::Point(8, top0 - 6), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
-  cv::putText(img, "cote : avant a droite, haut en haut", cv::Point(pw + 8, top0 - 6), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
-  char gt[64];
-  if (step < 0.995) std::snprintf(gt, sizeof(gt), "1 carreau = %d cm", (int)std::lround(step * 100));
-  else std::snprintf(gt, sizeof(gt), "1 carreau = %.0f m", step);
-  cv::putText(img, gt, cv::Point(8, bot + 16), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-
-  auto top = [&](const Vec3& p) { return cv::Point((int)(c1.x - p.y * sc), (int)(c1.y - p.x * sc)); };
-  auto side = [&](const Vec3& p) { return cv::Point((int)(c2.x + p.x * sc), (int)(c2.y - p.z * sc)); };
-  for (size_t i = 1; i < trail.size(); i++) {
-    cv::line(A, top(trail[i - 1]), top(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
-    cv::line(Bm, side(trail[i - 1]), side(trail[i]), cv::Scalar(0, 200, 255), 1, cv::LINE_AA);
-  }
-  if (floorValid) {  // le sol, dans la vue de côté
-    int yf = c2.y - (int)(floorZ * sc);
-    cv::line(Bm, cv::Point(0, yf), cv::Point(Bm.cols, yf), cv::Scalar(90, 220, 90), 2, cv::LINE_AA);
-    cv::putText(Bm, "sol", cv::Point(Bm.cols - 34, yf - 4), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(90, 220, 90), 1, cv::LINE_AA);
-  }
-  if (haveMark) {
-    cv::circle(A, top(mark), 7, cv::Scalar(255, 0, 255), 2, cv::LINE_AA);
-    cv::circle(Bm, side(mark), 7, cv::Scalar(255, 0, 255), 2, cv::LINE_AA);
-    if (valid) {
-      cv::line(A, top(mark), top(pos), cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
-      cv::line(Bm, side(mark), side(pos), cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
-    }
-  }
-  if (!valid) return;
-  Vec3 fwd = R * Vec3{1, 0, 0};  // avant du casque dans le monde
-  cv::circle(A, top(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
-  cv::line(A, top(pos), top(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-  cv::circle(Bm, side(pos), 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
-  cv::line(Bm, side(pos), side(pos + fwd * (25.0 / sc)), cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-}
-
 // Latence : Windows 11 peut ralentir un programme sans fenêtre visible (économie d'énergie, minuteries à 15 ms).
 // On demande une priorité un peu plus haute, des minuteries à 1 ms et la fin de la limitation d'énergie.
 static void BoostProcess() {
@@ -598,8 +459,240 @@ static void StartParentWatch(DWORD pid) {
   }).detach();
 }
 
+
+// ---- Commandes communes au mode normal et au mode services -------------------------------------------------------------------------
+// Les commandes arrivent en UDP 127.0.0.1:9877 : un caractere (T V Z x c g f 0-6 u [ ] a - = Q) ou une ligne "PV <source>".
+// Il n'y a plus aucune fenetre ni aucune touche : tout est pilote par ar6dof_app (boutons) et par Unity.
+
+// "PV n" : demande d'apercu (0 aucun, 1 camera stereo, 2 yeux, 3 bouche). A renvoyer au moins une fois par seconde : sans nouvelle demande
+// pendant 3 s l'apercu s'arrete seul (aucun cout si l'application ou Unity est ferme).
+static bool HandlePvCommand(const std::string& line) {
+  if (line.size() >= 2 && line[0] == 'P' && line[1] == 'V') {
+    ar6pv::Request(std::atoi(line.c_str() + 2));
+    return true;
+  }
+  return false;
+}
+
+// Calibration du montage de l'IMU, sans tracking : g = etape 1 (a plat), f = etape 2 (penche vers l'avant), 1-6 = rotation de 90 deg, 0 = reinitialiser, z = yaw a zero.
+struct MountCal {
+  bool havePendingUp = false;
+  Vec3 pendingUp;
+  std::string msg = "montage : etape 1 (casque a plat, a l'endroit), puis etape 2 (penche vers l'avant)";
+};
+
+static void HandleMountCmd(int k, ImuState& imu, MountCal& mc, const Vec3& acc, const Vec3& gyr) {
+  if (k == 'g') {
+    mc.havePendingUp = MountStep1(acc, gyr, mc.pendingUp, mc.msg);
+  } else if (k == 'f') {
+    if (!mc.havePendingUp) {
+      mc.msg = "fais d'abord l'etape 1 (casque a plat, a l'endroit, immobile)";
+    } else {
+      Mat3 R;
+      if (MountStep2(mc.pendingUp, acc, gyr, R, mc.msg)) {
+        std::lock_guard<std::mutex> l(imu.m);
+        imu.mount = R;
+        imu.reinit = true;
+        SaveMount(R);
+        mc.havePendingUp = false;
+      }
+    }
+  } else if (k >= '1' && k <= '6') {
+    int axis = (k - '1') / 2;
+    int sign = ((k - '1') % 2 == 0) ? -1 : +1;
+    std::lock_guard<std::mutex> l(imu.m);
+    imu.mount = Rot90(axis, sign) * imu.mount;
+    imu.reinit = true;
+    SaveMount(imu.mount);
+    mc.msg = "montage tourne de 90 deg (sauvegarde)";
+  } else if (k == '0') {
+    std::lock_guard<std::mutex> l(imu.m);
+    imu.mount = Mat3();
+    imu.reinit = true;
+    SaveMount(imu.mount);
+    mc.msg = "montage reinitialise";
+  } else if (k == 'z') {
+    std::lock_guard<std::mutex> l(imu.m);
+    imu.zero_yaw = true;
+  }
+}
+
+// Apercus des yeux et de la bouche vers la memoire partagee. Dort (200 ms) tant que personne ne demande rien ; ne copie rien non plus
+// cote eye / mouth tracking. manage = mode services : les cameras d'oeil / de bouche sont ouvertes le temps de l'apercu puis refermees.
+static void PreviewPump(bool manage) {
+  UdpSender eyeCmd, mouthCmd;
+  if (manage) { eyeCmd.Open("127.0.0.1", 9884); mouthCmd.Open("127.0.0.1", 9887); }
+  auto send = [](UdpSender& u, const char* t) { u.Send(reinterpret_cast<const uint8_t*>(t), (int)std::strlen(t)); };
+  bool eyeAuto = false, mouthAuto = false;
+  cv::Mat m;
+  while (g_run) {
+    const int w = ar6pv::Wanted();
+    if (manage) {
+      if (w == ar6pv::kEyes && !eyeAuto && ar6eye::Running()) { send(eyeCmd, "EYE 1\n"); eyeAuto = true; }
+      if (w != ar6pv::kEyes && eyeAuto) { send(eyeCmd, "EYE 0\n"); eyeAuto = false; }
+      if (w == ar6pv::kMouth && !mouthAuto && ar6mouth::Running()) { send(mouthCmd, "MOUTH 1\n"); mouthAuto = true; }
+      if (w != ar6pv::kMouth && mouthAuto) { send(mouthCmd, "MOUTH 0\n"); mouthAuto = false; }
+    }
+    if (w == ar6pv::kEyes) {
+      if (ar6eye::Running() && ar6eye::GetPreview(&m)) ar6pv::Shared().Publish(m);
+      else ar6pv::Shared().PublishText("eye tracking non configure : choisis les cameras d'oeil");
+    } else if (w == ar6pv::kMouth) {
+      if (ar6mouth::Running() && ar6mouth::GetPreview(&m)) ar6pv::Shared().Publish(m);
+      else ar6pv::Shared().PublishText("mouth tracking non configure : choisis la camera de bouche");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds((w == ar6pv::kEyes || w == ar6pv::kMouth) ? 40 : 200));
+  }
+  if (eyeAuto) send(eyeCmd, "EYE 0\n");
+  if (mouthAuto) send(mouthCmd, "MOUTH 0\n");
+}
+
+// Apercu de la camera stereo en mode services (le tracking ne tourne pas, donc personne d'autre n'utilise la camera) :
+// elle n'est ouverte que pendant que l'apercu est demande, a 15 images/s, puis relachee.
+static void StereoPreviewThread(int ci, int ciR, int camW, int H, int fps, int firstApi) {
+  const int apis[2] = {firstApi == 1 ? cv::CAP_DSHOW : cv::CAP_MSMF, firstApi == 1 ? cv::CAP_MSMF : cv::CAP_DSHOW};
+  cv::VideoCapture a, b;
+  bool open = false;
+  double lastPub = 0, lastFail = -10;
+  int fails = 0;
+  cv::Mat l, r, f;
+  while (g_run) {
+    if (ar6pv::Wanted() != ar6pv::kStereo) {
+      if (open) { a.release(); b.release(); open = false; }
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      continue;
+    }
+    if (!open) {
+      if (NowS() - lastFail < 2.0) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); continue; }
+      bool ok = false;
+      for (int k = 0; k < 2 && !ok; k++) ok = OpenCam(a, ci, apis[k], camW, H, fps) && (ciR < 0 || OpenCam(b, ciR, apis[k], camW, H, fps));
+      if (!ok) {
+        a.release();
+        b.release();
+        lastFail = NowS();
+        ar6pv::Shared().PublishText("camera introuvable ou deja utilisee");
+        continue;
+      }
+      open = true;
+      fails = 0;
+      std::cout << "[apercu] camera stereo ouverte\n";
+    }
+    if (!a.grab() || (ciR >= 0 && !b.grab())) {
+      if (++fails > 60) { a.release(); b.release(); open = false; lastFail = NowS(); }
+      continue;
+    }
+    fails = 0;
+    const double t = NowS();
+    if (t - lastPub < 0.066) continue;   // grab() seul : on ne decode que les images affichees
+    lastPub = t;
+    if (!a.retrieve(l) || l.empty()) continue;
+    if (ciR >= 0) {
+      if (!b.retrieve(r) || r.empty() || l.rows != r.rows || l.type() != r.type()) continue;
+      cv::hconcat(l, r, f);
+    } else {
+      f = l;
+    }
+    ar6pv::Shared().Publish(f);
+  }
+}
+
+// ---- Mode services : ar6dof_probe --services ----------------------------------------------------------------------------------------
+// Ni camera stereo ouverte en permanence, ni suivi 6DoF, ni passthrough, ni Bluetooth : seulement ce qu'il faut pour regler le materiel
+// depuis ar6dof_app sans lancer Unity (calibration du montage de l'IMU, eye / mouth tracking, apercus des cameras).
+// Les yeux et la bouche n'ouvrent leurs cameras que pendant un apercu ou une calibration.
+static int RunServices() {
+  g_auto = true;
+  std::cout << "=== ar6dof_probe : mode services (sans suivi 6DoF) ===\n";
+  _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");   // sinon l'ouverture d'une camera MSMF peut prendre plusieurs dizaines de secondes
+  ImuState imu;
+  imu.mount = LoadMount();
+  std::thread th;
+  int pi = -1;
+  auto ports = ListComPorts();
+  {
+    auto it = g_cfg.find("portname");
+    if (it != g_cfg.end())
+      for (size_t i = 0; i < ports.size(); i++) if (ports[i] == it->second) pi = (int)i;
+  }
+  if (pi >= 0) {
+    std::cout << "IMU : " << ports[pi] << "\n";
+    th = std::thread(ImuThread, ports[pi], &imu, (VisionSnap*)nullptr, (UdpSender*)nullptr);
+  } else {
+    std::cout << "IMU : aucun port choisi (page Capteurs de l'application)\n";
+  }
+  struct Stop { ~Stop() { ar6eye::Stop(); ar6mouth::Stop(); } } stopAll;
+  const int ncam = (int)ListCameras().size();
+  const int ci = SavedInt("cam", 0, 0, 64), ciR = SavedInt("camR", -1, -1, 64);
+  int eL = SavedInt("eyecamL", -1, -1, 64), eR = SavedInt("eyecamR", -1, -1, 64);
+  int mc = SavedInt("mouthcam", -1, -1, 64);
+  if (eL >= ncam) eL = -1;
+  if (eR >= ncam) eR = -1;
+  if (mc >= ncam) mc = -1;
+  if ((eL >= 0 && (eL == ci || eL == ciR)) || (eR >= 0 && (eR == ci || eR == ciR)) || (eL >= 0 && eL == eR)) { std::cout << "[yeux] une meme camera est utilisee deux fois : eye tracking ignore\n"; eL = eR = -1; }
+  if (mc >= 0 && (mc == ci || mc == ciR || mc == eL || mc == eR)) { std::cout << "[bouche] la camera de bouche est deja utilisee ailleurs : mouth tracking ignore\n"; mc = -1; }
+  if (eL >= 0 || eR >= 0) {
+    ar6eye::Options eo;
+    eo.camL = eL; eo.camR = eR; eo.fps = SavedInt("eyefps", 90, 10, 240); eo.backend = SavedInt("eyebackend", 0, 0, 1);
+    eo.startEnabled = false; eo.dataDir = ExeDir();
+    ar6eye::Start(eo, [](const std::string& m) { std::cout << m << std::endl; });
+  }
+  if (mc >= 0) {
+    ar6mouth::Options mo;
+    mo.cam = mc; mo.fps = SavedInt("mouthfps", 60, 10, 120); mo.backend = SavedInt("mouthbackend", 0, 0, 1);
+    mo.startEnabled = false; mo.dataDir = ExeDir();
+    ar6mouth::Start(mo, [](const std::string& m) { std::cout << m << std::endl; });
+  }
+  // camera stereo (apercu seulement)
+  const int W0 = SavedInt("width", 1600, 320, 8000), H0 = SavedInt("height", 600, 240, 4000), F0 = SavedInt("fps", 120, 5, 240);
+  const int camW = ciR >= 0 ? (W0 / 2) : W0;
+  std::thread stereo(StereoPreviewThread, ci, ciR, camW, H0, F0, SavedInt("backend", 0, 0, 1));
+  std::thread pump(PreviewPump, true);
+  UdpControl ctl;
+  if (!ctl.Open(9877)) std::cout << "Canal de commande (UDP 9877) indisponible : un autre ar6dof_probe tourne-t-il ?\n";
+  std::cout << "Pret : pilotage par l'application (UDP 9877).\n";
+  MountCal mcal;
+  std::string lastMsg = mcal.msg;
+  double lastStat = 0;
+  bool quit = false;
+  while (!quit && !g_parentGone) {
+    std::string line;
+    while (ctl.PollText(line)) {
+      if (line == "Q" || line == "q") { quit = true; break; }
+      if (HandlePvCommand(line)) continue;
+      if (line.size() != 1) continue;
+      Vec3 acc, gyr;
+      { std::lock_guard<std::mutex> l(imu.m); acc = imu.acc_s; gyr = imu.gyr_s; }
+      HandleMountCmd((unsigned char)line[0], imu, mcal, acc, gyr);
+    }
+    if (mcal.msg != lastMsg) { lastMsg = mcal.msg; std::cout << "[montage] " << mcal.msg << std::endl; }
+    const double now = NowS();
+    if (now - lastStat >= 1.0) {
+      lastStat = now;
+      bool err;
+      double ra, rg;
+      uint64_t okN, badN, bytes;
+      double na;
+      {
+        std::lock_guard<std::mutex> l(imu.m);
+        err = imu.port_error; ra = imu.rate_acc; rg = imu.rate_gyr; okN = imu.ok; badN = imu.bad; bytes = imu.bytes; na = Norm(imu.acc_s);
+      }
+      char sb[240];
+      if (pi < 0) std::snprintf(sb, sizeof(sb), "[imu] non selectionnee");
+      else if (err) std::snprintf(sb, sizeof(sb), "[imu] erreur d'ouverture ou de lecture du port");
+      else if (bytes > 0 && okN == 0) std::snprintf(sb, sizeof(sb), "[imu] octets recus mais 0 paquet valide (firmware v2 flashe ?)");
+      else std::snprintf(sb, sizeof(sb), "[imu] accel %.0f Hz | gyro %.0f Hz | |a| = %.2f m/s2 | paquets ok=%llu ko=%llu", ra, rg, na, (unsigned long long)okN, (unsigned long long)badN);
+      std::cout << sb << std::endl;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  g_run = false;
+  if (pump.joinable()) pump.join();
+  if (stereo.joinable()) stereo.join();
+  if (th.joinable()) th.join();
+  return 0;
+}
+
 int main(int argc, char** argv) {
-  bool noWindowsFlag = false, noBle = false;
+  bool noBle = false, services = false;
   int cvThreads = 2;
   std::ofstream logFile(ExeDir() + "\\ar6dof_probe.log", std::ios::trunc);
   TeeBuf tee(std::cout.rdbuf(), logFile.rdbuf());
@@ -612,7 +705,8 @@ int main(int argc, char** argv) {
     std::string a = argv[i];
     if (a == "--auto") g_auto = true;                 // rejoue les réponses de la dernière fois, sans question
     else if (a == "--no-ble") noBle = true;            // ne pas ecouter la telecommande Bluetooth
-    else if (a == "--no-windows") noWindowsFlag = true;  // aucune fenêtre OpenCV : bien moins de CPU
+    else if (a == "--no-windows") {}                    // ancienne option : il n'y a plus aucune fenêtre OpenCV (tout se pilote depuis ar6dof_app et Unity)
+    else if (a == "--services") services = true;        // sans caméra stéréo ni suivi 6DoF : IMU, yeux, bouche et aperçus seulement
     else if (a == "--parent" && i + 1 < argc) { long long pid = atoll(argv[++i]); if (pid > 0) StartParentWatch((DWORD)pid); }
     else if (a == "--cv-threads" && i + 1 < argc) cvThreads = std::max(1, atoi(argv[++i]));   // threads d'OpenCV (defaut 2)
   }
@@ -624,8 +718,9 @@ int main(int argc, char** argv) {
   LoadConfig();   // les réponses précédentes servent de valeurs par défaut, même sans --auto
   if (g_auto && g_cfg.empty()) std::cout << "[auto] aucune configuration trouvee (" << ConfigPath() << ") : lance d'abord ar6dof_probe.exe SANS --auto.\n";
   std::cout << "ar6dof_probe " << (g_auto ? "(--auto) " : "") << "- config : " << ConfigPath() << "\n";
+  if (services) return RunServices();
   // Télécommande Bluetooth -> UDP local (Unity). Se reconnecte seule ; --no-ble pour la désactiver.
-  struct BleStop { ~BleStop() { ar6ble::Stop(); ar6hub::Stop(); ar6eye::Stop(); } } bleStop;
+  struct BleStop { ~BleStop() { ar6ble::Stop(); ar6hub::Stop(); ar6eye::Stop(); ar6mouth::Stop(); } } bleStop;
   // Sans ça, l'ouverture d'une caméra avec le backend MSMF peut prendre
   // plusieurs dizaines de secondes.
   _putenv_s("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0");
@@ -670,9 +765,7 @@ int main(int argc, char** argv) {
     std::cout << "Deux cameras separees : " << camW << "x" << H << " chacune, assemblees en " << W << "x" << H << " (gauche|droite). Elles ne sont pas synchronisees par le materiel.\n";
   int udpPort = AskInt("udp", "Port UDP vers Unity sur ce PC (0 = desactive)", 9876, 0, 65535);
   int shareFrames = AskInt("share", "Partager l'image de la camera avec Unity pour le passthrough (1 = oui, 0 = non)", 1, 0, 1);
-  int showWindows = AskInt("windows", "Afficher les fenetres de controle (1 = oui, 0 = non : plus leger)", 1, 0, 1);
   int autoTrack = AskInt("autotrack", "Demarrer le tracking automatiquement (1 = oui, 0 = non)", 1, 0, 1);
-  const bool windowsOn = showWindows && !noWindowsFlag;
   // Eye tracking (2 cameras infrarouges d'oeil). Reponse 0 = rien n'est cree : ni camera, ni thread, ni socket.
   int eyeOn = AskInt("eye", "Eye tracking avec 2 cameras d'oeil (1 = oui, 0 = non : aucune charge)", 0, 0, 1);
   int eyeCamL = -1, eyeCamR = -1, eyeFps = 90, eyeBackend = 0;
@@ -685,6 +778,20 @@ int main(int argc, char** argv) {
     if ((eyeCamL >= 0 && eyeCamL == ci) || (eyeCamR >= 0 && eyeCamR == ci) || (eyeCamL >= 0 && eyeCamL == eyeCamR)) {
       std::cout << "  ATTENTION : une meme camera est utilisee deux fois (stereo / oeil gauche / oeil droit) : eye tracking desactive.\n";
       eyeOn = 0;
+    }
+  }
+
+  // Mouth tracking (une camera dirigee vers la bouche), independant de l'eye tracking. Reponse 0 = rien n'est cree.
+  int mouthOn = AskInt("mouth", "Mouth tracking avec une camera de bouche (1 = oui, 0 = non : aucune charge)", 0, 0, 1);
+  int mouthCam = -1, mouthFps = 60, mouthBackend = 0;
+  if (mouthOn) {
+    mouthCam = AskInt("mouthcam", "  Numero de la camera de la bouche (-1 = aucune)", 3, -1, (int)cams.size() - 1);
+    if (mouthCam < 0) mouthOn = 0;
+    mouthFps = AskInt("mouthfps", "  Cadence de traitement (fps ; 30 = tres leger)", 60, 10, 120);
+    mouthBackend = AskInt("mouthbackend", "  Backend de la camera de bouche (0 = MSMF, 1 = DSHOW)", 0, 0, 1);
+    if (mouthOn && (mouthCam == ci || mouthCam == ciR || mouthCam == eyeCamL || mouthCam == eyeCamR)) {
+      std::cout << "  ATTENTION : la camera de bouche est deja utilisee ailleurs : mouth tracking desactive.\n";
+      mouthOn = 0;
     }
   }
 
@@ -736,6 +843,11 @@ int main(int argc, char** argv) {
       ar6eye::Options eo;
       eo.camL = eyeCamL; eo.camR = eyeCamR; eo.fps = eyeFps; eo.backend = eyeBackend; eo.dataDir = ExeDir();
       ar6eye::Start(eo, [](const std::string& m) { std::cout << m << std::endl; });
+    }
+    if (mouthOn) {
+      ar6mouth::Options mo;
+      mo.cam = mouthCam; mo.fps = mouthFps; mo.backend = mouthBackend; mo.startEnabled = true; mo.dataDir = ExeDir();
+      ar6mouth::Start(mo, [](const std::string& m) { std::cout << m << std::endl; });
     }
     double best = -1;
     int bestIdx = -1, openIdx = -1;
@@ -803,17 +915,14 @@ int main(int argc, char** argv) {
   imu.mount = LoadMount();
   std::thread th;
 
-  std::filesystem::create_directories("capture");
-  int saved = 0, frames = 0, fails = 0;
+  int frames = 0, fails = 0;
   double fps = 0;
   auto tf = std::chrono::steady_clock::now();
-  cv::Mat frame, orient(520, 640, CV_8UC3);
+  cv::Mat frame;
   Rectifier rect;
-  bool rectReady = false, showRect = haveCalib, swapEyes = false;
-  std::string checkMsg = "touche 'c' : mesurer la qualite de la calibration (scene riche en details)";
-  std::string mountMsg = "montage : g (a plat, a l'endroit) puis f (penche vers l'avant)";
-  bool havePendingUp = false;
-  Vec3 pendingUp;
+  bool rectReady = false, swapEyes = false;
+  std::string checkMsg = "bouton Verifier la calibration : mesure la qualite (scene riche en details)";
+  MountCal mc;
 
   // ---- Tracking 6DoF ----
   bool tracking = false, usePrior = true, trackReady = false, haveLast = false;
@@ -831,15 +940,9 @@ int main(int argc, char** argv) {
   Mat3 R_GV, snapRvc, poseR;
   Vec3 snapT, snapV, poseP;
   bool poseValid = false;
-  std::vector<Vec3> trail;
-  double lastDispS = 0, pxPerM = 0;
   cv::Size smallFor;
-  const double zoomList[6] = {0, 100, 200, 400, 800, 1600};  // 0 = auto
-  int zoomIdx = 3;
-  bool haveMark = false;
-  Vec3 mark;
-  std::string trackMsg = "touche t : demarrer le tracking 6DoF (fais d'abord g puis f dans la fenetre orientation)";
-  cv::Mat traj(520, 640, CV_8UC3);
+  double lastPv = 0;   // dernier apercu de la camera stereo publie (seulement quand l'application ou Unity le demande)
+  std::string trackMsg = "suivi arrete : bouton Redemarrer le suivi";
   // ---- Sol + sortie vers Unity ----
   UdpSender udp;
   if (udpPort > 0) {
@@ -857,7 +960,6 @@ int main(int argc, char** argv) {
   if (!g_auto) SaveConfig();   // les réponses servent de configuration pour --auto
   UdpControl ctl;
   if (!ctl.Open(9877)) std::cout << "Canal de commande (UDP 9877) indisponible.\n";
-  int injectKey = (autoTrack && haveCalib) ? 't' : -1;   // démarre le tracking dès la première image
   Mailbox mb;
   uint64_t lastId = 0;
   std::function<bool(cv::Mat&)> grab;
@@ -888,11 +990,21 @@ int main(int argc, char** argv) {
     };
   }
   std::thread capThread(CaptureThread, grab, &mb, &share, shareFrames != 0);
-  std::cout << (windowsOn ? "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n"
-                          : "\nMode sans fenetres : commandes par UDP 9877 (T recentrer, V sol, Z yaw, Q quitter).\n");
+  std::thread pump(PreviewPump, false);   // apercus des yeux / de la bouche, seulement quand ils sont demandes
+  std::cout << "\nPilotage par l'application ou Unity (UDP 9877) : aucune fenetre, aucune touche.\n";
   // Les messages d'état (montage de l'IMU, suivi, vérification de la calibration) ne s'affichaient que dans les fenêtres :
   // ils sont aussi écrits dans la console / le journal, que lit l'application ar6dof_app (boutons à la place des touches).
-  std::string lastMountMsg = mountMsg, lastTrackMsg = trackMsg, lastCheckMsg = checkMsg;
+  std::string lastMountMsg = mc.msg, lastTrackMsg = trackMsg, lastCheckMsg = checkMsg;
+  std::deque<std::string> cmdQ;
+  if (autoTrack && haveCalib) cmdQ.push_back("t");   // demarre le tracking des la premiere image
+  bool quit = false;
+  auto drainCtl = [&] {
+    std::string l;
+    while (ctl.PollText(l)) {
+      if (l == "Q" || l == "q") quit = true;
+      else if (!HandlePvCommand(l)) cmdQ.push_back(l);
+    }
+  };
 
   while (true) {
     double tRead = 0, tSm = 0;
@@ -900,11 +1012,10 @@ int main(int argc, char** argv) {
       std::unique_lock<std::mutex> l(mb.m);
       mb.cond.wait_for(l, std::chrono::milliseconds(30), [&] { return mb.id != lastId || mb.failed; });
       if (mb.failed) { std::cout << "Plus d'images de la camera.\n"; break; }
-      if (mb.id == lastId) {   // pas de nouvelle image : on reste réactif aux touches et aux commandes
+      if (mb.id == lastId) {   // pas de nouvelle image : on reste réactif aux commandes
         l.unlock();
-        int kk = windowsOn ? cv::waitKey(1) : -1;
-        int cc = ctl.Poll();
-        if (kk == 'q' || kk == 27 || cc == 'Q' || g_parentGone) break;
+        drainCtl();
+        if (quit || g_parentGone) break;
         continue;
       }
       frame = mb.frame;   // partage du tampon, aucune copie de pixels
@@ -913,12 +1024,15 @@ int main(int argc, char** argv) {
       lastId = mb.id;
     }
     ++frames;
-    const bool displayDue = (tRead - lastDispS) >= 0.033;  // affichage ~30 Hz max, tracking à pleine cadence
+    if (tRead - lastPv >= 0.066 && ar6pv::Wanted() == ar6pv::kStereo) {   // apercu pour l'application / Unity : 15 images/s, seulement s'il est demande
+      lastPv = tRead;
+      ar6pv::Shared().Publish(frame);
+    }
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - tf).count();
     if (dt >= 1.0) {
       fps = frames / dt; frames = 0; tf = now;
-      if (!windowsOn) {  // sans fenêtre : un résumé par seconde dans la console et le journal
+      {  // un résumé par seconde dans la console et le journal (lu par l'application et par Unity)
         char sb[360];
         std::snprintf(sb, sizeof(sb), "camera %.1f fps | suivi %.1f fps | partage %.1f ms | decodage %.1f ms | tracking %s | %d points | delai camera %.1f ms (%s) | cpu %.0f%%\n",
                       g_camFps.load(), fps, g_shareMs.load(), g_decodeMs.load(),
@@ -941,7 +1055,6 @@ int main(int argc, char** argv) {
         calibErr = err;
         std::cout << "Rectification impossible : " << err << "\n";
         haveCalib = false;
-        showRect = false;
       }
     }
     // Copie des données IMU (un seul verrouillage)
@@ -960,7 +1073,7 @@ int main(int argc, char** argv) {
 
     // ---- Paire rectifiée de travail (<= 800 px par oeil) : tracking + affichage rectifié ----
     cv::Mat tl, tr;
-    const bool needSmall = haveCalib && (tracking || (showRect && displayDue && windowsOn));
+    const bool needSmall = haveCalib && tracking;
     if (needSmall) {
       const cv::Size want(w, frame.rows);
       if (!trackReady || smallFor != want) {
@@ -975,7 +1088,6 @@ int main(int argc, char** argv) {
         } else {
           trackMsg = "rectification de travail impossible : " + (e1.empty() ? std::string("calibration incompatible") : e1);
           tracking = false;
-          showRect = false;
         }
       }
       if (trackReady) {
@@ -1006,7 +1118,6 @@ int main(int argc, char** argv) {
           vo->Process(tl, tr, nullptr, 0.033);
           haveLast = true;
           lastFrameT = tcap;
-          trail.clear();
         } else {
           double dt = std::max(0.001, std::min(0.2, tcap - lastFrameT));
           cv::Matx33d dRc;
@@ -1068,10 +1179,6 @@ int main(int argc, char** argv) {
       poseP = po.p;
       poseR = po.R;
       poseValid = true;
-      if (tracking && vo && vo->state == StereoVO::kOk) {
-        trail.push_back(poseP);
-        if (trail.size() > 1500) trail.erase(trail.begin());
-      }
       // Sol : plus bas plan horizontal dense parmi les points 3D suivis (estimé toutes les 0,5 s)
       if (tracking && vo && vo->state == StereoVO::kOk && !floorLocked && (tRead - lastFloorT) > 0.5) {
         lastFloorT = tRead;
@@ -1090,243 +1197,69 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (displayDue && windowsOn) {
-    lastDispS = tRead;
-    cv::Mat shown;
-    if (showRect && !tl.empty()) cv::hconcat(tl, tr, shown);
-    else cv::hconcat(left, right, shown);
 
-    double scale = std::min(1.0, 1600.0 / shown.cols);
-    cv::Mat disp;
-    cv::resize(shown, disp, cv::Size(), scale, scale);
-    if (disp.channels() == 1) cv::cvtColor(disp, disp, cv::COLOR_GRAY2BGR);
-    for (int y = 40; y < disp.rows; y += 60)
-      cv::line(disp, {0, y}, {disp.cols, y}, {0, 255, 0}, 1);
-    cv::line(disp, {disp.cols / 2, 0}, {disp.cols / 2, disp.rows}, {0, 0, 255}, 2);
-
-
-    char line[256];
-    int y = 24;
-    auto put = [&](const std::string& s, cv::Scalar c = {255, 255, 255}) {
-      cv::putText(disp, s, {10, y}, cv::FONT_HERSHEY_SIMPLEX, 0.6, {0, 0, 0}, 3);
-      cv::putText(disp, s, {10, y}, cv::FONT_HERSHEY_SIMPLEX, 0.6, c, 1);
-      y += 24;
-    };
-    std::snprintf(line, sizeof(line), "cam %dx%d | camera %.1f fps | suivi %.1f fps | partage %.1f ms | paires: %d  vue: %s%s",
-                  frame.cols, frame.rows, g_camFps.load(), fps, g_shareMs.load(), saved,
-                  (showRect && !tl.empty()) ? "RECTIFIEE" : "brute", swapEyes ? "  [G/D inverses]" : "");
-    put(line);
-    if (haveCalib && rectReady) {
-      std::snprintf(line, sizeof(line), "calib: f=%.0f px  base=%.1f mm  champ ~%.0f deg", rect.f,
-                    rect.baseline_mm, rect.hfov_deg);
-      put(line);
-      put(checkMsg, {0, 255, 255});
-      for (size_t i = 0; i < rect.warnings.size() && i < 5; i++)
-        put("! " + rect.warnings[i], {0, 165, 255});
-    } else {
-      put("pas de calibration : " + calibErr, {0, 165, 255});
-    }
-    if (pi < 0) {
-      put("IMU: non selectionnee");
-    } else if (portErr) {
-      put("IMU: erreur d'ouverture/lecture du port", {0, 0, 255});
-    } else if (bytes > 0 && okN == 0) {
-      put("IMU: octets recus mais 0 paquet valide (firmware v2 flashe ?)", {0, 0, 255});
-    } else {
-      double na = Norm(acc);
-      std::snprintf(line, sizeof(line), "IMU accel %.1f Hz  |a|=%.2f m/s2   gyro %.1f Hz   paquets ok=%llu ko=%llu",
-                    rA, na, rG, (unsigned long long)okN, (unsigned long long)badN);
-      put(line);
-    }
-    cv::imshow("ar6dof_probe", disp);
-
-    // ---- Fenêtre orientation ----
-    DrawOrientation(orient, q, qok && pi >= 0);
-    {
-      int yy = 500;
-      auto put2 = [&](const std::string& s, cv::Scalar c = {255, 255, 255}, int ypos = -1) {
-        int yp = ypos >= 0 ? ypos : yy;
-        cv::putText(orient, s, {10, yp}, cv::FONT_HERSHEY_SIMPLEX, 0.45, c, 1, cv::LINE_AA);
-      };
-      if (qok && pi >= 0) {
-        double r, p, ya;
-        ToEuler(q, r, p, ya);
-        const double k = 180.0 / 3.14159265358979;
-        std::snprintf(line, sizeof(line), "roll %+6.1f  pitch %+6.1f  yaw %+6.1f deg", r * k, p * k, ya * k);
-        put2(line, {255, 255, 255}, 24);
-        put2("pitch>0: regarde en bas | roll>0: penche a droite | yaw>0: tourne a gauche (derive, pas de boussole)",
-             {170, 170, 170}, 44);
-      }
-      put2("montage: avant=" + AxisName(mount.Row(0)) + "  gauche=" + AxisName(mount.Row(1)) +
-               "  haut=" + AxisName(mount.Row(2)),
-           {0, 255, 255}, 470);
-      put2(mountMsg, {0, 255, 255}, 488);
-      put2("g/f calibrer | 1-6 tourner de 90 deg | 0 reset montage | z yaw=0", {170, 170, 170}, 508);
-    }
-    cv::imshow("orientation", orient);
-
-    // ---- Fenêtre trajectoire ----
-    DrawTrajectory(traj, trail, poseP, poseR, poseValid && haveLast, zoomList[zoomIdx], haveMark, mark, &pxPerM,
-                   floorValid, floorZ);
-    {
-      char tl[256];
-      if (poseValid && haveLast) {
-        double r, p, ya;
-        MatToEuler(poseR, r, p, ya);
-        const double kk = 180.0 / 3.14159265358979;
-        std::snprintf(tl, sizeof(tl), "x %+.3f  y %+.3f  z %+.3f m   roll %+.1f pitch %+.1f yaw %+.1f deg",
-                      poseP.x, poseP.y, poseP.z, r * kk, p * kk, ya * kk);
-        cv::putText(traj, tl, cv::Point(10, 22), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
-        const char* stn = !vo ? "-" : vo->state == StereoVO::kOk ? "OK" : vo->state == StereoVO::kLost ? "PERDU" : "INIT";
-        std::snprintf(tl, sizeof(tl), "tracking %s | points %d (inliers %d) | calcul %.1f ms | prior IMU: %s",
-                      stn, vo ? vo->nPoints() : 0, vo ? vo->nInliers : 0, voMs, usePrior ? "oui" : "non");
-        cv::putText(traj, tl, cv::Point(10, 44), cv::FONT_HERSHEY_SIMPLEX, 0.45,
-                    (vo && vo->state == StereoVO::kLost) ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-      } else {
-        cv::putText(traj, trackMsg, cv::Point(10, 22), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-      }
-      if (poseValid && haveLast) {
-        double d0 = Norm(poseP) * 100.0;
-        if (haveMark) {
-          Vec3 dd = poseP - mark;
-          std::snprintf(tl, sizeof(tl), "origine %.1f cm | repere %.1f cm (dx %+.1f dy %+.1f dz %+.1f)", d0, Norm(dd) * 100,
-                        dd.x * 100, dd.y * 100, dd.z * 100);
+    drainCtl();   // commandes de l'application ou d'Unity (un caractere, ou une ligne de texte pour les apercus)
+    if (quit || g_parentGone) break;
+    while (!cmdQ.empty()) {
+      const std::string cl = cmdQ.front();
+      cmdQ.pop_front();
+      if (cl.size() != 1) continue;
+      int k = (unsigned char)cl[0];
+      if (k == 'V') k = 'v';   // V sol, Z yaw : commandes d'Unity
+      if (k == 'Z') k = 'z';
+      if (k == 'T') { tracking = false; haveLast = false; poseValid = false; k = 't'; }   // T = recentrer : arret puis redemarrage
+      if (k == 'x') swapEyes = !swapEyes;
+      if (k == 'c') {
+        if (haveCalib && rectReady) {
+          cv::Mat ca, cb;  // rectification pleine resolution, seulement pour ce controle
+          cv::remap(left, ca, rect.mapL1, rect.mapL2, cv::INTER_LINEAR);
+          cv::remap(right, cb, rect.mapR1, rect.mapR2, cv::INTER_LINEAR);
+          checkMsg = CheckRectification(ca, cb);
         } else {
-          std::snprintf(tl, sizeof(tl), "distance a l'origine : %.1f cm   (m = poser un repere ici)", d0);
-        }
-        cv::putText(traj, tl, cv::Point(10, 66), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 200, 255), 1, cv::LINE_AA);
-      }
-      if (floorValid) {
-        std::snprintf(tl, sizeof(tl), "sol a %+.2f m %s | hauteur de la tete : %.0f cm", floorZ, floorLocked ? "(verrouille)" : "(estime)",
-                      (poseP.z - floorZ) * 100.0);
-        cv::putText(traj, tl, cv::Point(8, traj.rows - 46), cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(120, 255, 120), 1, cv::LINE_AA);
-      } else if (tracking) {
-        cv::putText(traj, "sol : pas encore detecte (regarde le sol, 2 a 4 m devant toi)", cv::Point(8, traj.rows - 46),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 165, 255), 1, cv::LINE_AA);
-      }
-      std::snprintf(tl, sizeof(tl), ", . zoom (%.0f px/m)%s | m/n repere | v verrouiller le sol | t demarrer/recentrer | u prior IMU",
-                    pxPerM, zoomList[zoomIdx] <= 0 ? " auto" : "");
-      cv::putText(traj, tl, cv::Point(10, traj.rows - 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
-      std::snprintf(tl, sizeof(tl), "[ ] delai camera %.0f ms (%s, a = auto) | - = prediction %.0f ms", camDelay * 1000, autoDelay ? "auto" : "manuel", predS * 1000);
-      cv::putText(traj, tl, cv::Point(10, traj.rows - 12), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(170, 170, 170), 1, cv::LINE_AA);
-    }
-    cv::imshow("trajectoire", traj);
-    if (eyeOn && ar6eye::Running()) {
-      cv::Mat ev;
-      if (ar6eye::GetPreview(&ev)) cv::imshow("yeux", ev);
-    }
-    }  // fin de l'affichage (displayDue)
-
-    int k = windowsOn ? cv::waitKey(1) : -1;
-    int cmd = ctl.Poll();   // commandes envoyées par Unity (1 caractère)
-    if (k < 0 && cmd >= 0) k = cmd;
-    if (k < 0 && injectKey >= 0) { k = injectKey; injectKey = -1; }
-    if (k == 'q' || k == 27 || k == 'Q' || g_parentGone) break;
-    if (k == 'V') k = 'v';   // commandes d'Unity : V sol, Z yaw
-    if (k == 'Z') k = 'z';
-    if (k == 'T') { tracking = false; haveLast = false; poseValid = false; k = 't'; }   // T = recentrer : arrêt puis redémarrage
-    if (k == 'r' && haveCalib && rectReady) showRect = !showRect;
-    if (k == 'x') swapEyes = !swapEyes;
-    if (k == 'c') {
-      if (haveCalib && rectReady) {
-        cv::Mat ca, cb;  // rectification pleine résolution, seulement pour ce contrôle
-        cv::remap(left, ca, rect.mapL1, rect.mapL2, cv::INTER_LINEAR);
-        cv::remap(right, cb, rect.mapR1, rect.mapR2, cv::INTER_LINEAR);
-        checkMsg = CheckRectification(ca, cb);
-      } else {
-        checkMsg = "pas de calibration chargee";
-      }
-    }
-    if (k == 'm') { haveMark = poseValid && haveLast; mark = poseP; }
-    if (k == 'n') haveMark = false;
-    if (k == '.') zoomIdx = std::min(5, zoomIdx + 1);
-    if (k == ',') zoomIdx = std::max(0, zoomIdx - 1);
-    if (k == 's') {
-      char n1[64], n2[64];
-      std::snprintf(n1, sizeof(n1), "capture/left_%04d.png", saved);
-      std::snprintf(n2, sizeof(n2), "capture/right_%04d.png", saved);
-      cv::imwrite(n1, left);
-      cv::imwrite(n2, right);
-      ++saved;
-    }
-    // ---- Calibration du montage de l'IMU ----
-    if (k == 'g') {
-      havePendingUp = MountStep1(acc, gyr, pendingUp, mountMsg);
-    }
-    if (k == 'f') {
-      if (!havePendingUp) {
-        mountMsg = "appuie d'abord sur g (casque a plat, a l'endroit, immobile)";
-      } else {
-        Mat3 R;
-        if (MountStep2(pendingUp, acc, gyr, R, mountMsg)) {
-          std::lock_guard<std::mutex> l(imu.m);
-          imu.mount = R;
-          imu.reinit = true;
-          SaveMount(R);
-          havePendingUp = false;
+          checkMsg = "pas de calibration chargee";
         }
       }
-    }
-    if (k >= '1' && k <= '6') {
-      int axis = (k - '1') / 2;
-      int sign = ((k - '1') % 2 == 0) ? -1 : +1;
-      std::lock_guard<std::mutex> l(imu.m);
-      imu.mount = Rot90(axis, sign) * imu.mount;
-      imu.reinit = true;
-      SaveMount(imu.mount);
-      mountMsg = "montage tourne de 90 deg (sauvegarde)";
-    }
-    if (k == '0') {
-      std::lock_guard<std::mutex> l(imu.m);
-      imu.mount = Mat3();
-      imu.reinit = true;
-      SaveMount(imu.mount);
-      mountMsg = "montage reinitialise";
-    }
-    if (k == 'z') {
-      std::lock_guard<std::mutex> l(imu.m);
-      imu.zero_yaw = true;
-    }
-    // ---- Tracking ----
-    if (k == 't') {
-      if (!tracking) {
-        if (!haveCalib) {
-          trackMsg = "le tracking a besoin d'une calibration chargee";
+      HandleMountCmd(k, imu, mc, acc, gyr);   // g, f (calibration du montage de l'IMU), 1-6, 0 et z
+      if (k == 't') {
+        if (!tracking) {
+          if (!haveCalib) {
+            trackMsg = "le tracking a besoin d'une calibration chargee";
+          } else {
+            tracking = true;
+            haveLast = false;
+            poseValid = false;
+            InvalidateSnap(vsnap);
+            delayEst.Reset();
+            havePrevOk = false;
+            if (vo) vo->Reset();
+            trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
+            floorF.Reset();
+            floorValid = false;
+            floorLocked = false;
+          }
         } else {
-          tracking = true;
+          tracking = false;
           haveLast = false;
           poseValid = false;
-          trail.clear();
           InvalidateSnap(vsnap);
-          delayEst.Reset();
-          havePrevOk = false;
-          if (vo) vo->Reset();
-          trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
-          floorF.Reset();
-          floorValid = false;
-          floorLocked = false;
+          trackMsg = "tracking arrete";
         }
-      } else {
-        tracking = false;
-        haveLast = false;
-        poseValid = false;
-        InvalidateSnap(vsnap);
-        trackMsg = "tracking arrete";
       }
+      if (k == 'u') usePrior = !usePrior;
+      if (k == 'v' && floorValid) floorLocked = !floorLocked;
+      if (k == '[') { camDelay = std::max(0.0, camDelay - 0.005); autoDelay = false; }   // reglage manuel : coupe l'automatique
+      if (k == ']') { camDelay = std::min(0.2, camDelay + 0.005); autoDelay = false; }
+      if (k == 'a') autoDelay = !autoDelay;
+      if (k == '-') predS = std::max(0.0, predS - 0.005);
+      if (k == '=') predS = std::min(0.1, predS + 0.005);
     }
-    if (k == 'u') usePrior = !usePrior;
-    if (k == 'v' && floorValid) floorLocked = !floorLocked;
-    if (k == '[') { camDelay = std::max(0.0, camDelay - 0.005); autoDelay = false; }   // réglage manuel : coupe l'automatique
-    if (k == ']') { camDelay = std::min(0.2, camDelay + 0.005); autoDelay = false; }
-    if (k == 'a') autoDelay = !autoDelay;
-    if (k == '-') predS = std::max(0.0, predS - 0.005);
-    if (k == '=') predS = std::min(0.1, predS + 0.005);
-    if (mountMsg != lastMountMsg) { lastMountMsg = mountMsg; std::cout << "[montage] " << mountMsg << std::endl; }
+    if (mc.msg != lastMountMsg) { lastMountMsg = mc.msg; std::cout << "[montage] " << mc.msg << std::endl; }
     if (trackMsg != lastTrackMsg) { lastTrackMsg = trackMsg; std::cout << "[suivi] " << trackMsg << std::endl; }
     if (checkMsg != lastCheckMsg) { lastCheckMsg = checkMsg; std::cout << "[calibration] " << checkMsg << std::endl; }
   }
 
   g_run = false;
+  if (pump.joinable()) pump.join();
   if (capThread.joinable()) capThread.join();
   if (th.joinable()) th.join();
   return 0;

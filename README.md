@@ -24,13 +24,21 @@ Deux caméras d'oeil infrarouges (ex. GC0308 320x240 @ 120 fps, avec LED IR) -> 
 - `tests/eye_math_test.cpp` (maths, g++) et `tests/eye_pupil_ref.py` (détecteur de référence sur images synthétiques, Python + OpenCV).
 - Ports UDP locaux : 9883 regard (44 octets), 9884 commandes, 9885 évènements. Voir `src/eye_math.h`.
 
+## Mouth tracking (facultatif)
+Une caméra de bouche (`mouthcam` dans `ar6dof_config.txt`, -1 = aucune) -> ouverture de la mâchoire, largeur, côté -> Unity (UDP 9886 données, 9887 commandes, 9888 évènements, voir `src/mouth_math.h`).
+Indépendant de l'eye tracking (l'un sans l'autre, ou les deux). Désactivé par défaut : aucun thread ni caméra. Détection classique de la cavité sombre de la bouche (`src/mouth_tracker.cpp`, réglages `ar6dof_mouth.txt`), étalonnage en 4 poses (`ar6dof_mouth_cal.txt`) : approximatif, à régler selon l'éclairage.
+
+## Mode services et aperçus
+`ar6dof_probe --services` (lancé par `ar6dof_app.exe`) n'a ni suivi stéréo, ni Bluetooth, ni passthrough : seulement l'IMU (étalonnage du montage), les caméras d'oeil / de bouche (étalonnage) et les aperçus, pour tout régler **sans lancer le suivi**. Les aperçus (`PV n` sur UDP 9877 : 1 stéréo, 2 yeux, 3 bouche, renouvelé au moins chaque seconde, expire après 3 s) passent par la mémoire partagée `Local\ar6dof_preview` (800x300 BGRA) et ne coûtent rien tant qu'on ne les demande pas, dans l'application comme dans le menu Unity.
+Les fenêtres OpenCV et les touches du clavier ont été retirées : tout se commande depuis l'application, Unity ou l'UDP 9877.
+
 ## Performances (CPU et latence)
 - **Threads d'OpenCV** : par défaut 2 (`--cv-threads N` pour changer). Sans cette limite OpenCV disperse chaque petit calcul (flot optique, remap) sur tous les coeurs : sur un CPU à 16 threads, ~50 % de CPU partout pour un suivi léger.
-- **Seul, sans Unity** : réponds `0` à « Afficher les fenêtres » ou lance avec `--no-windows` (Unity le fait déjà). Les 4 fenêtres OpenCV (image, orientation, trajectoire, yeux) redessinent à 30 Hz et coûtent cher.
+- **Plus de fenêtres OpenCV** : elles ont été remplacées par les aperçus à la demande de l'application (`--no-windows` est accepté sans effet).
 - **Compilation** : `/O2 /GL /arch:AVX2 /LTCG` pour le code d'ar6dof, OpenCV minimal (JPEG + PNG seulement, sans TIFF / WebP / lecteur de QR code) : build plus court et exe plus léger.
 - **Lecteur caméra direct (option `mfdirect`, réponds `1`)** : le MJPEG de la caméra est lu par Media Foundation sans décodeur ni convertisseur Windows intercalés (mode faible latence), puis décodé par libjpeg-turbo (SIMD) directement en BGR. Moins de copies, moins de CPU, moins de délai sur du 3200x1200. Au démarrage un auto-test (5 images sur 40 lectures) valide le mode ; en cas d'échec (pas de MJPEG à cette taille...) le programme revient tout seul à OpenCV. Le journal affiche `decodage X ms`.
 - `ar6dof_screen.dll` capture aussi des **fenêtres** (Windows.Graphics.Capture, C++/WinRT) : elle se lie à `windowsapp`.
-- Le journal de l'exe affiche `cpu NN%` une fois par seconde en mode sans fenêtre : compare avant / après.
+- Le journal de l'exe affiche `cpu NN%` une fois par seconde : compare avant / après.
 
 ## Compiler
 Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6dof_app.exe` (la fenêtre de contrôle), `ar6dof_probe.exe`, ses DLL et `ar6dof_screen.dll`.
@@ -39,7 +47,7 @@ Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6d
 1. Flasher `firmware/bno085_streamer` sur l'ESP32-C3 (Arduino IDE : *USB CDC On Boot = Enabled*).
 2. Lancer **`ar6dof_app.exe`** (fenêtre Windows : langue, listes de caméras et de ports, cases à cocher, boutons à la place des touches) : choisir la caméra, le port COM,
    le mode (liste lue sur la caméra ; module double comme l'ELP 3200x1200 = 2 yeux de 1600x1200, ou deux caméras séparées) et le dossier de calibration, *Enregistrer*, puis *Démarrer le suivi*. Les réglages sont gardés dans `ar6dof_config.txt`.
-   (L'ancienne méthode, `ar6dof_probe.exe` en console avec ses touches `r` `c` `x` `s` `g` `f` `t` `q`, fonctionne toujours.)
+   (`ar6dof_probe.exe` reste le **moteur** : l'application le lance elle-même, tu n'as plus à le double-cliquer.)
 3. Côté Unity : suivre `unity/README_UNITY.md`.
 
 ## Tests (g++)

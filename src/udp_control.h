@@ -3,6 +3,7 @@
 // À inclure APRÈS <winsock2.h>.
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <string>
 
 class UdpControl {
  public:
@@ -28,6 +29,17 @@ class UdpControl {
     char c[16];
     int n = recvfrom(s_, c, sizeof(c), 0, nullptr, nullptr);
     return n > 0 ? (unsigned char)c[0] : -1;
+  }
+  // Prochaine commande complète (une ligne de texte, ou un seul caractère pour les commandes simples) ; faux s'il n'y en a pas.
+  bool PollText(std::string& out) {
+    out.clear();
+    if (s_ == INVALID_SOCKET) return false;
+    char c[128];
+    int n = recvfrom(s_, c, sizeof(c) - 1, 0, nullptr, nullptr);
+    if (n <= 0) return false;
+    while (n > 0 && (c[n - 1] == '\n' || c[n - 1] == '\r' || c[n - 1] == ' ')) n--;
+    out.assign(c, c + n);
+    return !out.empty();
   }
   void Close() {
     if (s_ != INVALID_SOCKET) closesocket(s_);

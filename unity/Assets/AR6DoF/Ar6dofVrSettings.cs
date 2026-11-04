@@ -30,14 +30,14 @@ namespace AR6DoF
         // 5 onglets (comme dans Style, chacun peut avoir des sous-pages en haut de sa page) :
         //   Image      > Affichage, Optique
         //   Ecrans
-        //   Appareils  > Tete, Telecommande, Yeux
+        //   Appareils  > Tete, Telecommande, Yeux, Bouche
         //   Style      > Couleurs, Forme, Fenetres, Clavier (sous-pages propres a Style)
         //   Interface  > Dock, Langue, Performances
         // Chaque sous-page est une PAGE (défilement et textes vivants à elle) ; Enregistrer / Annuler / Par defaut ne touchent que la page affichée.
-        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PageCount = 10;
+        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PgMouth = 10, PageCount = 11;
         static readonly string[] TabNames = { "Image", "Ecrans", "Appareils", "Style", "Interface" };
-        static readonly int[][] TabPages = { new[] { PgView, PgOptics }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf } };
-        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances" };
+        static readonly int[][] TabPages = { new[] { PgView, PgOptics }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes, PgMouth }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf } };
+        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances", "Bouche" };
         static int TabOf(int pg)
         {
             for (int t = 0; t < TabPages.Length; t++) foreach (int p in TabPages[t]) if (p == pg) return t;
@@ -106,6 +106,11 @@ namespace AR6DoF
         Text eyeHint;
 
         // onglet Système : calibration de la télécommande en un seul bouton, avec compte à rebours (pour avoir le temps de poser la manette)
+        // aperçus des caméras d'oeil / de bouche : à la demande seulement (voir Ar6dofCameraPreview)
+        readonly Ar6dofCameraPreview camPreview = new Ar6dofCameraPreview();
+        bool eyePvOn, mouthPvOn, eyePvAuto, mouthPvAuto;     // aperçu demandé ; Auto : l'aperçu a lui-même activé le suivi (arrêté avec l'aperçu)
+        RawImage eyePvImg, mouthPvImg;
+        Text eyePvBtn, mouthPvBtn, eyePvMsg, mouthPvMsg;
         Text calMsg, calBtnText;
         string calMsgFr = "";
         int calStep;                // 0 = rien, 1 ou 2 = étape en attente
@@ -141,6 +146,7 @@ namespace AR6DoF
 
         // colonnes : 2 colonnes (largeur 320), 3 colonnes (208), 4 colonnes (156), 6 colonnes (102)
         static float Col3(int i) { return (i - 1) * 220f; }
+        static float Col4(int i) { return (i - 1.5f) * 164f; }
         static float Col4(int i) { return (i - 1.5f) * 162f; }
         static float Col6(int i) { return (i - 2.5f) * 109.2f; }
 
@@ -192,6 +198,7 @@ namespace AR6DoF
             BuildHead(pages[PgHead]);
             BuildRemote(pages[PgRemote]);
             BuildEyes(pages[PgEyes]);
+            BuildMouth(pages[PgMouth]);
             BuildStyle(pages[PgStyle]);
             BuildDock(pages[PgDock]);
             BuildLanguage(pages[PgLang]);
@@ -255,9 +262,9 @@ namespace AR6DoF
             for (int k = 0; k < subs.Length; k++)
             {
                 int target = subs[k];
-                float x = subs.Length == 2 ? (k == 0 ? -164f : 164f) : Col3(k);
-                float w = subs.Length == 2 ? 320f : 208f;
-                var b = Btn(page, x, Start - 23f, w, PageNames[target], () => ShowPage(target), 22, 46f);
+                float x = subs.Length == 2 ? (k == 0 ? -164f : 164f) : subs.Length == 4 ? Col4(k) : Col3(k);
+                float w = subs.Length == 2 ? 320f : subs.Length == 4 ? 156f : 208f;
+                var b = Btn(page, x, Start - 23f, w, PageNames[target], () => ShowPage(target), subs.Length == 4 ? 19 : 22, 46f);
                 subDots.Add(new KeyValuePair<int, GameObject>(target, Dot(b.transform, new Vector2(w * 0.5f - 18f, 15f))));
                 refreshers.Add(() => Ar6dofTheme.SetSelected(b, target == curTab));
             }
@@ -327,7 +334,14 @@ namespace AR6DoF
         /// <summary>Appelé à chaque image par la barre de tâches : textes vivants de l'onglet visible, état Enregistré / Aperçu.</summary>
         public void Tick()
         {
-            if (canvas == null || !canvas.gameObject.activeInHierarchy) return;
+            if (canvas == null || !canvas.gameObject.activeInHierarchy)
+            {
+                // menu fermé : plus d'aperçu (et on rend leur état aux suivis activés seulement pour l'aperçu)
+                if (eyePvOn) SetPreview(true, false);
+                if (mouthPvOn) SetPreview(false, false);
+                if (camPreview.Texture != null) camPreview.Stop();
+                return;
+            }
             float now = Time.unscaledTime;
             if (resetArmed && now > resetUntil) { resetArmed = false; UpdateResetLabel(); }
             // molette d'une vraie souris : fait défiler la page visée par le laser
@@ -355,6 +369,7 @@ namespace AR6DoF
                 }
                 UpdateCalMsg();
             }
+            PumpPreview();
             if (now < nextLive) return;
             nextLive = now + 0.25f;
             foreach (var kv in live) if (kv.Key == curTab) kv.Value();
@@ -1020,7 +1035,7 @@ namespace AR6DoF
                 var st = et.Status;
                 var g = et.Gaze;
                 if (!et.Enabled) l1.text = Ar6dofLoc.T("Desactive : aucune camera, aucun port, aucune charge");
-                else if (!et.EngineOnline) l1.text = Ar6dofLoc.T("ar6dof_probe ne repond pas (lance-le avec Eye tracking = 1)");
+                else if (!et.EngineOnline) l1.text = Ar6dofLoc.T("ar6dof_probe ne repond pas (coche Eye tracking dans l'application ar6dof_app)");
                 else l1.text = Ar6dofLoc.T("ar6dof_probe : en ligne") + (st.on ? "" : Ar6dofLoc.T(" (cameras arretees)"));
                 bool on = et.Enabled && et.EngineOnline;
                 l2.text = on ? Ar6dofLoc.F("Cameras : gauche {0}   droite {1}", CamTxt(st.camL, st.fpsL), CamTxt(st.camR, st.fpsR)) : "";
@@ -1038,6 +1053,10 @@ namespace AR6DoF
             });
             CloseCard(page, top, ref c);
 
+            top = OpenCard(page, ref c, "Apercu des cameras d'oeil");
+            BuildPreviewBox(page, ref c, true);
+            CloseCard(page, top, ref c);
+
             top = OpenCard(page, ref c, "Etalonnage des yeux");
             float y = Next(ref c, 48f, 12f);
             Btn(page, -164f, y, 320f, "Etalonner (9 points)", () =>
@@ -1051,6 +1070,141 @@ namespace AR6DoF
             Para(page, ref c, "Pendant l'etalonnage, garde la tete immobile et suis la cible\ndes yeux. Les donnees du regard sont lues par Unity dans\nAr6dofEyeTracker.Instance.Gaze (pour tes animations).", 100f);
             CloseCard(page, top, ref c);
             Finish(PgEyes, c);
+        }
+
+
+        // ================================================================== APERCU DES CAMERAS (a la demande)
+        /// <summary>Cadre d'aperçu 480x180 + bouton « Voir l'aperçu ». Rien ne tourne (ni caméra ni copie d'image) tant que l'aperçu n'est pas demandé.</summary>
+        void BuildPreviewBox(RectTransform page, ref float c, bool eyes)
+        {
+            float y = Next(ref c, 48f, 12f);
+            Text bt = ButtonText(page, 0f, y, 440f, "Voir l'apercu", () => TogglePreview(eyes), 22);
+            if (eyes) eyePvBtn = bt; else mouthPvBtn = bt;
+            float py = Next(ref c, 180f, 12f);
+            var bg = Ar6dofVrUi.Rect(page, "ApercuFond", new Vector2(0f, py), new Vector2(480f, 180f));
+            var bgi = bg.gameObject.AddComponent<Image>();
+            bgi.color = new Color(0.09f, 0.09f, 0.09f, 1f);
+            bgi.raycastTarget = false;
+            var rawRt = Ar6dofVrUi.Rect(bg, "Apercu", Vector2.zero, new Vector2(480f, 180f));
+            var raw = rawRt.gameObject.AddComponent<RawImage>();
+            raw.raycastTarget = false;
+            raw.enabled = false;
+            Text msg = Ar6dofVrUi.Label(bg, "", Vector2.zero, new Vector2(460f, 60f), 20);
+            msg.horizontalOverflow = HorizontalWrapMode.Wrap;
+            if (eyes) { eyePvImg = raw; eyePvMsg = msg; } else { mouthPvImg = raw; mouthPvMsg = msg; }
+            UpdatePreviewUi();
+        }
+
+        void TogglePreview(bool eyes)
+        {
+            if (eyes) SetPreview(true, !eyePvOn);
+            else SetPreview(false, !mouthPvOn);
+        }
+
+        /// <summary>Démarre / arrête l'aperçu. S'il faut pour cela activer le suivi, il est réactivé... puis désactivé avec l'aperçu (rien ne reste allumé).</summary>
+        void SetPreview(bool eyes, bool on)
+        {
+            if (eyes)
+            {
+                if (on == eyePvOn) return;
+                eyePvOn = on;
+                var et = dock.eyes;
+                if (on && et != null && !et.Enabled) { et.SetEnabled(true, false); eyePvAuto = true; }
+                else if (!on && eyePvAuto && et != null) { et.SetEnabled(false, false); eyePvAuto = false; }
+            }
+            else
+            {
+                if (on == mouthPvOn) return;
+                mouthPvOn = on;
+                var mt = dock.mouth;
+                if (on && mt != null && !mt.Enabled) { mt.SetEnabled(true, false); mouthPvAuto = true; }
+                else if (!on && mouthPvAuto && mt != null) { mt.SetEnabled(false, false); mouthPvAuto = false; }
+            }
+            UpdatePreviewUi();
+        }
+
+        void UpdatePreviewUi()
+        {
+            if (eyePvBtn != null) eyePvBtn.text = Ar6dofLoc.T(eyePvOn ? "Arreter l'apercu" : "Voir l'apercu");
+            if (mouthPvBtn != null) mouthPvBtn.text = Ar6dofLoc.T(mouthPvOn ? "Arreter l'apercu" : "Voir l'apercu");
+        }
+
+        /// <summary>Appelé à chaque image par Tick() : n'envoie et ne copie rien tant qu'aucun aperçu n'est affiché.</summary>
+        void PumpPreview()
+        {
+            // l'aperçu s'arrête dès qu'on quitte sa page (ou que le menu se ferme : Tick n'est plus appelé et ar6dof_probe coupe seul au bout de 3 s)
+            if (eyePvOn && curTab != PgEyes) SetPreview(true, false);
+            if (mouthPvOn && curTab != PgMouth) SetPreview(false, false);
+            int src = eyePvOn ? Ar6dofCameraPreview.Eyes : mouthPvOn ? Ar6dofCameraPreview.Mouth : 0;
+            camPreview.Pump(src);
+            if (src == 0)
+            {
+                if (camPreview.Texture != null) camPreview.Stop();   // libère la texture
+                if (eyePvImg != null) eyePvImg.enabled = false;
+                if (mouthPvImg != null) mouthPvImg.enabled = false;
+                if (eyePvMsg != null) eyePvMsg.text = Ar6dofLoc.T("Apercu desactive");
+                if (mouthPvMsg != null) mouthPvMsg.text = Ar6dofLoc.T("Apercu desactive");
+                return;
+            }
+            bool has = camPreview.HasFrame;
+            var img = src == Ar6dofCameraPreview.Eyes ? eyePvImg : mouthPvImg;
+            var msg = src == Ar6dofCameraPreview.Eyes ? eyePvMsg : mouthPvMsg;
+            if (img != null)
+            {
+                if (img.texture != camPreview.Texture) img.texture = camPreview.Texture;
+                img.enabled = has;
+            }
+            if (msg != null) msg.text = has ? "" : Ar6dofLoc.T("En attente de la camera...");
+        }
+
+        // ================================================================== BOUCHE
+        void BuildMouth(RectTransform page)
+        {
+            var mt = dock.mouth;
+            float c = BeginPage(page, PgMouth);
+            if (mt == null)
+            {
+                Ar6dofVrUi.Label(page, "Mouth tracking introuvable", new Vector2(0f, c - 30f), new Vector2(CW, 40f), 24);
+                Finish(PgMouth, c - 60f);
+                return;
+            }
+            float top = OpenCard(page, ref c, "Mouth tracking");
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Mouth tracking actif", () => mt.Enabled, v => mt.SetEnabled(v), 400f);
+            Text l1 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
+            Text l2 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
+            Text l3 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 12f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
+            Live(PgMouth, () =>
+            {
+                var st = mt.Status;
+                var m = mt.Mouth;
+                if (!mt.Enabled) l1.text = Ar6dofLoc.T("Desactive : aucune camera, aucun port, aucune charge");
+                else if (!mt.EngineOnline) l1.text = Ar6dofLoc.T("ar6dof_probe ne repond pas (coche Mouth tracking dans l'application ar6dof_app)");
+                else l1.text = Ar6dofLoc.T("ar6dof_probe : en ligne") + (st.on ? "" : Ar6dofLoc.T(" (camera arretee)"));
+                bool on = mt.Enabled && mt.EngineOnline;
+                l2.text = on ? Ar6dofLoc.F("Camera : {0}   Etalonnage : {1}", CamTxt(st.cam, st.fps), Ar6dofLoc.T(st.calibrated ? "fait" : "a faire")) : "";
+                if (on && mt.Receiving)
+                    l3.text = m.valid ? Ar6dofLoc.F("Ouverture {0}   largeur {1}   cote {2}", m.jawOpen.ToString("0.00"), m.wide.ToString("+0.00;-0.00;0.00"), m.side.ToString("+0.00;-0.00;0.00"))
+                                      : Ar6dofLoc.T("Pas d'etalonnage");
+                else l3.text = "";
+            });
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Apercu de la camera de bouche");
+            BuildPreviewBox(page, ref c, false);
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Etalonnage de la bouche");
+            float y = Next(ref c, 48f, 12f);
+            Btn(page, -164f, y, 320f, "1 - Bouche neutre", () => mt.Calibrate("neutral"), 22);
+            Btn(page, 164f, y, 320f, "2 - Grande ouverture", () => mt.Calibrate("open"), 22);
+            y = Next(ref c, 48f, 12f);
+            Btn(page, -164f, y, 320f, "3 - Sourire large", () => mt.Calibrate("wide"), 22);
+            Btn(page, 164f, y, 320f, "4 - Bouche serree", () => mt.Calibrate("narrow"), 22);
+            y = Next(ref c, 48f, 12f);
+            Btn(page, 0f, y, 440f, "Effacer l'etalonnage", () => mt.ClearCalibration(), 22);
+            Para(page, ref c, "Clique sur une etape puis prends l'expression tout de suite et garde-la\n1,5 s. Les etapes 1 et 2 suffisent pour l'ouverture ; 3 et 4 reglent la\nlargeur. Les valeurs sont lues dans Ar6dofMouthTracker.Instance.Mouth.", 100f);
+            CloseCard(page, top, ref c);
+            Finish(PgMouth, c);
         }
 
         // ================================================================== STYLE

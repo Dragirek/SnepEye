@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "devices.h"
+#include "frame_share_core.h"
 
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
@@ -84,16 +85,19 @@ std::vector<Loc> g_loc;
 
 enum {
   ID_LANG = 100, ID_CAMTYPE, ID_CAM, ID_CAM_REFRESH, ID_CAMR, ID_CAMHINT, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT,
-  ID_PORT, ID_PORT_REFRESH, ID_CALDIR, ID_CALBROWSE, ID_BASE,
+  ID_PORT, ID_PORT_REFRESH, ID_CALDIR, ID_CALBROWSE, ID_BASE, ID_IMUSTAT, ID_MOUNTMSG,
   ID_UDP, ID_SHARE, ID_BLE, ID_AUTOTRACK,
-  ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK,
-  ID_DIAG, ID_THREADS, ID_KEEP,
+  ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK, ID_EYE_CAL, ID_EYE_RECENTER, ID_EYE_CLEAR, ID_EYE_FOV, ID_EYESTAT,
+  ID_MOUTH, ID_MOUTHCAM, ID_MOUTHFPS, ID_MOUTHBACK, ID_MC_NEUTRAL, ID_MC_OPEN, ID_MC_WIDE, ID_MC_NARROW, ID_MC_CLEAR, ID_MOUTHSTAT,
+  ID_PV_CAM, ID_PV_EYE, ID_PV_MOUTH, ID_PVW_CAM, ID_PVW_EYE, ID_PVW_MOUTH,
+  ID_THREADS, ID_KEEP,
   ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK,
   ID_M_STEP1, ID_M_STEP2, ID_M_RESET,
   ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS,
-  ID_NAV0 = 300   // 6 pages : ID_NAV0 .. ID_NAV0 + 5
+  ID_NAV0 = 300   // 7 pages : ID_NAV0 .. ID_NAV0 + 6
 };
-const int kNavCount = 6;
+const int kNavCount = 7;
+enum { PG_CAM = 0, PG_SENSORS, PG_UNITY, PG_EYES, PG_MOUTH, PG_TRACK, PG_ADV };
 
 // Modes courants proposés seulement quand la caméra ne répond pas à la question « quels modes as-tu ? » (déjà utilisée par ar6dof_probe, par exemple).
 struct Preset { int w, h, fps; };
@@ -416,17 +420,19 @@ void RefreshCameras() {
   g_modeCache.clear();
   bool prevLoading = g_loading;
   g_loading = true;
-  int sl = GetSel(ID_CAM), sr = GetSel(ID_CAMR), el = GetSel(ID_EYEL), er = GetSel(ID_EYER);
+  int sl = GetSel(ID_CAM), sr = GetSel(ID_CAMR), el = GetSel(ID_EYEL), er = GetSel(ID_EYER), sm = GetSel(ID_MOUTHCAM);
   FillCams(ID_CAM, false);
   FillCams(ID_CAMR, false);
   FillCams(ID_EYEL, true);
   FillCams(ID_EYER, true);
+  FillCams(ID_MOUTHCAM, true);
   FillPorts();
   int n = (int)g_cams.size();
   SetSel(ID_CAM, std::min(std::max(sl, 0), std::max(0, n - 1)));
   SetSel(ID_CAMR, std::min(std::max(sr, 0), std::max(0, n - 1)));
   SetSel(ID_EYEL, std::min(std::max(el, 0), n));
   SetSel(ID_EYER, std::min(std::max(er, 0), n));
+  SetSel(ID_MOUTHCAM, std::min(std::max(sm, 0), n));
   g_loading = prevLoading;
   RebuildModes(false);
 }
@@ -435,6 +441,11 @@ void RefreshCameras() {
 void UpdateEyeEnable() {
   bool on = IsChecked(ID_EYE);
   for (int id : {ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK}) EnableWindow(H(id), on);
+}
+
+void UpdateMouthEnable() {
+  bool on = IsChecked(ID_MOUTH);
+  for (int id : {ID_MOUTHCAM, ID_MOUTHFPS, ID_MOUTHBACK}) EnableWindow(H(id), on);
 }
 
 void ConfigToFields() {
@@ -476,12 +487,20 @@ void ConfigToFields() {
   SetText(ID_EYEFPS, std::to_wstring(CfgInt("eyefps", 90)));
   SetSel(ID_EYEBACK, CfgInt("eyebackend", 0) == 1 ? 1 : 0);
   UpdateEyeEnable();
+  SetText(ID_EYE_FOV, std::to_wstring(CfgInt("app_calfov", 60)));
 
-  SetChecked(ID_DIAG, CfgInt("windows", 0) != 0);
+  SetChecked(ID_MOUTH, CfgInt("mouth", 0) != 0);
+  SetSel(ID_MOUTHCAM, std::min(std::max(CfgInt("mouthcam", -1) + 1, 0), (int)g_cams.size()));
+  SetText(ID_MOUTHFPS, std::to_wstring(CfgInt("mouthfps", 60)));
+  SetSel(ID_MOUTHBACK, CfgInt("mouthbackend", 0) == 1 ? 1 : 0);
+  UpdateMouthEnable();
+
   SetText(ID_THREADS, std::to_wstring(CfgInt("app_cvthreads", 2)));
   SetChecked(ID_KEEP, CfgInt("app_keep", 0) != 0);
   g_loading = false;
 }
+
+bool g_quietSave = false;   // enregistrement automatique (démarrage du mode services) : pas de boîte de dialogue
 
 bool ReadInt(int id, int lo, int hi, const wchar_t* frName, const wchar_t* enName, int* out) {
   std::wstring t = GetText(id);
@@ -489,8 +508,10 @@ bool ReadInt(int id, int lo, int hi, const wchar_t* frName, const wchar_t* enNam
   long v = wcstol(t.c_str(), &end, 10);
   if (t.empty() || (end && *end != L'\0') || v < lo || v > hi) {
     std::wstring msg = std::wstring(Tr(frName, enName)) + Tr(L" : entre ", L": enter ") + std::to_wstring(lo) + Tr(L" et ", L" and ") + std::to_wstring(hi) + L".";
-    MessageBoxW(g_wnd, msg.c_str(), Tr(L"Valeur invalide", L"Invalid value"), MB_OK | MB_ICONWARNING);
-    SetFocus(H(id));
+    if (!g_quietSave) {
+      MessageBoxW(g_wnd, msg.c_str(), Tr(L"Valeur invalide", L"Invalid value"), MB_OK | MB_ICONWARNING);
+      SetFocus(H(id));
+    }
     return false;
   }
   *out = (int)v;
@@ -499,19 +520,23 @@ bool ReadInt(int id, int lo, int hi, const wchar_t* frName, const wchar_t* enNam
 
 // Lit les champs et écrit ar6dof_config.txt (les clés inconnues sont conservées).
 bool SaveFields() {
-  int w, h, f, udp, efps, thr;
+  int w, h, f, udp, efps, mfps, fov, thr;
   if (!ReadInt(ID_W, 320, 8000, L"Largeur", L"Width", &w)) return false;
   if (!ReadInt(ID_H, 240, 4000, L"Hauteur", L"Height", &h)) return false;
   if (!ReadInt(ID_FPS, 5, 240, L"Cadence", L"Frame rate", &f)) return false;
   if (!ReadInt(ID_UDP, 0, 65535, L"Port UDP", L"UDP port", &udp)) return false;
   if (!ReadInt(ID_EYEFPS, 10, 240, L"Cadence des yeux", L"Eye frame rate", &efps)) return false;
+  if (!ReadInt(ID_MOUTHFPS, 10, 120, L"Cadence de la bouche", L"Mouth frame rate", &mfps)) return false;
+  if (!ReadInt(ID_EYE_FOV, 10, 150, L"Champ de vision de l'écran", L"Screen field of view", &fov)) return false;
   if (!ReadInt(ID_THREADS, 1, 16, L"Threads de calcul", L"Compute threads", &thr)) return false;
 
   bool two = IsTwoCams();
   if (two && GetSel(ID_CAM) == GetSel(ID_CAMR)) {
-    MessageBoxW(g_wnd, Tr(L"Choisis deux caméras différentes (gauche et droite).", L"Pick two different cameras (left and right)."),
-                Tr(L"Caméra", L"Camera"), MB_OK | MB_ICONWARNING);
-    SetFocus(H(ID_CAMR));
+    if (!g_quietSave) {
+      MessageBoxW(g_wnd, Tr(L"Choisis deux caméras différentes (gauche et droite).", L"Pick two different cameras (left and right)."),
+                  Tr(L"Caméra", L"Camera"), MB_OK | MB_ICONWARNING);
+      SetFocus(H(ID_CAMR));
+    }
     return false;
   }
   LoadCfg();   // repart du fichier : ce que le programme y a écrit lui-même est conservé
@@ -536,14 +561,20 @@ bool SaveFields() {
   g_cfg["eyecamR"] = std::to_string(GetSel(ID_EYER) - 1);
   g_cfg["eyefps"] = std::to_string(efps);
   g_cfg["eyebackend"] = std::to_string(GetSel(ID_EYEBACK) == 1 ? 1 : 0);
-  g_cfg["windows"] = IsChecked(ID_DIAG) ? "1" : "0";
+  g_cfg.erase("windows");   // ancienne option : les fenêtres OpenCV n'existent plus
+  g_cfg["mouth"] = IsChecked(ID_MOUTH) ? "1" : "0";
+  g_cfg["mouthcam"] = std::to_string(GetSel(ID_MOUTHCAM) - 1);
+  g_cfg["mouthfps"] = std::to_string(mfps);
+  g_cfg["mouthbackend"] = std::to_string(GetSel(ID_MOUTHBACK) == 1 ? 1 : 0);
+  g_cfg["app_calfov"] = std::to_string(fov);
   g_cfg["app_ble"] = IsChecked(ID_BLE) ? "1" : "0";
   g_cfg["app_cvthreads"] = std::to_string(thr);
   g_cfg["app_keep"] = IsChecked(ID_KEEP) ? "1" : "0";
   g_cfg["app_lang"] = g_en ? "en" : "fr";
   if (!SaveCfg()) {
-    MessageBoxW(g_wnd, Tr(L"Impossible d'écrire ar6dof_config.txt (dossier protégé ?).", L"Cannot write ar6dof_config.txt (protected folder?)."),
-                Tr(L"Enregistrement", L"Saving"), MB_OK | MB_ICONERROR);
+    if (!g_quietSave)
+      MessageBoxW(g_wnd, Tr(L"Impossible d'écrire ar6dof_config.txt (dossier protégé ?).", L"Cannot write ar6dof_config.txt (protected folder?)."),
+                  Tr(L"Enregistrement", L"Saving"), MB_OK | MB_ICONERROR);
     return false;
   }
   return true;
@@ -669,9 +700,9 @@ void FillRound(HDC dc, RECT r, int rad, COLORREF fill, COLORREF line, bool outli
   if (outline) DeleteObject(p);
 }
 
-const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Capteurs", L"Unity", L"Yeux", L"Suivi", L"Avancé"};
-const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Sensors", L"Unity", L"Eyes", L"Tracking", L"Advanced"};
-const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE768", L"\xE713"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
+const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Capteurs", L"Unity", L"Yeux", L"Bouche", L"Suivi", L"Avancé"};
+const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Sensors", L"Unity", L"Eyes", L"Mouth", L"Tracking", L"Advanced"};
+const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE76E", L"\xE768", L"\xE713"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
 
 // Fond de la fenêtre : titre de l'application, titre de la page et cartes de la page affichée.
 void PaintChrome(HDC dc) {
@@ -782,18 +813,58 @@ void ShowPage(int p) {
   RedrawWindow(g_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
-// ------------------------------------------------------------------ ar6dof_probe : état, lancement, arrêt, commandes
-bool ProbeRunning() {
+void OnPageChanged();   // défini plus bas (aperçus, mode services)
+
+// ------------------------------------------------------------------ ar6dof_probe : deux modes
+//  - « suivi » : lancé par le bouton Démarrer (ou par Unity) ; tout tourne (caméra stéréo, tracking 6DoF, passthrough, Bluetooth...)
+//  - « services » : lancé tout seul quand on a besoin d'un aperçu ou d'une calibration SANS suivi (IMU, yeux, bouche) ;
+//    pas de tracking, caméras ouvertes seulement pendant un aperçu ; s'arrête après 20 s d'inactivité.
+struct ProbeProcs { bool full = false, svc = false; };
+ProbeProcs g_procs;
+DWORD g_svcPid = 0;
+HANDLE g_svcProc = nullptr;
+DWORD g_svcReadyAt = 0, g_svcIdleSince = 0, g_svcLastStart = 0, g_svcStopDeadline = 0;
+bool g_startAfterSvc = false;                  // « Démarrer le suivi » demandé pendant que le mode services tourne : on attend sa fin
+bool g_pvOn[3] = {false, false, false};        // aperçus demandés par l'utilisateur : caméra stéréo, yeux, bouche
+std::string g_lastImu, g_lastMount, g_lastEye, g_lastMouth;   // derniers messages du journal (affichés dans leur page)
+
+// Étalonnage des yeux sur l'écran (fenêtre plein écran)
+struct CalState {
+  bool active = false, begun = false, solved = false;
+  HWND wnd = nullptr;
+  DWORD start = 0, endAt = 0;   // start : instant du premier point
+  int pointSent = -1;
+  double fov = 60;
+};
+CalState g_cal;
+
+void ScanProbes() {
+  bool full = false, svc = false;
   HANDLE s = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (s == INVALID_HANDLE_VALUE) return false;
-  PROCESSENTRY32W e;
-  e.dwSize = sizeof(e);
-  bool found = false;
-  if (Process32FirstW(s, &e)) {
-    do { if (_wcsicmp(e.szExeFile, L"ar6dof_probe.exe") == 0) { found = true; break; } } while (Process32NextW(s, &e));
+  if (s != INVALID_HANDLE_VALUE) {
+    PROCESSENTRY32W e;
+    e.dwSize = sizeof(e);
+    if (Process32FirstW(s, &e)) {
+      do {
+        if (_wcsicmp(e.szExeFile, L"ar6dof_probe.exe") == 0) {
+          if (g_svcPid && e.th32ProcessID == g_svcPid) svc = true;
+          else full = true;
+        }
+      } while (Process32NextW(s, &e));
+    }
+    CloseHandle(s);
   }
-  CloseHandle(s);
-  return found;
+  g_procs.full = full;
+  g_procs.svc = svc;
+  if (!svc && g_svcPid) {
+    g_svcPid = 0;
+    if (g_svcProc) { CloseHandle(g_svcProc); g_svcProc = nullptr; }
+  }
+}
+
+void KillPid(DWORD pid) {
+  HANDLE p = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+  if (p) { TerminateProcess(p, 0); CloseHandle(p); }
 }
 
 void KillProbe() {
@@ -802,17 +873,13 @@ void KillProbe() {
   PROCESSENTRY32W e;
   e.dwSize = sizeof(e);
   if (Process32FirstW(s, &e)) {
-    do {
-      if (_wcsicmp(e.szExeFile, L"ar6dof_probe.exe") == 0) {
-        HANDLE p = OpenProcess(PROCESS_TERMINATE, FALSE, e.th32ProcessID);
-        if (p) { TerminateProcess(p, 0); CloseHandle(p); }
-      }
-    } while (Process32NextW(s, &e));
+    do { if (_wcsicmp(e.szExeFile, L"ar6dof_probe.exe") == 0) KillPid(e.th32ProcessID); } while (Process32NextW(s, &e));
   }
   CloseHandle(s);
 }
 
-void SendCmd(char c) {
+// Un datagramme UDP vers 127.0.0.1:port (9877 = ar6dof_probe, 9884 = eye tracking, 9887 = mouth tracking).
+void SendUdp(int port, const std::string& text) {
   static bool init = false;
   if (!init) { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); init = true; }
   SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -820,10 +887,84 @@ void SendCmd(char c) {
   sockaddr_in a;
   memset(&a, 0, sizeof(a));
   a.sin_family = AF_INET;
-  a.sin_port = htons(9877);   // canal de commande d'ar6dof_probe (le même que celui d'Unity)
+  a.sin_port = htons((u_short)port);
   inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
-  sendto(s, &c, 1, 0, reinterpret_cast<sockaddr*>(&a), sizeof(a));
+  sendto(s, text.data(), (int)text.size(), 0, reinterpret_cast<sockaddr*>(&a), sizeof(a));
   closesocket(s);
+}
+
+void SendCmd(char c) { SendUdp(9877, std::string(1, c)); }
+
+// Commandes en attente : le mode services met ~2 s à ouvrir ses ports, on envoie quand il est prêt.
+struct Pending { DWORD at; int port; std::string text; };
+std::vector<Pending> g_pending;
+
+void QueueUdp(int port, const std::string& text, DWORD delayMs) {
+  if (delayMs == 0) { SendUdp(port, text); return; }
+  g_pending.push_back({GetTickCount() + delayMs, port, text});
+}
+
+void FlushPending() {
+  if (g_pending.empty()) return;
+  DWORD now = GetTickCount();
+  for (size_t i = 0; i < g_pending.size();) {
+    if ((LONG)(now - g_pending[i].at) >= 0) {
+      SendUdp(g_pending[i].port, g_pending[i].text);
+      g_pending.erase(g_pending.begin() + i);
+    } else {
+      i++;
+    }
+  }
+}
+
+bool StartServices(bool interactive) {
+  DWORD now = GetTickCount();
+  if (!interactive && g_svcLastStart && (LONG)(now - g_svcLastStart) < 3000) return false;
+  g_svcLastStart = now ? now : 1;
+  std::wstring exe = ExeDir() + L"\\ar6dof_probe.exe";
+  if (!FileExists(exe)) {
+    if (interactive)
+      MessageBoxW(g_wnd, Tr(L"ar6dof_probe.exe est introuvable : il doit être dans le même dossier que cette application.",
+                            L"ar6dof_probe.exe not found: it must be in the same folder as this application."),
+                  Tr(L"Démarrer", L"Start"), MB_OK | MB_ICONERROR);
+    return false;
+  }
+  g_quietSave = !interactive;
+  bool ok = SaveFields();   // le mode services lit ar6dof_config.txt : caméras des yeux et de la bouche, port de l'IMU...
+  g_quietSave = false;
+  if (!ok) return false;
+  std::wstring cmd = L"\"" + exe + L"\" --services --auto --no-ble --cv-threads " + std::to_wstring(CfgInt("app_cvthreads", 2)) + L" --parent " +
+                     std::to_wstring(GetCurrentProcessId());
+  std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+  buf.push_back(L'\0');
+  STARTUPINFOW si;
+  memset(&si, 0, sizeof(si));
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi;
+  memset(&pi, 0, sizeof(pi));
+  std::wstring dir = ExeDir();
+  if (!CreateProcessW(exe.c_str(), buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si, &pi)) return false;
+  if (g_svcProc) CloseHandle(g_svcProc);
+  g_svcProc = pi.hProcess;
+  g_svcPid = pi.dwProcessId;
+  CloseHandle(pi.hThread);
+  g_procs.svc = true;
+  g_svcReadyAt = GetTickCount() + 2200;
+  g_svcIdleSince = 0;
+  g_lastLogSize = ~0ull;
+  g_lastImu.clear(); g_lastMount.clear(); g_lastEye.clear(); g_lastMouth.clear();
+  return true;
+}
+
+// Un ar6dof_probe est-il là pour répondre ? Sinon on lance le mode services. Retourne le délai (ms) à attendre avant d'envoyer une commande.
+DWORD EnsureProbe() {
+  ScanProbes();
+  if (g_procs.full) return 0;
+  if (g_procs.svc) {
+    LONG left = (LONG)(g_svcReadyAt - GetTickCount());
+    return left > 0 ? (DWORD)left : 0;
+  }
+  return StartServices(true) ? 2200 : 0;
 }
 
 void StartProbe() {
@@ -835,9 +976,9 @@ void StartProbe() {
                 Tr(L"Démarrer", L"Start"), MB_OK | MB_ICONERROR);
     return;
   }
-  if (ProbeRunning()) return;
+  ScanProbes();
+  if (g_procs.full) return;
   std::wstring cmd = L"\"" + exe + L"\" --auto --cv-threads " + std::to_wstring(CfgInt("app_cvthreads", 2));
-  if (!IsChecked(ID_DIAG)) cmd += L" --no-windows";
   if (!IsChecked(ID_BLE)) cmd += L" --no-ble";
   if (!IsChecked(ID_KEEP)) cmd += L" --parent " + std::to_wstring(GetCurrentProcessId());   // s'arrête tout seul quand cette fenêtre se ferme
   std::vector<wchar_t> buf(cmd.begin(), cmd.end());
@@ -856,11 +997,304 @@ void StartProbe() {
   g_ourProc = pi.hProcess;
   CloseHandle(pi.hThread);
   g_lastLogSize = ~0ull;
+  g_lastMount.clear(); g_lastEye.clear(); g_lastMouth.clear();
 }
 
 void StopProbe() {
   SendCmd('Q');
   g_stopDeadline = GetTickCount() + 4000;   // arrêt propre d'abord ; sinon on force
+}
+
+// « Démarrer le suivi » : si le mode services tourne (il garde la caméra, le port de l'IMU...), on l'arrête d'abord.
+void StartTracking() {
+  ScanProbes();
+  if (g_procs.svc) {
+    SendCmd('Q');
+    g_startAfterSvc = true;
+    g_svcStopDeadline = GetTickCount() + 3500;
+    return;
+  }
+  StartProbe();
+}
+
+// ------------------------------------------------------------------ aperçus des caméras
+// ar6dof_probe écrit les images dans la mémoire partagée « Local\ar6dof_preview » (800 x 300) seulement tant qu'on lui envoie « PV n »
+// (n = 1 caméra stéréo, 2 yeux, 3 bouche) au moins une fois par seconde. Fermer la page ou l'application suffit à tout arrêter.
+const int kPvW = 800, kPvH = 300;
+HANDLE g_pvMap = nullptr;
+const uint8_t* g_pvBase = nullptr;
+std::vector<uint8_t> g_pvBuf;
+uint64_t g_pvLastId = 0;
+bool g_pvHave = false;
+int g_pvSrc = 0, g_pvActive = 0;
+DWORD g_pvLastReq = 0;
+
+int WantedSource() {
+  if (g_cal.active) return 2;
+  if (g_page == PG_CAM && g_pvOn[0]) return 1;
+  if (g_page == PG_EYES && g_pvOn[1]) return 2;
+  if (g_page == PG_MOUTH && g_pvOn[2]) return 3;
+  return 0;
+}
+
+HWND PvWindow(int src) { return H(src == 1 ? ID_PVW_CAM : src == 2 ? ID_PVW_EYE : ID_PVW_MOUTH); }
+
+bool OpenPreview() {
+  if (g_pvBase) return true;
+  g_pvMap = OpenFileMappingA(FILE_MAP_READ, FALSE, "Local\\ar6dof_preview");
+  if (!g_pvMap) return false;
+  g_pvBase = static_cast<const uint8_t*>(MapViewOfFile(g_pvMap, FILE_MAP_READ, 0, 0, 0));
+  uint32_t head[5] = {0, 0, 0, 0, 0};
+  if (g_pvBase) { memcpy(&head[0], g_pvBase, 4); memcpy(&head[2], g_pvBase + 8, 12); }
+  if (!g_pvBase || head[0] != fshare::kMagic || head[2] != (uint32_t)kPvW || head[3] != (uint32_t)kPvH || head[4] != 4u) {
+    if (g_pvBase) UnmapViewOfFile(g_pvBase);
+    CloseHandle(g_pvMap);
+    g_pvBase = nullptr;
+    g_pvMap = nullptr;
+    return false;
+  }
+  g_pvLastId = 0;
+  return true;
+}
+
+void ClosePreview() {
+  if (g_pvBase) UnmapViewOfFile(g_pvBase);
+  if (g_pvMap) CloseHandle(g_pvMap);
+  g_pvBase = nullptr;
+  g_pvMap = nullptr;
+}
+
+void PollPreview(int want) {
+  if (!OpenPreview()) return;
+  g_pvBuf.resize((size_t)kPvW * kPvH * 4);
+  uint64_t fid = 0, last = g_pvLastId;
+  double tw = 0, tc = 0;
+  if (!fshare::Read(g_pvBase, g_pvBuf.data(), g_pvBuf.size(), last, fid, tw, tc)) return;
+  g_pvLastId = last;
+  LARGE_INTEGER f, n;
+  QueryPerformanceFrequency(&f);
+  QueryPerformanceCounter(&n);
+  if ((double)n.QuadPart / (double)f.QuadPart - tw > 1.5) return;   // image d'une session précédente
+  g_pvHave = true;
+  g_pvSrc = want;
+  InvalidateRect(PvWindow(want), nullptr, FALSE);
+}
+
+// Appelée toutes les 66 ms : n'envoie et ne lit rien quand aucun aperçu n'est demandé.
+void OnFastTick() {
+  FlushPending();
+  const int want = WantedSource();
+  const DWORD now = GetTickCount();
+  if (want != g_pvActive) {
+    if (want == 0 && g_pvActive != 0) { SendUdp(9877, "PV 0"); ClosePreview(); }
+    g_pvHave = false;
+    for (int s = 1; s <= 3; s++) InvalidateRect(PvWindow(s), nullptr, FALSE);
+    g_pvActive = want;
+    g_pvLastReq = 0;
+  }
+  if (!want) return;
+  if (g_pvLastReq == 0 || now - g_pvLastReq >= 400) {
+    g_pvLastReq = now ? now : 1;
+    SendUdp(9877, "PV " + std::to_string(want));
+  }
+  PollPreview(want);
+}
+
+LRESULT CALLBACK PvProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+  if (m == WM_ERASEBKGND) return 1;
+  if (m == WM_PAINT) {
+    PAINTSTRUCT ps;
+    HDC dc = BeginPaint(h, &ps);
+    RECT rc;
+    GetClientRect(h, &rc);
+    const int src = (int)GetWindowLongPtrW(h, GWLP_USERDATA);
+    if (g_pvHave && g_pvSrc == src && WantedSource() == src && g_pvBuf.size() >= (size_t)kPvW * kPvH * 4) {
+      BITMAPINFO bi;
+      memset(&bi, 0, sizeof(bi));
+      bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      bi.bmiHeader.biWidth = kPvW;
+      bi.bmiHeader.biHeight = -kPvH;   // lignes du haut vers le bas
+      bi.bmiHeader.biPlanes = 1;
+      bi.bmiHeader.biBitCount = 32;
+      bi.bmiHeader.biCompression = BI_RGB;
+      SetStretchBltMode(dc, HALFTONE);
+      SetBrushOrgEx(dc, 0, 0, nullptr);
+      StretchDIBits(dc, 0, 0, rc.right, rc.bottom, 0, 0, kPvW, kPvH, g_pvBuf.data(), &bi, DIB_RGB_COLORS, SRCCOPY);
+    } else {
+      HBRUSH b = CreateSolidBrush(RGB(22, 22, 22));
+      FillRect(dc, &rc, b);
+      DeleteObject(b);
+      SetBkMode(dc, TRANSPARENT);
+      SetTextColor(dc, RGB(160, 160, 160));
+      SelectObject(dc, g_font);
+      const wchar_t* msg = WantedSource() == src ? Tr(L"En attente de la caméra…", L"Waiting for the camera…") : Tr(L"Aperçu désactivé", L"Preview off");
+      DrawTextW(dc, msg, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
+    EndPaint(h, &ps);
+    return 0;
+  }
+  return DefWindowProcW(h, m, w, l);
+}
+
+void TogglePreview(int idx) {
+  g_pvOn[idx] = !g_pvOn[idx];
+  if (g_pvOn[idx]) EnsureProbe();
+  OnFastTick();
+}
+
+// ------------------------------------------------------------------ étalonnage des yeux sur l'écran (9 points, fenêtre plein écran)
+const double kPi = 3.14159265358979323846;
+const double kCalPts[9][2] = {{0.5, 0.5}, {0.1, 0.1}, {0.9, 0.1}, {0.1, 0.9}, {0.9, 0.9}, {0.5, 0.1}, {0.5, 0.9}, {0.1, 0.5}, {0.9, 0.5}};
+const DWORD kCalPrep = 3500, kCalSettle = 900, kCalCollect = 800, kCalPer = 2000;
+
+void EndEyeCal(bool cancel) {
+  if (cancel && g_cal.active && !g_cal.solved) SendUdp(9884, "CAL_CANCEL\n");
+  g_cal.active = false;
+  HWND w = g_cal.wnd;
+  g_cal.wnd = nullptr;
+  if (w) DestroyWindow(w);
+}
+
+LRESULT CALLBACK CalProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+  switch (m) {
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_SETCURSOR:
+      SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+      return TRUE;
+    case WM_KEYDOWN:
+      if (w == VK_ESCAPE) EndEyeCal(true);
+      return 0;
+    case WM_RBUTTONDOWN:
+      EndEyeCal(true);
+      return 0;
+    case WM_TIMER: {
+      if (!g_cal.active) return 0;
+      const DWORD now = GetTickCount();
+      const LONG el = (LONG)(now - g_cal.start);
+      if (!g_cal.begun && el >= -500) { SendUdp(9884, "CAL_BEGIN\n"); g_cal.begun = true; }
+      const int idx = el >= 0 ? (int)(el / (LONG)kCalPer) : -1;
+      if (g_cal.begun && idx >= 0 && idx < 9 && idx > g_cal.pointSent) {
+        g_cal.pointSent = idx;
+        RECT rc;
+        GetClientRect(h, &rc);
+        const double tx = std::tan(g_cal.fov * kPi / 360.0), ty = tx * (double)rc.bottom / std::max(1L, rc.right);
+        const double u = (kCalPts[idx][0] - 0.5) * 2.0, v = (0.5 - kCalPts[idx][1]) * 2.0;   // yaw > 0 : à droite, pitch > 0 : en haut
+        char b[96];
+        std::snprintf(b, sizeof(b), "CAL_POINT %.3f %.3f %u %u\n", std::atan(u * tx) * 180.0 / kPi, std::atan(v * ty) * 180.0 / kPi, (unsigned)kCalSettle,
+                      (unsigned)kCalCollect);
+        SendUdp(9884, b);
+      }
+      if (!g_cal.solved && el >= (LONG)(9 * kCalPer + 300)) {
+        SendUdp(9884, "CAL_SOLVE\n");
+        g_cal.solved = true;
+        g_cal.endAt = now + 1500;
+      }
+      if (g_cal.solved && (LONG)(now - g_cal.endAt) >= 0) { EndEyeCal(false); return 0; }
+      InvalidateRect(h, nullptr, FALSE);
+      return 0;
+    }
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC dc = BeginPaint(h, &ps);
+      RECT rc;
+      GetClientRect(h, &rc);
+      HDC mem = CreateCompatibleDC(dc);
+      HBITMAP bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
+      HGDIOBJ old = SelectObject(mem, bmp);
+      FillRect(mem, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+      SetBkMode(mem, TRANSPARENT);
+      SelectObject(mem, g_fontTitle);
+      const LONG el = (LONG)(GetTickCount() - g_cal.start);
+      std::wstring msg;
+      if (el < 0) {
+        msg = Tr(L"Ouverture des caméras… tiens la tête droite, face à l'écran", L"Opening the cameras… keep your head straight, facing the screen");
+      } else if (g_cal.solved) {
+        msg = Tr(L"Calcul de l'étalonnage…", L"Computing the calibration…");
+      } else {
+        const int idx = std::min(8, (int)(el / (LONG)kCalPer));
+        const LONG ph = el % (LONG)kCalPer;
+        const double px = kCalPts[idx][0] * rc.right, py = kCalPts[idx][1] * rc.bottom;
+        const double t = std::min(1.0, (double)ph / (double)(kCalSettle + kCalCollect));
+        const int R = S(30), r = (int)(S(22) * (1.0 - t) + S(5) * t);
+        HBRUSH none = (HBRUSH)GetStockObject(NULL_BRUSH);
+        HPEN ring = CreatePen(PS_SOLID, std::max(2, S(3)), g_accent);
+        HGDIOBJ op = SelectObject(mem, ring), ob = SelectObject(mem, none);
+        Ellipse(mem, (int)px - R, (int)py - R, (int)px + R, (int)py + R);
+        SelectObject(mem, op);
+        SelectObject(mem, ob);
+        DeleteObject(ring);
+        HBRUSH dot = CreateSolidBrush(RGB(255, 255, 255));
+        HGDIOBJ ob2 = SelectObject(mem, dot);
+        HGDIOBJ op2 = SelectObject(mem, GetStockObject(NULL_PEN));
+        Ellipse(mem, (int)px - r, (int)py - r, (int)px + r, (int)py + r);
+        SelectObject(mem, ob2);
+        SelectObject(mem, op2);
+        DeleteObject(dot);
+        msg = std::wstring(Tr(L"Regarde le point sans bouger la tête", L"Look at the dot without moving your head")) + L"  (" + std::to_wstring(idx + 1) + L" / 9)";
+      }
+      SetTextColor(mem, RGB(210, 210, 210));
+      RECT tr = {0, rc.bottom - S(90), rc.right, rc.bottom - S(50)};
+      DrawTextW(mem, msg.c_str(), -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+      SelectObject(mem, g_font);
+      SetTextColor(mem, RGB(130, 130, 130));
+      RECT hr = {0, rc.bottom - S(50), rc.right, rc.bottom - S(20)};
+      DrawTextW(mem, Tr(L"Échap ou clic droit pour annuler", L"Esc or right-click to cancel"), -1, &hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+      BitBlt(dc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
+      SelectObject(mem, old);
+      DeleteObject(bmp);
+      DeleteDC(mem);
+      EndPaint(h, &ps);
+      return 0;
+    }
+    case WM_DESTROY:
+      KillTimer(h, 7);
+      if (g_cal.active) { g_cal.active = false; g_cal.wnd = nullptr; }
+      return 0;
+  }
+  return DefWindowProcW(h, m, w, l);
+}
+
+void StartEyeCal() {
+  if (g_cal.active) return;
+  int fov = 60;
+  if (!ReadInt(ID_EYE_FOV, 10, 150, L"Champ de vision de l'écran", L"Screen field of view", &fov)) return;
+  if (GetSel(ID_EYEL) <= 0 && GetSel(ID_EYER) <= 0) {
+    MessageBoxW(g_wnd, Tr(L"Coche « Activer », choisis au moins une caméra d'œil, puis clique sur Enregistrer.",
+                          L"Tick “Enable”, pick at least one eye camera, then click Save."),
+                Tr(L"Étalonnage des yeux", L"Eye calibration"), MB_OK | MB_ICONINFORMATION);
+    return;
+  }
+  const DWORD delay = EnsureProbe();
+  QueueUdp(9884, "EYE 1\n", delay);
+  g_cal = CalState();
+  g_cal.fov = fov;
+  g_cal.active = true;
+  g_cal.start = GetTickCount() + delay + kCalPrep;
+  MONITORINFO mi;
+  memset(&mi, 0, sizeof(mi));
+  mi.cbSize = sizeof(mi);
+  GetMonitorInfoW(MonitorFromWindow(g_wnd, MONITOR_DEFAULTTONEAREST), &mi);
+  g_cal.wnd = CreateWindowExW(WS_EX_TOPMOST, L"AR6Cal", L"", WS_POPUP | WS_VISIBLE, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                              mi.rcMonitor.bottom - mi.rcMonitor.top, g_wnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+  if (!g_cal.wnd) { g_cal.active = false; return; }
+  SetTimer(g_cal.wnd, 7, 30, nullptr);
+  SetForegroundWindow(g_cal.wnd);
+  SetFocus(g_cal.wnd);
+}
+
+// Étalonnage de la bouche : une expression à la fois ; la sonde mesure 1,5 s après 1 s de préparation.
+void MouthCal(const char* phase) {
+  if (GetSel(ID_MOUTHCAM) <= 0) {
+    MessageBoxW(g_wnd, Tr(L"Coche « Activer », choisis la caméra de la bouche, puis clique sur Enregistrer.",
+                          L"Tick “Enable”, pick the mouth camera, then click Save."),
+                Tr(L"Étalonnage de la bouche", L"Mouth calibration"), MB_OK | MB_ICONINFORMATION);
+    return;
+  }
+  g_pvOn[2] = true;
+  const DWORD delay = EnsureProbe();
+  QueueUdp(9887, std::string("MCAL ") + phase + "\n", delay + 300);
+  OnFastTick();
 }
 
 // ------------------------------------------------------------------ journal
@@ -901,6 +1335,10 @@ void RefreshLog() {
     p = e + 1;
     if (l.empty()) continue;
     if (IsStatsLine(l)) { g_lastStats = l; continue; }   // une ligne par seconde : affichée en bas, pas dans le journal
+    if (l.rfind("[imu] ", 0) == 0) { g_lastImu = l.substr(6); continue; }   // idem : affichée dans la page Capteurs
+    if (l.rfind("[montage] ", 0) == 0) g_lastMount = l.substr(10);
+    else if (l.rfind("[yeux] ", 0) == 0) g_lastEye = l.substr(7);
+    else if (l.rfind("[bouche] ", 0) == 0) g_lastMouth = l.substr(9);
     lines.push_back(l);
   }
   const size_t keep = 80;
@@ -916,17 +1354,58 @@ void RefreshLog() {
 
 // ------------------------------------------------------------------ état de la fenêtre
 void UpdateState() {
-  bool running = ProbeRunning();
-  if (running != g_running) g_running = running;
+  ScanProbes();
+  const bool running = g_procs.full;
+  g_running = running;
   if (!running) g_stopDeadline = 0;
+  if (!g_procs.full && !g_procs.svc) g_lastImu.clear();
   SetTextIfChanged(H(ID_START), running ? Tr(L"■  Arrêter le suivi", L"■  Stop tracking") : Tr(L"▶  Démarrer le suivi", L"▶  Start tracking"));
-  for (int id : {ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK, ID_M_STEP1, ID_M_STEP2, ID_M_RESET}) EnableWindow(H(id), running);
+  for (int id : {ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK}) EnableWindow(H(id), running);
   if (g_msgUntil == 0 || (LONG)(GetTickCount() - g_msgUntil) > 0) {
     g_msgUntil = 0;
-    SetTextIfChanged(H(ID_STATUS), running ? Tr(L"En marche", L"Running") : Tr(L"Arrêté", L"Stopped"));
+    SetTextIfChanged(H(ID_STATUS), running ? Tr(L"En marche", L"Running") : g_procs.svc ? Tr(L"Services (sans suivi)", L"Services (no tracking)") : Tr(L"Arrêté", L"Stopped"));
   }
   SetTextIfChanged(H(ID_STATS), running && !g_lastStats.empty() ? LogToW(g_lastStats) : std::wstring());
   if (g_stopDeadline && running && (LONG)(GetTickCount() - g_stopDeadline) > 0) { KillProbe(); g_stopDeadline = 0; }
+
+  // « Démarrer le suivi » demandé pendant le mode services : on attend qu'il ait rendu la caméra et le port série
+  if (g_startAfterSvc) {
+    if (!g_procs.svc) { g_startAfterSvc = false; StartProbe(); ScanProbes(); }
+    else if ((LONG)(GetTickCount() - g_svcStopDeadline) > 0) KillPid(g_svcPid);
+  }
+
+  // textes d'état des pages
+  std::wstring imu;
+  if (g_procs.full) imu = Tr(L"Le suivi tourne : il lit l'IMU lui-même.", L"Tracking is running: it reads the IMU itself.");
+  else if (GetSel(ID_PORT) <= 0) imu = Tr(L"Choisis le port de l'IMU, puis clique sur Enregistrer.", L"Pick the IMU port, then click Save.");
+  else if (!g_lastImu.empty()) imu = LogToW(g_lastImu);
+  else imu = Tr(L"Lecture de l'IMU en cours de démarrage…", L"Starting the IMU reading…");
+  SetTextIfChanged(H(ID_IMUSTAT), imu);
+  SetTextIfChanged(H(ID_MOUNTMSG), g_lastMount.empty() ? std::wstring(Tr(L"Suis les deux étapes ci-dessus : le résultat s'affiche ici.", L"Follow the two steps above: the result appears here."))
+                                                      : LogToW(g_lastMount));
+  SetTextIfChanged(H(ID_EYESTAT), g_lastEye.empty() ? std::wstring(Tr(L"Aperçu et étalonnage des yeux : aucune mesure pour l'instant.", L"Eye preview and calibration: nothing measured yet."))
+                                                    : LogToW(g_lastEye));
+  SetTextIfChanged(H(ID_MOUTHSTAT), g_lastMouth.empty() ? std::wstring(Tr(L"Aperçu et étalonnage de la bouche : aucune mesure pour l'instant.", L"Mouth preview and calibration: nothing measured yet."))
+                                                        : LogToW(g_lastMouth));
+  SetTextIfChanged(H(ID_PV_CAM), g_pvOn[0] ? Tr(L"Arrêter l'aperçu", L"Stop the preview") : Tr(L"Voir l'aperçu", L"Show the preview"));
+  SetTextIfChanged(H(ID_PV_EYE), g_pvOn[1] ? Tr(L"Arrêter l'aperçu", L"Stop the preview") : Tr(L"Voir l'aperçu", L"Show the preview"));
+  SetTextIfChanged(H(ID_PV_MOUTH), g_pvOn[2] ? Tr(L"Arrêter l'aperçu", L"Stop the preview") : Tr(L"Voir l'aperçu", L"Show the preview"));
+
+  // mode services : lancé seulement quand une page en a besoin, arrêté après 20 s sans besoin
+  const int want = WantedSource();
+  if (!g_procs.full && !g_procs.svc && !g_startAfterSvc) {
+    if (want || g_cal.active || (g_page == PG_SENSORS && GetSel(ID_PORT) > 0)) StartServices(false);
+  } else if (g_procs.svc && !g_startAfterSvc) {
+    const bool needed = want || g_cal.active || g_page == PG_SENSORS || !g_pending.empty();
+    if (needed) {
+      g_svcIdleSince = 0;
+    } else if (g_svcIdleSince == 0) {
+      g_svcIdleSince = GetTickCount() ? GetTickCount() : 1;
+    } else if (GetTickCount() - g_svcIdleSince > 20000) {
+      SendCmd('Q');
+      g_svcIdleSince = 0;
+    }
+  }
 }
 
 void ApplyLanguage() {
@@ -937,8 +1416,10 @@ void ApplyLanguage() {
   FillModes();
   FillBackends(ID_BACKEND);
   FillBackends(ID_EYEBACK);
+  FillBackends(ID_MOUTHBACK);
   FillCams(ID_EYEL, true);
   FillCams(ID_EYER, true);
+  FillCams(ID_MOUTHCAM, true);
   FillPorts();
   g_loading = false;
   UpdateCamType();
@@ -1000,24 +1481,27 @@ void OnCamTypeChanged() {
 }
 
 // ------------------------------------------------------------------ construction de la fenêtre
+const int kClientW = 940, kClientH = 752;   // taille de la zone cliente à 96 ppp (réduite automatiquement si l'écran est trop petit)
+
 void CreateControls() {
-  // Disposition : navigation à gauche (x 0..204), page à droite (cartes de x 224 à 916), barre du bas (y 588..640). Contrôles posés à la main, en pixels à 96 ppp.
+  // Disposition : navigation à gauche (x 0..204), page à droite (cartes de x 224 à 916), barre du bas (y 704..738). Contrôles posés à la main, en pixels à 96 ppp.
   const int X = 224, CWd = 692, PAD = 20, C0 = 190, CR = 472;   // x de la carte, largeur, marge gauche, début des champs (relatif), largeur d'un champ plein
+  const int PVX = PAD, PVW = 480, PVH = 180, COLX = PAD + PVW + 16, COLW = CWd - COLX - PAD;   // aperçu (480x180) et colonne de boutons à sa droite
 
   // ---- navigation (visible sur toutes les pages)
   g_buildPage = -1;
   for (int i = 0; i < kNavCount; i++) Mk(L"BUTTON", kNavFr[i], kNavEn[i], BS_OWNERDRAW | WS_TABSTOP, 12, 64 + i * 44, 180, 40, ID_NAV0 + i);
-  Combo(16, 598, 172, ID_LANG);
+  Combo(16, 706, 172, ID_LANG);
 
   // ---- barre du bas
-  Button(L"Enregistrer", L"Save", X, 596, 120, 34, ID_SAVE);
-  Mk(L"BUTTON", L"▶  Démarrer le suivi", L"▶  Start tracking", BS_OWNERDRAW | WS_TABSTOP, X + 132, 596, 210, 34, ID_START);
-  Button(L"Ouvrir le dossier", L"Open the folder", X + 354, 596, 140, 34, ID_OPENDIR);
-  Mk(L"STATIC", nullptr, nullptr, SS_RIGHT | SS_NOPREFIX | SS_ENDELLIPSIS, X + 506, 604, 186, 20, ID_STATUS);
+  Button(L"Enregistrer", L"Save", X, 704, 120, 34, ID_SAVE);
+  Mk(L"BUTTON", L"▶  Démarrer le suivi", L"▶  Start tracking", BS_OWNERDRAW | WS_TABSTOP, X + 132, 704, 210, 34, ID_START);
+  Button(L"Ouvrir le dossier", L"Open the folder", X + 354, 704, 140, 34, ID_OPENDIR);
+  Mk(L"STATIC", nullptr, nullptr, SS_RIGHT | SS_NOPREFIX | SS_ENDELLIPSIS, X + 506, 712, 186, 20, ID_STATUS);
 
   // ---- page 0 : Caméra
-  g_buildPage = 0;
-  CardBox(L"Caméra stéréo", L"Stereo camera", X, 62, CWd, 328);
+  g_buildPage = PG_CAM;
+  CardBox(L"Caméra stéréo", L"Stereo camera", X, 62, CWd, 352);
   Label(L"Type", L"Type", X + PAD, 100, 160);
   Combo(X + C0, 96, CR, ID_CAMTYPE);
   g_lblCam = Label(L"Caméra", L"Camera", X + PAD, 138, 160);
@@ -1035,36 +1519,42 @@ void CreateControls() {
   Edit(X + C0 + 212, 248, 62, ID_FPS, true);
   Label(L"i/s", L"fps", X + C0 + 284, 252, 40);
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + C0, 284, CR, 38, ID_CAMHINT);
-  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", X + PAD, 332, CWd - 2 * PAD, ID_MFDIRECT);
+  Label(L"Pilote caméra", L"Camera driver", X + PAD, 336, 160);
+  Combo(X + C0, 332, CR, ID_BACKEND);
+  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", X + PAD, 374, CWd - 2 * PAD, ID_MFDIRECT);
 
-  CardBox(L"Pilote", L"Driver", X, 404, CWd, 100);
-  Label(L"Pilote caméra", L"Camera driver", X + PAD, 452, 160);
-  Combo(X + C0, 448, CR, ID_BACKEND);
+  CardBox(L"Aperçu de la caméra", L"Camera preview", X, 428, CWd, 244);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + PVX, 474, PVW, PVH, ID_PVW_CAM);
+  Button(L"Voir l'aperçu", L"Show the preview", X + COLX, 474, COLW, 34, ID_PV_CAM);
+  Label(L"La caméra n'est ouverte que pendant l'aperçu. Elle est rendue quand tu quittes la page ou démarres le suivi.",
+        L"The camera is only opened while the preview is shown. It is released when you leave the page or start tracking.", X + COLX, 520, COLW, 110);
 
   // ---- page 1 : Capteurs
-  g_buildPage = 1;
-  CardBox(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", X, 62, CWd, 100);
+  g_buildPage = PG_SENSORS;
+  CardBox(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", X, 62, CWd, 170);
   Label(L"Port série", L"Serial port", X + PAD, 110, 160);
   Combo(X + C0, 106, CR - 90, ID_PORT);
   Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 105, 80, 28, ID_PORT_REFRESH);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 152, CWd - 2 * PAD, 68, ID_IMUSTAT);
 
-  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 176, CWd, 138);
-  Label(L"Dossier", L"Folder", X + PAD, 224, 160);
-  Edit(X + C0, 220, CR - 100, ID_CALDIR);
-  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 219, 90, 28, ID_CALBROWSE);
-  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 262, 160);
-  Edit(X + C0, 258, 76, ID_BASE);
-  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 262, 330);
-
-  CardBox(L"Montage de l'IMU (une seule fois)", L"IMU mounting (once)", X, 328, CWd, 200);
+  CardBox(L"Montage de l'IMU (une seule fois, sans lancer le suivi)", L"IMU mounting (once, without starting tracking)", X, 246, CWd, 232);
   Label(L"1. Pose le casque à plat, à l'endroit, sans bouger, puis clique sur « 1 ».\r\n2. Penche-le vers l'avant (pointe vers le haut), immobile, puis clique sur « 2 ».",
-        L"1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", X + PAD, 372, CWd - 2 * PAD, 44);
-  Button(L"1 · Casque à plat", L"1 · Headset flat", X + PAD, 424, 316, 34, ID_M_STEP1);
-  Button(L"2 · Penché en avant", L"2 · Tilted forward", X + PAD + 328, 424, 316, 34, ID_M_STEP2);
-  Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 468, 644, 34, ID_M_RESET);
+        L"1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", X + PAD, 290, CWd - 2 * PAD, 44);
+  Button(L"1 · Casque à plat", L"1 · Headset flat", X + PAD, 342, 316, 34, ID_M_STEP1);
+  Button(L"2 · Penché en avant", L"2 · Tilted forward", X + PAD + 328, 342, 316, 34, ID_M_STEP2);
+  Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 386, 644, 34, ID_M_RESET);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 430, CWd - 2 * PAD, 40, ID_MOUNTMSG);
+
+  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 492, CWd, 138);
+  Label(L"Dossier", L"Folder", X + PAD, 540, 160);
+  Edit(X + C0, 536, CR - 100, ID_CALDIR);
+  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 535, 90, 28, ID_CALBROWSE);
+  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 578, 160);
+  Edit(X + C0, 574, 76, ID_BASE);
+  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 578, 330);
 
   // ---- page 2 : Unity
-  g_buildPage = 2;
+  g_buildPage = PG_UNITY;
   CardBox(L"Sorties vers Unity", L"Output to Unity", X, 62, CWd, 208);
   Label(L"Port UDP", L"UDP port", X + PAD, 100, 160);
   Edit(X + C0, 96, 90, ID_UDP, true);
@@ -1074,7 +1564,7 @@ void CreateControls() {
   Check(L"Démarrer le suivi dès la première image", L"Start tracking on the first frame", X + PAD, 212, CWd - 2 * PAD, ID_AUTOTRACK);
 
   // ---- page 3 : Yeux
-  g_buildPage = 3;
+  g_buildPage = PG_EYES;
   CardBox(L"Suivi des yeux (eye tracking)", L"Eye tracking", X, 62, CWd, 216);
   Check(L"Activer avec 2 caméras d'œil", L"Enable with 2 eye cameras", X + PAD, 100, CWd - 2 * PAD, ID_EYE);
   Label(L"Œil gauche", L"Left eye", X + PAD, 148, 160);
@@ -1086,28 +1576,77 @@ void CreateControls() {
   Label(L"Pilote", L"Driver", X + C0 + 100, 224, 60);
   Combo(X + C0 + 160, 220, CR - 160, ID_EYEBACK);
 
-  // ---- page 4 : Suivi
-  g_buildPage = 4;
-  CardBox(L"Pendant le suivi (remplacent les touches du clavier)", L"While tracking (replace the keyboard keys)", X, 62, CWd, 160);
+  CardBox(L"Aperçu et étalonnage", L"Preview and calibration", X, 292, CWd, 388);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + PVX, 338, PVW, PVH, ID_PVW_EYE);
+  Button(L"Voir l'aperçu", L"Show the preview", X + COLX, 338, COLW, 34, ID_PV_EYE);
+  Button(L"Étalonner (9 points)", L"Calibrate (9 points)", X + COLX, 382, COLW, 34, ID_EYE_CAL);
+  Button(L"Recentrer le regard", L"Recenter the gaze", X + COLX, 426, COLW, 34, ID_EYE_RECENTER);
+  Button(L"Effacer l'étalonnage", L"Clear the calibration", X + COLX, 470, COLW, 34, ID_EYE_CLEAR);
+  Label(L"Champ de vision de l'écran (°)", L"Screen field of view (°)", X + PAD, 536, 230);
+  Edit(X + PAD + 236, 532, 60, ID_EYE_FOV, true);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 568, CWd - 2 * PAD, 40, ID_EYESTAT);
+  Label(L"Étalonnage : regarde chaque point sans bouger la tête (Échap pour annuler). Champ de vision : sur un moniteur, 2 × atan(largeur ÷ (2 × distance)), "
+        L"par exemple 53° pour un écran de 60 cm vu à 60 cm. Pour un étalonnage plus fidèle, refais-le dans le casque (menu Yeux d'Unity).",
+        L"Calibration: look at each dot without moving your head (Esc to cancel). Field of view: on a monitor, 2 × atan(width ÷ (2 × distance)), "
+        L"e.g. 53° for a 60 cm screen seen from 60 cm. For a more faithful calibration, redo it in the headset (Unity Eyes menu).",
+        X + PAD, 612, CWd - 2 * PAD, 60);
+
+  // ---- page 4 : Bouche
+  g_buildPage = PG_MOUTH;
+  CardBox(L"Suivi de la bouche (mouth tracking)", L"Mouth tracking", X, 62, CWd, 170);
+  Check(L"Activer avec une caméra de bouche", L"Enable with a mouth camera", X + PAD, 100, CWd - 2 * PAD, ID_MOUTH);
+  Label(L"Caméra", L"Camera", X + PAD, 148, 160);
+  Combo(X + C0, 144, CR, ID_MOUTHCAM);
+  Label(L"Cadence", L"Rate", X + PAD, 186, 160);
+  Edit(X + C0, 182, 76, ID_MOUTHFPS, true);
+  Label(L"Pilote", L"Driver", X + C0 + 100, 186, 60);
+  Combo(X + C0 + 160, 182, CR - 160, ID_MOUTHBACK);
+
+  CardBox(L"Aperçu et étalonnage", L"Preview and calibration", X, 246, CWd, 434);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + PVX, 292, PVW, PVH, ID_PVW_MOUTH);
+  Button(L"Voir l'aperçu", L"Show the preview", X + COLX, 292, COLW, 34, ID_PV_MOUTH);
+  Button(L"1 · Bouche neutre", L"1 · Neutral mouth", X + COLX, 336, COLW, 34, ID_MC_NEUTRAL);
+  Button(L"2 · Grande ouverture", L"2 · Wide open", X + COLX, 380, COLW, 34, ID_MC_OPEN);
+  Button(L"3 · Sourire large", L"3 · Wide smile", X + COLX, 424, COLW, 34, ID_MC_WIDE);
+  Button(L"4 · Bouche serrée", L"4 · Pursed lips", X + COLX, 468, COLW, 34, ID_MC_NARROW);
+  Button(L"Effacer l'étalonnage", L"Clear the calibration", X + COLX, 512, COLW, 34, ID_MC_CLEAR);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 486, PVW, 56, ID_MOUTHSTAT);
+  Label(L"Clique sur une étape, puis prends l'expression dans la seconde qui suit et garde-la 1,5 s. Les étapes 1 et 2 suffisent pour l'ouverture de la bouche ; "
+        L"3 et 4 règlent la largeur. La détection repère la cavité sombre de la bouche : une caméra proche, bien éclairée (ou infrarouge), cadrée sur la bouche. "
+        L"La zone analysée se règle dans ar6dof_mouth.txt.",
+        L"Click a step, then make the expression within a second and hold it for 1.5 s. Steps 1 and 2 are enough for mouth opening; "
+        L"3 and 4 tune the width. Detection finds the dark cavity of the mouth: use a close, well-lit (or infrared) camera framing the mouth. "
+        L"The analysed area is set in ar6dof_mouth.txt.",
+        X + PAD, 556, CWd - 2 * PAD, 112);
+
+  // ---- page 5 : Suivi
+  g_buildPage = PG_TRACK;
+  CardBox(L"Pendant le suivi", L"While tracking", X, 62, CWd, 160);
   Button(L"Redémarrer le suivi", L"Restart tracking", X + PAD, 106, 208, 34, ID_A_RESTART);
   Button(L"Verrouiller le sol", L"Lock the floor", X + PAD + 218, 106, 208, 34, ID_A_FLOOR);
   Button(L"Cap à zéro", L"Zero the heading", X + PAD + 436, 106, 208, 34, ID_A_YAW);
   Button(L"Inverser gauche / droite", L"Swap left / right", X + PAD, 150, 208, 34, ID_A_SWAP);
   Button(L"Vérifier la calibration", L"Check the calibration", X + PAD + 218, 150, 208, 34, ID_A_CHECK);
 
-  CardBox(L"Journal", L"Log", X, 236, CWd, 332);
-  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, X + PAD, 280, CWd - 2 * PAD, 240, ID_LOG, WS_EX_CLIENTEDGE);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 530, CWd - 2 * PAD, 20, ID_STATS);
+  CardBox(L"Journal", L"Log", X, 236, CWd, 440);
+  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, X + PAD, 280, CWd - 2 * PAD, 350, ID_LOG, WS_EX_CLIENTEDGE);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 640, CWd - 2 * PAD, 20, ID_STATS);
 
-  // ---- page 5 : Avancé
-  g_buildPage = 5;
-  CardBox(L"Avancé", L"Advanced", X, 62, CWd, 180);
-  Check(L"Fenêtres de diagnostic OpenCV (plus de CPU)", L"OpenCV diagnostic windows (more CPU)", X + PAD, 100, CWd - 2 * PAD, ID_DIAG);
-  Label(L"Threads de calcul", L"Compute threads", X + PAD, 148, 160);
-  Edit(X + C0, 144, 60, ID_THREADS, true);
-  Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", X + PAD, 190, CWd - 2 * PAD, ID_KEEP);
+  // ---- page 6 : Avancé
+  g_buildPage = PG_ADV;
+  CardBox(L"Avancé", L"Advanced", X, 62, CWd, 130);
+  Label(L"Threads de calcul", L"Compute threads", X + PAD, 104, 160);
+  Edit(X + C0, 100, 60, ID_THREADS, true);
+  Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", X + PAD, 144, CWd - 2 * PAD, ID_KEEP);
 
   g_buildPage = -1;
+}
+
+// Changement de page : l'aperçu de l'ancienne page s'arrête (plus aucune demande envoyée, la sonde le coupe seule), celui de la nouvelle reprend s'il était activé.
+void OnPageChanged() {
+  OnFastTick();
+  if (g_page == PG_SENSORS && GetSel(ID_PORT) > 0) EnsureProbe();   // lecture de l'IMU en direct dans la page Capteurs
+  UpdateState();
 }
 
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -1157,7 +1696,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       break;
     case WM_COMMAND: {
       int id = LOWORD(w), code = HIWORD(w);
-      if (code == BN_CLICKED && id >= ID_NAV0 && id < ID_NAV0 + kNavCount) { ShowPage(id - ID_NAV0); return 0; }
+      if (code == BN_CLICKED && id >= ID_NAV0 && id < ID_NAV0 + kNavCount) { ShowPage(id - ID_NAV0); OnPageChanged(); return 0; }
       if (code == BN_CLICKED && GetPropW(H(id), L"ischk")) SetChecked(id, !IsChecked(id));   // cases dessinées par nous : on bascule l'état ici
       switch (id) {
         case ID_LANG:
@@ -1181,6 +1720,20 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_EYE:
           if (code == BN_CLICKED) UpdateEyeEnable();
           break;
+        case ID_MOUTH:
+          if (code == BN_CLICKED) UpdateMouthEnable();
+          break;
+        case ID_PV_CAM: TogglePreview(0); UpdateState(); break;
+        case ID_PV_EYE: TogglePreview(1); UpdateState(); break;
+        case ID_PV_MOUTH: TogglePreview(2); UpdateState(); break;
+        case ID_EYE_CAL: StartEyeCal(); break;
+        case ID_EYE_RECENTER: QueueUdp(9884, "RECENTER\n", EnsureProbe()); break;
+        case ID_EYE_CLEAR: QueueUdp(9884, "CAL_CLEAR\n", EnsureProbe()); break;
+        case ID_MC_NEUTRAL: MouthCal("neutral"); break;
+        case ID_MC_OPEN: MouthCal("open"); break;
+        case ID_MC_WIDE: MouthCal("wide"); break;
+        case ID_MC_NARROW: MouthCal("narrow"); break;
+        case ID_MC_CLEAR: QueueUdp(9887, "MCAL_CLEAR\n", EnsureProbe()); break;
         case ID_PORT_REFRESH:
           g_ports = ListComPorts();
           g_loading = true;
@@ -1193,10 +1746,12 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             SetWindowTextW(H(ID_STATUS), Tr(L"Enregistré", L"Saved"));
             g_msgUntil = GetTickCount() + 2500;
             if (g_msgUntil == 0) g_msgUntil = 1;
+            ScanProbes();
+            if (g_procs.svc) SendCmd('Q');   // le mode services relit la configuration : il est relancé tout seul si une page en a besoin
           }
           break;
         case ID_START:
-          if (g_running) StopProbe(); else StartProbe();
+          if (g_running) StopProbe(); else StartTracking();
           UpdateState();
           break;
         case ID_OPENDIR: ShellExecuteW(h, L"open", ExeDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
@@ -1205,22 +1760,31 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_A_YAW: SendCmd('Z'); break;
         case ID_A_SWAP: SendCmd('x'); break;
         case ID_A_CHECK: SendCmd('c'); break;
-        case ID_M_STEP1: SendCmd('g'); break;
-        case ID_M_STEP2: SendCmd('f'); break;
-        case ID_M_RESET: SendCmd('0'); break;
+        case ID_M_STEP1: QueueUdp(9877, "g", EnsureProbe()); break;   // fonctionne sans suivi : le mode services lit l'IMU
+        case ID_M_STEP2: QueueUdp(9877, "f", EnsureProbe()); break;
+        case ID_M_RESET: QueueUdp(9877, "0", EnsureProbe()); break;
       }
       return 0;
     }
     case WM_TIMER:
+      if (w == 2) {   // 15 fois par seconde : ne fait rien tant qu'aucun aperçu n'est demandé
+        OnFastTick();
+        if (g_startAfterSvc) { static int n = 0; if (++n % 4 == 0) UpdateState(); }
+        return 0;
+      }
       RefreshLog();
       UpdateState();
       return 0;
     case WM_CLOSE:
+      if (g_cal.active) EndEyeCal(true);
       if (g_running && !IsChecked(ID_KEEP) && g_ourProc) SendCmd('Q');   // arrêt propre du programme que cette fenêtre a lancé
+      else if (g_procs.svc) SendCmd('Q');                                 // et du mode services
       DestroyWindow(h);
       return 0;
     case WM_DESTROY:
+      ClosePreview();
       KillTimer(h, 1);
+      KillTimer(h, 2);
       PostQuitMessage(0);
       return 0;
   }
@@ -1240,11 +1804,21 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   HDC dc = GetDC(nullptr);
   g_dpi = GetDeviceCaps(dc, LOGPIXELSY);
   ReleaseDC(nullptr, dc);
+  // La fenêtre est grande (aperçus des caméras) : si elle ne tient pas dans l'écran à cette échelle, tout est réduit proportionnellement.
+  double fit = 1.0;
+  {
+    RECT wa;
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    const double needH = MulDiv(kClientH, g_dpi, 96) + 48, needW = MulDiv(kClientW, g_dpi, 96) + 16;
+    fit = std::min(1.0, std::min((wa.bottom - wa.top) / needH, (wa.right - wa.left) / needW));
+    if (fit < 1.0) g_dpi = std::max(48, (int)(g_dpi * fit));
+  }
 
   NONCLIENTMETRICSW ncm;
   memset(&ncm, 0, sizeof(ncm));
   ncm.cbSize = sizeof(ncm);
   SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+  ncm.lfMessageFont.lfHeight = (LONG)(ncm.lfMessageFont.lfHeight * fit);
   g_font = CreateFontIndirectW(&ncm.lfMessageFont);
   {
     LOGFONTW lf = ncm.lfMessageFont;
@@ -1280,15 +1854,34 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   wc.lpszClassName = L"AR6DoFApp";
   wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
   RegisterClassW(&wc);
+  {   // aperçu des caméras et fenêtre plein écran d'étalonnage des yeux
+    WNDCLASSW pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.lpfnWndProc = PvProc;
+    pc.hInstance = inst;
+    pc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    pc.lpszClassName = L"AR6Preview";
+    RegisterClassW(&pc);
+    WNDCLASSW cc;
+    memset(&cc, 0, sizeof(cc));
+    cc.lpfnWndProc = CalProc;
+    cc.hInstance = inst;
+    cc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    cc.lpszClassName = L"AR6Cal";
+    RegisterClassW(&cc);
+  }
 
   const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
-  RECT r = {0, 0, S(940), S(644)};
+  RECT r = {0, 0, S(kClientW), S(kClientH)};
   AdjustWindowRect(&r, style, FALSE);
   g_wnd = CreateWindowExW(0, wc.lpszClassName, Tr(L"AR6DoF — Centre de contrôle", L"AR6DoF — Control center"), style, CW_USEDEFAULT, CW_USEDEFAULT,
                           r.right - r.left, r.bottom - r.top, nullptr, nullptr, inst, nullptr);
   if (!g_wnd) return 1;
 
   CreateControls();
+  SetWindowLongPtrW(H(ID_PVW_CAM), GWLP_USERDATA, 1);
+  SetWindowLongPtrW(H(ID_PVW_EYE), GWLP_USERDATA, 2);
+  SetWindowLongPtrW(H(ID_PVW_MOUTH), GWLP_USERDATA, 3);
   ApplyTheme();
   ShowPage(0);
   // liste de langue
@@ -1301,10 +1894,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   FillCamTypes();
   FillBackends(ID_BACKEND);
   FillBackends(ID_EYEBACK);
+  FillBackends(ID_MOUTHBACK);
   FillCams(ID_CAM, false);
   FillCams(ID_CAMR, false);
   FillCams(ID_EYEL, true);
   FillCams(ID_EYER, true);
+  FillCams(ID_MOUTHCAM, true);
   FillPorts();
   g_loading = false;
   ConfigToFields();
@@ -1312,6 +1907,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   UpdateState();
   RefreshLog();
   SetTimer(g_wnd, 1, 700, nullptr);
+  SetTimer(g_wnd, 2, 66, nullptr);
 
   ShowWindow(g_wnd, show);
   UpdateWindow(g_wnd);
