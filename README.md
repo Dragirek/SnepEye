@@ -38,7 +38,7 @@ Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6d
 ## Première utilisation
 1. Flasher `firmware/bno085_streamer` sur l'ESP32-C3 (Arduino IDE : *USB CDC On Boot = Enabled*).
 2. Lancer **`ar6dof_app.exe`** (fenêtre Windows : langue, listes de caméras et de ports, cases à cocher, boutons à la place des touches) : choisir la caméra, le port COM,
-   la résolution (3200x1200 = 2 yeux de 1600x1200) et le dossier de calibration, *Enregistrer*, puis *Démarrer le suivi*. Les réglages sont gardés dans `ar6dof_config.txt`.
+   le mode (liste lue sur la caméra ; module double comme l'ELP 3200x1200 = 2 yeux de 1600x1200, ou deux caméras séparées) et le dossier de calibration, *Enregistrer*, puis *Démarrer le suivi*. Les réglages sont gardés dans `ar6dof_config.txt`.
    (L'ancienne méthode, `ar6dof_probe.exe` en console avec ses touches `r` `c` `x` `s` `g` `f` `t` `q`, fonctionne toujours.)
 3. Côté Unity : suivre `unity/README_UNITY.md`.
 

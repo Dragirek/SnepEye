@@ -125,7 +125,7 @@ namespace AR6DoF
             {
                 if (Head == null) return;
                 if (rig == null) rig = FindFirstObjectByType<Ar6dofHeadRig>();
-                if (rig != null && !rig.HasPose) return;
+                if (rig != null && !rig.Ready) return;
                 if (waitStart < 0f) waitStart = Time.unscaledTime;
                 var sc = Ar6dofScreens.Instance;
                 bool screensReady = sc == null || sc.Built || Time.unscaledTime - waitStart > 3f;   // la barre se place sous les écrans
@@ -148,6 +148,13 @@ namespace AR6DoF
             if (h == null) return;
             var d = Ar6dofSettings.Current;
             if (!d.dockAtFeet) { reveal = 1f; ApplyReveal(); return; }
+            if (rig != null && !rig.HasPose)   // pas de suivi : on ne sait pas ou sont tes pieds, le dock reste visible devant toi
+            {
+                reveal = 1f;
+                if (!feetInit) FollowFeet(true);
+                ApplyReveal();
+                return;
+            }
 
             // inclinaison de la tête vers le bas (degrés) : le dock apparaît entre dockRevealStart et dockRevealFull
             float pitch = Mathf.Asin(Mathf.Clamp(-h.forward.y, -1f, 1f)) * Mathf.Rad2Deg;
@@ -519,7 +526,7 @@ namespace AR6DoF
             Text lbl;
             Ar6dofDockApp app = a;
             var sa = a as ScreenApp;
-            var b = Ar6dofVrUi.MakeButton(iconsRoot, (isGear || sa != null) ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
+            var b = Ar6dofVrUi.MakeButton(iconsRoot, (isGear || sa != null || a is KeyboardApp) ? "" : a.icon, new Vector2(x, -26f), new Vector2(size, size), () => Toggle(app), out lbl, 34);
             var rt = (RectTransform)b.transform;
             iconOf[a] = rt;
             if (isGear)
@@ -552,6 +559,20 @@ namespace AR6DoF
                 Ar6dofTheme.Attach(g, Ar6dofRole.Text);
                 var num = Ar6dofVrUi.Label(rt, sa.number.ToString(), new Vector2(0f, sa.panel != null && sa.panel.IsWindow ? 2f : 8f), new Vector2(size * 0.6f, 44f), 36);
                 num.fontStyle = FontStyle.Bold;
+            }
+            else if (a is KeyboardApp)
+            {
+                // clavier : dessin d'un clavier a la place des lettres "KB"
+                var g = new GameObject("Clavier", typeof(RectTransform));
+                g.transform.SetParent(rt, false);
+                var grt = (RectTransform)g.transform;
+                grt.anchoredPosition = new Vector2(0f, 10f);
+                grt.sizeDelta = new Vector2(size * 0.62f, size * 0.62f);
+                var gi = g.AddComponent<Image>();
+                gi.sprite = Glyph("keyboard");
+                gi.raycastTarget = false;
+                Ar6dofTheme.Attach(g, Ar6dofRole.Text);
+                Ar6dofVrUi.Label(rt, Ar6dofLoc.T(a.title), new Vector2(0f, -32f), new Vector2(size, 24f), 15);
             }
             else
             {

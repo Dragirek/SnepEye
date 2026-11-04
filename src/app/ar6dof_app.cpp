@@ -26,6 +26,7 @@
 #include <tlhelp32.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -57,6 +58,15 @@ ULONGLONG g_lastLogSize = ~0ull;
 
 std::vector<std::string> g_cams;
 std::vector<std::string> g_ports;
+
+// Modes de la liste « Mode » : ceux que la caméra annonce vraiment (Media Foundation), pas des réglages écrits d'avance.
+struct ModeEntry { int w, h, fps; };
+std::vector<ModeEntry> g_modeList;          // contenu de la liste (sans l'entrée « personnalisé »)
+std::map<int, std::vector<CamMode>> g_modeCache;   // modes déjà lus, par numéro de caméra
+int g_modeState = 0;                        // 0 = modes lus sur la caméra ; 1 = la caméra n'a pas répondu (modes courants) ; 2 = deux caméras sans mode commun
+bool g_modeNonMjpg = false;                 // la caméra n'annonce pas de MJPEG
+bool g_prevTwo = false;                     // type de caméra avant le dernier changement (pour convertir la largeur)
+HWND g_lblCam = nullptr;
 std::map<std::string, std::string> g_cfg;
 
 int S(int v) { return MulDiv(v, g_dpi, 96); }
@@ -65,7 +75,7 @@ struct Loc { HWND h; const wchar_t* fr; const wchar_t* en; };
 std::vector<Loc> g_loc;
 
 enum {
-  ID_LANG = 100, ID_CAM, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT,
+  ID_LANG = 100, ID_CAMTYPE, ID_CAM, ID_CAM_REFRESH, ID_CAMR, ID_CAMHINT, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT,
   ID_PORT, ID_PORT_REFRESH, ID_CALDIR, ID_CALBROWSE, ID_BASE,
   ID_UDP, ID_SHARE, ID_BLE, ID_AUTOTRACK,
   ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK,
@@ -75,13 +85,10 @@ enum {
   ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS
 };
 
-struct Preset { int w, h, fps; const wchar_t* fr; const wchar_t* en; };
+// Modes courants proposés seulement quand la caméra ne répond pas à la question « quels modes as-tu ? » (déjà utilisée par ar6dof_probe, par exemple).
+struct Preset { int w, h, fps; };
 const Preset kPresets[] = {
-  {3200, 1200, 60,  L"3200 × 1200 à 60 i/s (ELP, calibration d'origine)", L"3200 × 1200 at 60 fps (ELP, original calibration)"},
-  {2560, 720, 60,   L"2560 × 720 à 60 i/s (16:9, incompatible avec la calibration)", L"2560 × 720 at 60 fps (16:9, not compatible with the calibration)"},
-  {1600, 600, 120,  L"1600 × 600 à 120 i/s (conseillé : fluide et léger)", L"1600 × 600 at 120 fps (recommended: smooth and light)"},
-  {1280, 480, 120,  L"1280 × 480 à 120 i/s", L"1280 × 480 at 120 fps"},
-  {640, 240, 120,   L"640 × 240 à 120 i/s (très léger, peu précis)", L"640 × 240 at 120 fps (very light, less precise)"},
+  {3200, 1200, 60}, {2560, 720, 60}, {1600, 600, 120}, {1280, 480, 120}, {640, 240, 120},
 };
 const int kPresetCount = 5;
 
@@ -206,12 +213,34 @@ void ClearCombo(int id) { SendMessageW(H(id), CB_RESETCONTENT, 0, 0); }
 void AddItem(int id, const std::wstring& t) { SendMessageW(H(id), CB_ADDSTRING, 0, (LPARAM)t.c_str()); }
 
 // ------------------------------------------------------------------ remplissage des listes (dépend de la langue)
+void ReadSizeFields(int* w, int* h, int* f) {
+  *w = _wtoi(GetText(ID_W).c_str());
+  *h = _wtoi(GetText(ID_H).c_str());
+  *f = _wtoi(GetText(ID_FPS).c_str());
+}
+
+int ModeIndexFor(int w, int h, int fps) {
+  for (size_t i = 0; i < g_modeList.size(); i++)
+    if (g_modeList[i].w == w && g_modeList[i].h == h && g_modeList[i].fps == fps) return (int)i;
+  return (int)g_modeList.size();   // « personnalisé »
+}
+
 void FillModes() {
-  int sel = GetSel(ID_MODE);
   ClearCombo(ID_MODE);
-  for (int i = 0; i < kPresetCount; i++) AddItem(ID_MODE, Tr(kPresets[i].fr, kPresets[i].en));
+  for (const auto& m : g_modeList)
+    AddItem(ID_MODE, std::to_wstring(m.w) + L" × " + std::to_wstring(m.h) + Tr(L" à ", L" at ") + std::to_wstring(m.fps) + Tr(L" i/s", L" fps"));
   AddItem(ID_MODE, Tr(L"Personnalisé (valeurs ci-dessous)", L"Custom (values below)"));
-  SetSel(ID_MODE, sel >= 0 ? sel : kPresetCount);
+  int w, h, f;
+  ReadSizeFields(&w, &h, &f);
+  SetSel(ID_MODE, ModeIndexFor(w, h, f));
+}
+
+void FillCamTypes() {
+  int sel = GetSel(ID_CAMTYPE);
+  ClearCombo(ID_CAMTYPE);
+  AddItem(ID_CAMTYPE, Tr(L"Un module double (image côte à côte)", L"One dual module (side-by-side image)"));
+  AddItem(ID_CAMTYPE, Tr(L"Deux caméras séparées (gauche + droite)", L"Two separate cameras (left + right)"));
+  SetSel(ID_CAMTYPE, sel == 1 ? 1 : 0);
 }
 
 void FillBackends(int id) {
@@ -252,13 +281,136 @@ void ScanDevices() {
   g_ports = ListComPorts();
 }
 
-// ------------------------------------------------------------------ configuration <-> champs
-int PresetIndexFor(int w, int h, int fps) {
-  for (int i = 0; i < kPresetCount; i++)
-    if (kPresets[i].w == w && kPresets[i].h == h && kPresets[i].fps == fps) return i;
-  return kPresetCount;
+// ------------------------------------------------------------------ modes réellement proposés par la ou les caméras
+bool IsTwoCams() { return GetSel(ID_CAMTYPE) == 1; }
+
+std::vector<CamMode> QueryModes(int idx) {
+  auto it = g_modeCache.find(idx);
+  if (it != g_modeCache.end()) return it->second;
+  std::vector<CamMode> v;
+  std::thread t([&v, idx] { v = ListCameraModes(idx); });   // Media Foundation sur son propre fil
+  t.join();
+  if (!v.empty()) g_modeCache[idx] = v;   // un échec (caméra occupée) n'est pas mémorisé : on réessaiera
+  return v;
 }
 
+// MJPEG seulement (ar6dof_probe demande du MJPEG) ; si la caméra n'en annonce aucun, tous ses modes, avec un avertissement.
+std::vector<ModeEntry> ModesOf(const std::vector<CamMode>& v, bool* nonMjpg) {
+  bool anyMjpg = false;
+  for (const auto& m : v) if (m.fourcc == kFourccMjpg) anyMjpg = true;
+  if (nonMjpg) *nonMjpg = !v.empty() && !anyMjpg;
+  std::vector<ModeEntry> out;
+  for (const auto& m : v) {
+    if (anyMjpg && m.fourcc != kFourccMjpg) continue;
+    bool dup = false;
+    for (const auto& e : out) if (e.w == m.w && e.h == m.h && e.fps == m.fps) dup = true;
+    if (!dup) out.push_back({m.w, m.h, m.fps});
+  }
+  return out;
+}
+
+// Mode proposé d'office : cadence d'au moins 60 i/s si possible, taille proche de 1600 × 600 (l'image côte à côte) -> fluide et léger.
+int PickDefaultMode(bool two) {
+  double target = (two ? 800.0 : 1600.0) * 600.0;
+  int best = -1;
+  double bestScore = 1e30;
+  for (size_t i = 0; i < g_modeList.size(); i++) {
+    const ModeEntry& m = g_modeList[i];
+    double score = std::fabs(std::log((double)m.w * m.h / target)) + (m.fps >= 60 ? 0.0 : 5.0) - 0.001 * m.fps;
+    if (score < bestScore) { bestScore = score; best = (int)i; }
+  }
+  return best;
+}
+
+void UpdateCamType() {
+  EnableWindow(H(ID_CAMR), IsTwoCams());
+  if (g_lblCam) SetTextIfChanged(g_lblCam, IsTwoCams() ? Tr(L"Caméra gauche", L"Left camera") : Tr(L"Caméra", L"Camera"));
+}
+
+void UpdateCamHint() {
+  int w, h, f;
+  ReadSizeFields(&w, &h, &f);
+  bool two = IsTwoCams();
+  bool known = ModeIndexFor(w, h, f) < (int)g_modeList.size();
+  std::wstring t;
+  if (g_modeState == 1)
+    t = Tr(L"La caméra n'a pas répondu (déjà utilisée ?) : modes courants affichés. Cliquer sur Actualiser pour réessayer.",
+           L"The camera did not answer (already in use?): common modes shown. Click Refresh to try again.");
+  else if (g_modeState == 2)
+    t = Tr(L"Aucun mode commun aux deux caméras : saisis une taille à la main.", L"No mode common to both cameras: type a size by hand.");
+  else if (g_modeNonMjpg)
+    t = Tr(L"Cette caméra n'annonce pas de MJPEG : le mode choisi peut ne pas fonctionner.", L"This camera does not advertise MJPEG: the chosen mode may not work.");
+  else if (!known)
+    t = Tr(L"Ce mode n'est pas annoncé par la caméra : choisis-en un dans la liste.", L"The camera does not advertise this mode: pick one from the list.");
+  else if (two)
+    t = std::wstring(Tr(L"Image assemblée : ", L"Combined image: ")) + std::to_wstring(w * 2) + L" × " + std::to_wstring(h) + Tr(L" (gauche | droite)", L" (left | right)");
+  else
+    t = std::wstring(Tr(L"Chaque œil : ", L"Each eye: ")) + std::to_wstring(w / 2) + L" × " + std::to_wstring(h);
+  SetTextIfChanged(H(ID_CAMHINT), t);
+}
+
+// Relit les modes de la ou des caméras choisies et remplit la liste. autoPick : si la taille saisie n'existe pas sur cette caméra, en choisir une qui existe.
+void RebuildModes(bool autoPick) {
+  bool prevLoading = g_loading;
+  g_loading = true;
+  bool two = IsTwoCams();
+  SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+  bool nonL = false, nonR = false;
+  std::vector<ModeEntry> a = ModesOf(QueryModes(std::max(0, GetSel(ID_CAM))), &nonL);
+  std::vector<ModeEntry> b;
+  if (two) b = ModesOf(QueryModes(std::max(0, GetSel(ID_CAMR))), &nonR);
+  SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+  g_modeList.clear();
+  g_modeNonMjpg = nonL || nonR;
+  g_modeState = 0;
+  if (a.empty() || (two && b.empty())) {
+    g_modeState = 1;
+    g_modeNonMjpg = false;
+    for (int i = 0; i < kPresetCount; i++) g_modeList.push_back({two ? kPresets[i].w / 2 : kPresets[i].w, kPresets[i].h, kPresets[i].fps});
+  } else if (!two) {
+    g_modeList = a;
+  } else {
+    for (const auto& m : a)
+      for (const auto& n : b)
+        if (m.w == n.w && m.h == n.h && m.fps == n.fps) { g_modeList.push_back(m); break; }
+    if (g_modeList.empty()) g_modeState = 2;
+  }
+  int w, h, f;
+  ReadSizeFields(&w, &h, &f);
+  if (autoPick && g_modeState != 1 && ModeIndexFor(w, h, f) >= (int)g_modeList.size()) {
+    int p = PickDefaultMode(two);
+    if (p >= 0) {
+      SetText(ID_W, std::to_wstring(g_modeList[p].w));
+      SetText(ID_H, std::to_wstring(g_modeList[p].h));
+      SetText(ID_FPS, std::to_wstring(g_modeList[p].fps));
+    }
+  }
+  FillModes();
+  UpdateCamHint();
+  g_loading = prevLoading;
+}
+
+void RefreshCameras() {
+  ScanDevices();
+  g_modeCache.clear();
+  bool prevLoading = g_loading;
+  g_loading = true;
+  int sl = GetSel(ID_CAM), sr = GetSel(ID_CAMR), el = GetSel(ID_EYEL), er = GetSel(ID_EYER);
+  FillCams(ID_CAM, false);
+  FillCams(ID_CAMR, false);
+  FillCams(ID_EYEL, true);
+  FillCams(ID_EYER, true);
+  FillPorts();
+  int n = (int)g_cams.size();
+  SetSel(ID_CAM, std::min(std::max(sl, 0), std::max(0, n - 1)));
+  SetSel(ID_CAMR, std::min(std::max(sr, 0), std::max(0, n - 1)));
+  SetSel(ID_EYEL, std::min(std::max(el, 0), n));
+  SetSel(ID_EYER, std::min(std::max(er, 0), n));
+  g_loading = prevLoading;
+  RebuildModes(false);
+}
+
+// ------------------------------------------------------------------ configuration <-> champs
 void UpdateEyeEnable() {
   bool on = IsChecked(ID_EYE);
   for (int id : {ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK}) EnableWindow(H(id), on);
@@ -266,12 +418,20 @@ void UpdateEyeEnable() {
 
 void ConfigToFields() {
   g_loading = true;
-  SetSel(ID_CAM, std::min(std::max(CfgInt("cam", 0), 0), std::max(0, (int)g_cams.size() - 1)));
+  int lastCam = std::max(0, (int)g_cams.size() - 1);
+  int camR = CfgInt("camR", -1);
+  bool two = camR >= 0;
+  g_prevTwo = two;
+  SetSel(ID_CAMTYPE, two ? 1 : 0);
+  SetSel(ID_CAM, std::min(std::max(CfgInt("cam", 0), 0), lastCam));
+  SetSel(ID_CAMR, std::min(std::max(two ? camR : 1, 0), lastCam));
   int w = CfgInt("width", 1600), h = CfgInt("height", 600), f = CfgInt("fps", 120);
+  if (two) w /= 2;   // deux caméras : le fichier garde la largeur de l'image assemblée, la fenêtre montre celle d'UNE caméra
   SetText(ID_W, std::to_wstring(w));
   SetText(ID_H, std::to_wstring(h));
   SetText(ID_FPS, std::to_wstring(f));
-  SetSel(ID_MODE, PresetIndexFor(w, h, f));
+  UpdateCamType();
+  RebuildModes(g_cfg.find("width") == g_cfg.end());   // première utilisation : on propose un mode que la caméra a vraiment
   SetSel(ID_BACKEND, CfgInt("backend", 0) == 1 ? 1 : 0);
   SetChecked(ID_MFDIRECT, CfgInt("mfdirect", 0) != 0);
 
@@ -287,7 +447,7 @@ void ConfigToFields() {
   SetText(ID_UDP, std::to_wstring(CfgInt("udp", 9876)));
   SetChecked(ID_SHARE, CfgInt("share", 1) != 0);
   SetChecked(ID_BLE, CfgInt("app_ble", 1) != 0);
-  SetChecked(ID_AUTOTRACK, CfgInt("autotrack", 0) != 0);
+  SetChecked(ID_AUTOTRACK, CfgInt("autotrack", 1) != 0);
 
   SetChecked(ID_EYE, CfgInt("eye", 0) != 0);
   SetSel(ID_EYEL, std::min(std::max(CfgInt("eyecamL", 1) + 1, 0), (int)g_cams.size()));
@@ -326,11 +486,19 @@ bool SaveFields() {
   if (!ReadInt(ID_EYEFPS, 10, 240, L"Cadence des yeux", L"Eye frame rate", &efps)) return false;
   if (!ReadInt(ID_THREADS, 1, 16, L"Threads de calcul", L"Compute threads", &thr)) return false;
 
+  bool two = IsTwoCams();
+  if (two && GetSel(ID_CAM) == GetSel(ID_CAMR)) {
+    MessageBoxW(g_wnd, Tr(L"Choisis deux caméras différentes (gauche et droite).", L"Pick two different cameras (left and right)."),
+                Tr(L"Caméra", L"Camera"), MB_OK | MB_ICONWARNING);
+    SetFocus(H(ID_CAMR));
+    return false;
+  }
   LoadCfg();   // repart du fichier : ce que le programme y a écrit lui-même est conservé
   g_cfg["cam"] = std::to_string(std::max(0, GetSel(ID_CAM)));
+  g_cfg["camR"] = two ? std::to_string(std::max(0, GetSel(ID_CAMR))) : std::string("-1");
   int ps = GetSel(ID_PORT);
   g_cfg["portname"] = (ps > 0 && (size_t)ps - 1 < g_ports.size()) ? g_ports[ps - 1] : "";
-  g_cfg["width"] = std::to_string(w);
+  g_cfg["width"] = std::to_string(two ? w * 2 : w);   // toujours la largeur TOTALE de l'image gauche|droite
   g_cfg["height"] = std::to_string(h);
   g_cfg["fps"] = std::to_string(f);
   g_cfg["backend"] = std::to_string(GetSel(ID_BACKEND) == 1 ? 1 : 0);
@@ -364,6 +532,65 @@ void SaveLanguageOnly() {
   LoadCfg();
   g_cfg["app_lang"] = g_en ? "en" : "fr";
   SaveCfg();
+}
+
+// ------------------------------------------------------------------ thème sombre / clair (suit le réglage « mode des applications » de Windows)
+bool g_dark = false;
+HBRUSH g_brBg = nullptr, g_brEdit = nullptr;
+const COLORREF kDarkBg = RGB(32, 32, 32), kDarkEdit = RGB(48, 48, 48), kDarkText = RGB(236, 236, 236), kDarkDisabled = RGB(130, 130, 130);
+
+bool SystemWantsDark() {
+  HIGHCONTRASTW hc;
+  memset(&hc, 0, sizeof(hc));
+  hc.cbSize = sizeof(hc);
+  if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON)) return false;   // contraste élevé : couleurs du système
+  DWORD v = 1, sz = sizeof(v);
+  if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD,
+                   nullptr, &v, &sz) != ERROR_SUCCESS)
+    return false;
+  return v == 0;
+}
+
+typedef HRESULT(WINAPI* SetWindowThemeFn)(HWND, LPCWSTR, LPCWSTR);
+typedef HRESULT(WINAPI* DwmSetWindowAttributeFn)(HWND, DWORD, LPCVOID, DWORD);
+
+// uxtheme.dll / dwmapi.dll sont chargées à la demande : l'application reste lancée sur n'importe quelle version de Windows.
+void SetCtlTheme(HWND c, LPCWSTR app, LPCWSTR list) {
+  static SetWindowThemeFn fn = [] {
+    HMODULE m = LoadLibraryW(L"uxtheme.dll");
+    return m ? (SetWindowThemeFn)GetProcAddress(m, "SetWindowTheme") : (SetWindowThemeFn) nullptr;
+  }();
+  if (fn) fn(c, app, list);
+}
+
+BOOL CALLBACK ThemeChild(HWND c, LPARAM) {
+  wchar_t cls[32] = L"";
+  GetClassNameW(c, cls, 32);
+  if (_wcsicmp(cls, L"Button") == 0) {
+    DWORD type = (DWORD)GetWindowLongPtrW(c, GWL_STYLE) & 0xF;
+    bool push = (type == BS_PUSHBUTTON || type == BS_DEFPUSHBUTTON);
+    if (!g_dark) SetCtlTheme(c, nullptr, nullptr);
+    else if (push) SetCtlTheme(c, L"DarkMode_Explorer", nullptr);
+    else SetCtlTheme(c, L"", L"");   // cases à cocher et cadres : sans style visuel, pour que leur texte prenne la couleur demandée
+  } else if (_wcsicmp(cls, L"ComboBox") == 0 || _wcsicmp(cls, L"Edit") == 0) {
+    if (g_dark) SetCtlTheme(c, L"DarkMode_CFD", nullptr);
+    else SetCtlTheme(c, nullptr, nullptr);
+  }
+  return TRUE;
+}
+
+void ApplyTheme() {
+  g_dark = SystemWantsDark();
+  if (!g_brBg) g_brBg = CreateSolidBrush(kDarkBg);
+  if (!g_brEdit) g_brEdit = CreateSolidBrush(kDarkEdit);
+  static DwmSetWindowAttributeFn dwm = [] {
+    HMODULE m = LoadLibraryW(L"dwmapi.dll");
+    return m ? (DwmSetWindowAttributeFn)GetProcAddress(m, "DwmSetWindowAttribute") : (DwmSetWindowAttributeFn) nullptr;
+  }();
+  BOOL on = g_dark ? TRUE : FALSE;
+  if (dwm && FAILED(dwm(g_wnd, 20, &on, sizeof(on)))) dwm(g_wnd, 19, &on, sizeof(on));   // barre de titre sombre (20 : Windows 10 20H1+ et 11 ; 19 : versions précédentes)
+  EnumChildWindows(g_wnd, ThemeChild, 0);
+  RedrawWindow(g_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
 }
 
 // ------------------------------------------------------------------ ar6dof_probe : état, lancement, arrêt, commandes
@@ -517,6 +744,7 @@ void ApplyLanguage() {
   for (const auto& l : g_loc) SetTextIfChanged(l.h, Tr(l.fr, l.en));
   SetWindowTextW(g_wnd, Tr(L"AR6DoF — Centre de contrôle", L"AR6DoF — Control center"));
   g_loading = true;
+  FillCamTypes();
   FillModes();
   FillBackends(ID_BACKEND);
   FillBackends(ID_EYEBACK);
@@ -524,6 +752,8 @@ void ApplyLanguage() {
   FillCams(ID_EYER, true);
   FillPorts();
   g_loading = false;
+  UpdateCamType();
+  UpdateCamHint();
   UpdateState();
 }
 
@@ -543,59 +773,80 @@ void BrowseCalibDir() {
 void OnModeChanged() {
   if (g_loading) return;
   int i = GetSel(ID_MODE);
-  if (i < 0 || i >= kPresetCount) return;
+  if (i < 0 || i >= (int)g_modeList.size()) return;
   g_loading = true;
-  SetText(ID_W, std::to_wstring(kPresets[i].w));
-  SetText(ID_H, std::to_wstring(kPresets[i].h));
-  SetText(ID_FPS, std::to_wstring(kPresets[i].fps));
+  SetText(ID_W, std::to_wstring(g_modeList[i].w));
+  SetText(ID_H, std::to_wstring(g_modeList[i].h));
+  SetText(ID_FPS, std::to_wstring(g_modeList[i].fps));
   g_loading = false;
+  UpdateCamHint();
 }
 
 void OnSizeEdited() {
   if (g_loading) return;
-  int w = _wtoi(GetText(ID_W).c_str()), h = _wtoi(GetText(ID_H).c_str()), f = _wtoi(GetText(ID_FPS).c_str());
+  int w, h, f;
+  ReadSizeFields(&w, &h, &f);
   g_loading = true;
-  SetSel(ID_MODE, PresetIndexFor(w, h, f));
+  SetSel(ID_MODE, ModeIndexFor(w, h, f));
   g_loading = false;
+  UpdateCamHint();
+}
+
+// Passage module double <-> deux caméras : la largeur saisie change de sens (image entière / une seule caméra).
+void OnCamTypeChanged() {
+  if (g_loading) return;
+  bool two = IsTwoCams();
+  if (two != g_prevTwo) {
+    int w = _wtoi(GetText(ID_W).c_str());
+    if (w > 0) {
+      g_loading = true;
+      SetText(ID_W, std::to_wstring(two ? w / 2 : w * 2));
+      g_loading = false;
+    }
+    g_prevTwo = two;
+  }
+  UpdateCamType();
+  RebuildModes(true);
 }
 
 // ------------------------------------------------------------------ construction de la fenêtre
 void CreateControls() {
   // colonne de gauche : x 12..422 ; colonne de droite : x 438..848
-  Group(L"Caméra stéréo", L"Stereo camera", 12, 6, 410, 178);
-  Label(L"Caméra", L"Camera", 24, 30, 90);
-  Combo(120, 26, 290, ID_CAM);
-  Label(L"Mode", L"Mode", 24, 60, 90);
-  Combo(120, 56, 290, ID_MODE);
-  Label(L"Taille / cadence", L"Size / rate", 24, 90, 96);
-  Edit(120, 86, 62, ID_W, true);
-  Label(L"×", L"×", 188, 90, 14);
-  Edit(204, 86, 62, ID_H, true);
-  Label(L"à", L"at", 272, 90, 18);
-  Edit(292, 86, 48, ID_FPS, true);
-  Label(L"i/s", L"fps", 346, 90, 40);
-  Label(L"Pilote", L"Driver", 24, 120, 90);
-  Combo(120, 116, 290, ID_BACKEND);
-  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", 24, 148, 386, ID_MFDIRECT);
+  Group(L"Caméra stéréo", L"Stereo camera", 12, 6, 410, 222);
+  Label(L"Type", L"Type", 24, 28, 90);
+  Combo(120, 24, 290, ID_CAMTYPE);
+  g_lblCam = Label(L"Caméra", L"Camera", 24, 56, 94);
+  Combo(120, 52, 214, ID_CAM);
+  Button(L"Actualiser", L"Refresh", 340, 51, 70, 26, ID_CAM_REFRESH);
+  Label(L"Caméra droite", L"Right camera", 24, 84, 94);
+  Combo(120, 80, 290, ID_CAMR);
+  Label(L"Mode", L"Mode", 24, 112, 90);
+  Combo(120, 108, 290, ID_MODE);
+  Label(L"Taille / cadence", L"Size / rate", 24, 140, 96);
+  Edit(120, 136, 62, ID_W, true);
+  Label(L"×", L"×", 188, 140, 14);
+  Edit(204, 136, 62, ID_H, true);
+  Label(L"à", L"at", 272, 140, 18);
+  Edit(292, 136, 48, ID_FPS, true);
+  Label(L"i/s", L"fps", 346, 140, 40);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, 24, 166, 386, 32, ID_CAMHINT);
+  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", 24, 198, 386, ID_MFDIRECT);
 
-  Group(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", 12, 190, 410, 54);
-  Label(L"Port série", L"Serial port", 24, 214, 90);
-  Combo(120, 210, 216, ID_PORT);
-  Button(L"Actualiser", L"Refresh", 342, 209, 68, 26, ID_PORT_REFRESH);
+  Group(L"Calibration de la caméra", L"Camera calibration", 12, 234, 410, 84);
+  Label(L"Dossier", L"Folder", 24, 258, 90);
+  Edit(120, 254, 218, ID_CALDIR);
+  Button(L"Parcourir…", L"Browse…", 344, 253, 66, 26, ID_CALBROWSE);
+  Label(L"Base réelle (mm)", L"Real baseline (mm)", 24, 288, 96);
+  Edit(120, 284, 60, ID_BASE);
+  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", 190, 288, 220);
 
-  Group(L"Calibration de la caméra", L"Camera calibration", 12, 250, 410, 84);
-  Label(L"Dossier", L"Folder", 24, 274, 90);
-  Edit(120, 270, 218, ID_CALDIR);
-  Button(L"Parcourir…", L"Browse…", 344, 269, 66, 26, ID_CALBROWSE);
-  Label(L"Base réelle (mm)", L"Real baseline (mm)", 24, 304, 96);
-  Edit(120, 300, 60, ID_BASE);
-  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", 190, 304, 220);
-
-  Group(L"Avancé", L"Advanced", 12, 340, 410, 98);
-  Check(L"Fenêtres de diagnostic OpenCV (plus de CPU)", L"OpenCV diagnostic windows (more CPU)", 24, 360, 386, ID_DIAG);
-  Label(L"Threads de calcul", L"Compute threads", 24, 388, 130);
-  Edit(160, 384, 44, ID_THREADS, true);
-  Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", 24, 410, 386, ID_KEEP);
+  Group(L"Avancé", L"Advanced", 12, 324, 410, 126);
+  Check(L"Fenêtres de diagnostic OpenCV (plus de CPU)", L"OpenCV diagnostic windows (more CPU)", 24, 344, 386, ID_DIAG);
+  Label(L"Threads de calcul", L"Compute threads", 24, 372, 130);
+  Edit(160, 368, 44, ID_THREADS, true);
+  Label(L"Pilote caméra", L"Camera driver", 24, 400, 96);
+  Combo(120, 396, 290, ID_BACKEND);
+  Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", 24, 424, 386, ID_KEEP);
 
   Group(L"Sorties vers Unity", L"Output to Unity", 438, 6, 410, 130);
   Label(L"Port UDP", L"UDP port", 450, 30, 100);
@@ -616,32 +867,61 @@ void CreateControls() {
   Label(L"Pilote", L"Driver", 614, 248, 50);
   Combo(666, 244, 170, ID_EYEBACK);
 
-  Group(L"Montage de l'IMU (une seule fois)", L"IMU mounting (once)", 438, 286, 410, 152);
-  Label(L"1. Pose le casque à plat, à l'endroit, sans bouger, puis clique sur « 1 ».\r\n2. Penche-le vers l'avant (pointe vers le haut), immobile, puis clique sur « 2 ».",
-        L"1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", 450, 306, 386, 54);
-  Button(L"1 · Casque à plat", L"1 · Headset flat", 450, 366, 186, 30, ID_M_STEP1);
-  Button(L"2 · Penché en avant", L"2 · Tilted forward", 650, 366, 186, 30, ID_M_STEP2);
-  Button(L"Réinitialiser le montage", L"Reset the mounting", 450, 402, 386, 28, ID_M_RESET);
+  Group(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", 438, 286, 410, 186);
+  Label(L"Port série", L"Serial port", 450, 310, 70);
+  Combo(526, 306, 230, ID_PORT);
+  Button(L"Actualiser", L"Refresh", 762, 305, 74, 26, ID_PORT_REFRESH);
+  Label(L"Montage (une seule fois) : 1. Pose le casque à plat, à l'endroit, sans bouger, puis clique sur « 1 ».\r\n2. Penche-le vers l'avant (pointe vers le haut), immobile, puis clique sur « 2 ».",
+        L"Mounting (once): 1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", 450, 340, 386, 54);
+  Button(L"1 · Casque à plat", L"1 · Headset flat", 450, 402, 186, 30, ID_M_STEP1);
+  Button(L"2 · Penché en avant", L"2 · Tilted forward", 650, 402, 186, 30, ID_M_STEP2);
+  Button(L"Réinitialiser le montage", L"Reset the mounting", 450, 438, 386, 28, ID_M_RESET);
 
-  Group(L"Pendant le suivi (remplacent les touches du clavier)", L"While tracking (replace the keyboard keys)", 12, 444, 836, 62);
-  Button(L"Redémarrer le suivi", L"Restart tracking", 24, 466, 156, 30, ID_A_RESTART);
-  Button(L"Verrouiller le sol", L"Lock the floor", 188, 466, 156, 30, ID_A_FLOOR);
-  Button(L"Cap à zéro", L"Zero the heading", 352, 466, 156, 30, ID_A_YAW);
-  Button(L"Inverser gauche / droite", L"Swap left / right", 516, 466, 156, 30, ID_A_SWAP);
-  Button(L"Vérifier la calibration", L"Check the calibration", 680, 466, 156, 30, ID_A_CHECK);
+  Group(L"Pendant le suivi (remplacent les touches du clavier)", L"While tracking (replace the keyboard keys)", 12, 478, 836, 62);
+  Button(L"Redémarrer le suivi", L"Restart tracking", 24, 500, 156, 30, ID_A_RESTART);
+  Button(L"Verrouiller le sol", L"Lock the floor", 188, 500, 156, 30, ID_A_FLOOR);
+  Button(L"Cap à zéro", L"Zero the heading", 352, 500, 156, 30, ID_A_YAW);
+  Button(L"Inverser gauche / droite", L"Swap left / right", 516, 500, 156, 30, ID_A_SWAP);
+  Button(L"Vérifier la calibration", L"Check the calibration", 680, 500, 156, 30, ID_A_CHECK);
 
-  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 12, 512, 836, 44, ID_LOG, WS_EX_CLIENTEDGE);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, 14, 560, 832, 18, ID_STATS);
+  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 12, 546, 836, 44, ID_LOG, WS_EX_CLIENTEDGE);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, 14, 594, 832, 18, ID_STATS);
 
-  Button(L"Enregistrer", L"Save", 12, 584, 120, 32, ID_SAVE);
-  Button(L"▶  Démarrer le suivi", L"▶  Start tracking", 140, 584, 190, 32, ID_START);
-  Button(L"Ouvrir le dossier", L"Open the folder", 338, 584, 130, 32, ID_OPENDIR);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, 484, 591, 208, 20, ID_STATUS);
-  Combo(704, 586, 144, ID_LANG);
+  Button(L"Enregistrer", L"Save", 12, 618, 120, 32, ID_SAVE);
+  Button(L"▶  Démarrer le suivi", L"▶  Start tracking", 140, 618, 190, 32, ID_START);
+  Button(L"Ouvrir le dossier", L"Open the folder", 338, 618, 130, 32, ID_OPENDIR);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, 484, 625, 208, 20, ID_STATUS);
+  Combo(704, 620, 144, ID_LANG);
 }
 
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
+    case WM_ERASEBKGND:
+      if (g_dark) {
+        RECT rc;
+        GetClientRect(h, &rc);
+        FillRect((HDC)w, &rc, g_brBg);
+        return 1;
+      }
+      break;
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+      if (g_dark) {
+        HDC dc = (HDC)w;
+        HWND ctl = (HWND)l;
+        wchar_t cls[16] = L"";
+        GetClassNameW(ctl, cls, 16);
+        bool field = (m == WM_CTLCOLOREDIT || m == WM_CTLCOLORLISTBOX || _wcsicmp(cls, L"Edit") == 0);   // champ de saisie, liste, journal (EDIT en lecture seule)
+        SetTextColor(dc, IsWindowEnabled(ctl) ? kDarkText : kDarkDisabled);
+        SetBkColor(dc, field ? kDarkEdit : kDarkBg);
+        return (LRESULT)(field ? g_brEdit : g_brBg);
+      }
+      break;
+    case WM_SETTINGCHANGE:
+      if (l && lstrcmpW((LPCWSTR)l, L"ImmersiveColorSet") == 0 && SystemWantsDark() != g_dark) ApplyTheme();   // l'utilisateur change de mode pendant que l'application tourne
+      break;
     case WM_COMMAND: {
       int id = LOWORD(w), code = HIWORD(w);
       switch (id) {
@@ -651,6 +931,15 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_MODE:
           if (code == CBN_SELCHANGE) OnModeChanged();
           break;
+        case ID_CAMTYPE:
+          if (code == CBN_SELCHANGE) OnCamTypeChanged();
+          break;
+        case ID_CAM: case ID_CAMR:
+          if (code == CBN_SELCHANGE && !g_loading) RebuildModes(true);
+          break;
+        case ID_CAM_REFRESH:
+          if (code == BN_CLICKED) RefreshCameras();
+          break;
         case ID_W: case ID_H: case ID_FPS:
           if (code == EN_CHANGE) OnSizeEdited();
           break;
@@ -658,11 +947,8 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           if (code == BN_CLICKED) UpdateEyeEnable();
           break;
         case ID_PORT_REFRESH:
-          ScanDevices();
+          g_ports = ListComPorts();
           g_loading = true;
-          FillCams(ID_CAM, false);
-          FillCams(ID_EYEL, true);
-          FillCams(ID_EYER, true);
           FillPorts();
           g_loading = false;
           break;
@@ -742,13 +1028,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   RegisterClassW(&wc);
 
   const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-  RECT r = {0, 0, S(860), S(626)};
+  RECT r = {0, 0, S(860), S(660)};
   AdjustWindowRect(&r, style, FALSE);
   g_wnd = CreateWindowExW(0, wc.lpszClassName, Tr(L"AR6DoF — Centre de contrôle", L"AR6DoF — Control center"), style, CW_USEDEFAULT, CW_USEDEFAULT,
                           r.right - r.left, r.bottom - r.top, nullptr, nullptr, inst, nullptr);
   if (!g_wnd) return 1;
 
   CreateControls();
+  ApplyTheme();
   // liste de langue
   AddItem(ID_LANG, L"Français");
   AddItem(ID_LANG, L"English");
@@ -756,10 +1043,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
 
   ScanDevices();
   g_loading = true;
-  FillModes();
+  FillCamTypes();
   FillBackends(ID_BACKEND);
   FillBackends(ID_EYEBACK);
   FillCams(ID_CAM, false);
+  FillCams(ID_CAMR, false);
   FillCams(ID_EYEL, true);
   FillCams(ID_EYER, true);
   FillPorts();

@@ -27,6 +27,17 @@ namespace AR6DoF
         public float staleSeconds = 0.5f;
 
         public bool HasPose { get; private set; }
+        float startT = -1f;
+        /// <summary>true des qu'une pose est arrivee, ou apres 2,5 s sans rien : l'interface se construit quand meme (suivi arrete = tu vois quand meme le dock et les ecrans).</summary>
+        public bool Ready
+        {
+            get
+            {
+                if (HasPose) return true;
+                if (startT < 0f) startT = Time.unscaledTime;
+                return Time.unscaledTime - startT > 2.5f;
+            }
+        }
         public bool TrackingOk { get; private set; }
         public bool ConnectionLost { get; private set; }
         public bool FloorDetected { get; private set; }

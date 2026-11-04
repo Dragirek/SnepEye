@@ -78,6 +78,17 @@ namespace AR6DoF
                             a = Mathf.Max(Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 32f, 27f, 24f, 7f))), Mathf.Clamp01(2.6f - SegDist(fx, fy, 6f, 45f, 58f, 45f)));
                             break;
                         }
+                        case "keyboard":
+                        {
+                            // clavier : contour, deux rangees de touches et la barre espace
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 32f, 28f, 19f, 7f)));
+                            for (int k = 0; k < 5; k++)
+                                if (Mathf.Abs(fx - (13f + k * 9.5f)) < 2.6f && Mathf.Abs(fy - 39f) < 2.6f) a = 1f;
+                            for (int k = 0; k < 4; k++)
+                                if (Mathf.Abs(fx - (17.75f + k * 9.5f)) < 2.6f && Mathf.Abs(fy - 31f) < 2.6f) a = 1f;
+                            if (fx > 19f && fx < 45f && fy > 21.5f && fy < 25.5f) a = 1f;
+                            break;
+                        }
                         case "resize":
                         {
                             // 3 traits en diagonale dans le coin bas droit (le plus long est le plus loin du coin)

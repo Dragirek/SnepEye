@@ -76,7 +76,7 @@ namespace AR6DoF
             {
                 if (Head == null) return;
                 if (rig == null) rig = FindFirstObjectByType<Ar6dofHeadRig>();
-                if (rig != null && !rig.HasPose) return;
+                if (rig != null && !rig.Ready) return;
                 Build();
             }
         }

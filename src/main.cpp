@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <deque>
 #include <functional>
+#include <future>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -633,7 +634,9 @@ int main(int argc, char** argv) {
   auto cams = ListCameras();
   if (cams.empty()) { std::cout << "  aucune camera trouvee\n"; return 1; }
   for (size_t i = 0; i < cams.size(); i++) std::cout << "  [" << i << "] " << cams[i] << "\n";
-  int ci = AskInt("cam", "Camera stereo", 0, 0, (int)cams.size() - 1);
+  int ci = AskInt("cam", "Camera stereo (ou camera GAUCHE si tes deux yeux sont deux cameras separees)", 0, 0, (int)cams.size() - 1);
+  int ciR = AskInt("camR", "Camera DROITE (-1 = une seule camera : module a deux capteurs, image cote a cote)", -1, -1, (int)cams.size() - 1);
+  if (ciR == ci) { std::cout << "  la camera droite est la meme que la gauche : ignoree (module a deux capteurs)\n"; ciR = -1; }
 
   std::cout << "\nPorts serie (IMU) :\n";
   auto ports = ListComPorts();
@@ -661,10 +664,14 @@ int main(int argc, char** argv) {
   int W = AskInt("width", "Largeur totale", 1600, 320, 8000);
   int H = AskInt("height", "Hauteur", 600, 240, 4000);
   int FPS = AskInt("fps", "Cadence demandee (fps)", 120, 5, 240);
+  if (ciR >= 0) W = (W / 2) * 2;
+  const int camW = ciR >= 0 ? W / 2 : W;   // largeur demandee a CHAQUE camera (deux cameras separees : la moitie de l'image cote a cote)
+  if (ciR >= 0)
+    std::cout << "Deux cameras separees : " << camW << "x" << H << " chacune, assemblees en " << W << "x" << H << " (gauche|droite). Elles ne sont pas synchronisees par le materiel.\n";
   int udpPort = AskInt("udp", "Port UDP vers Unity sur ce PC (0 = desactive)", 9876, 0, 65535);
   int shareFrames = AskInt("share", "Partager l'image de la camera avec Unity pour le passthrough (1 = oui, 0 = non)", 1, 0, 1);
   int showWindows = AskInt("windows", "Afficher les fenetres de controle (1 = oui, 0 = non : plus leger)", 1, 0, 1);
-  int autoTrack = AskInt("autotrack", "Demarrer le tracking automatiquement (1 = oui, 0 = non)", 0, 0, 1);
+  int autoTrack = AskInt("autotrack", "Demarrer le tracking automatiquement (1 = oui, 0 = non)", 1, 0, 1);
   const bool windowsOn = showWindows && !noWindowsFlag;
   // Eye tracking (2 cameras infrarouges d'oeil). Reponse 0 = rien n'est cree : ni camera, ni thread, ni socket.
   int eyeOn = AskInt("eye", "Eye tracking avec 2 cameras d'oeil (1 = oui, 0 = non : aucune charge)", 0, 0, 1);
@@ -735,7 +742,7 @@ int main(int argc, char** argv) {
     for (int attempt = 0; attempt < 2; attempt++) {
       int bi = (first + attempt) % 2;
       openIdx = -1;
-      if (!OpenCam(cap, ci, apis[bi], W, H, FPS)) {
+      if (!OpenCam(cap, ci, apis[bi], camW, H, FPS)) {
         std::cout << "  " << names[bi] << " : ouverture impossible\n";
         continue;
       }
@@ -747,7 +754,7 @@ int main(int argc, char** argv) {
       if (f >= 0.85 * FPS) break;
     }
     if (bestIdx < 0) { std::cout << "Impossible d'ouvrir la camera.\n"; return 1; }
-    if (openIdx != bestIdx && !OpenCam(cap, ci, apis[bestIdx], W, H, FPS)) {
+    if (openIdx != bestIdx && !OpenCam(cap, ci, apis[bestIdx], camW, H, FPS)) {
       std::cout << "Impossible de rouvrir la camera.\n";
       return 1;
     }
@@ -767,14 +774,29 @@ int main(int argc, char** argv) {
   if (mfDirect) {
     cap.release();
     std::string err;
-    if (mfcam.Open(ci, W, H, FPS, &err) && mfcam.SelfTest(40, 5, &err)) {
+    if (mfcam.Open(ci, camW, H, FPS, &err) && mfcam.SelfTest(40, 5, &err)) {
       useMf = true;
-      std::cout << "Lecteur camera DIRECT (Media Foundation + libjpeg-turbo) actif : MJPEG " << W << "x" << H << " a " << mfcam.ModeFps() << " fps.\n";
+      std::cout << "Lecteur camera DIRECT (Media Foundation + libjpeg-turbo) actif : MJPEG " << camW << "x" << H << " a " << mfcam.ModeFps() << " fps.\n";
     } else {
       std::cout << "Lecteur direct indisponible (" << err << ") : retour a OpenCV.\n";
       mfcam.Close();
-      if (!OpenCam(cap, ci, camApi, W, H, FPS)) { std::cout << "Impossible de rouvrir la camera.\n"; return 1; }
+      if (!OpenCam(cap, ci, camApi, camW, H, FPS)) { std::cout << "Impossible de rouvrir la camera.\n"; return 1; }
     }
+  }
+
+  // Deuxieme camera (yeux = deux cameras separees) : meme mode que la premiere, lecteur direct si celui-ci a marche pour la gauche.
+  cv::VideoCapture capR;
+  ar6mf::Camera mfcamR;
+  if (ciR >= 0) {
+    bool okR = false;
+    if (useMf) {
+      std::string err;
+      okR = mfcamR.Open(ciR, camW, H, FPS, &err) && mfcamR.SelfTest(40, 5, &err);
+      if (!okR) { std::cout << "Camera droite : lecteur direct indisponible (" << err << ") : OpenCV.\n"; mfcamR.Close(); }
+    }
+    if (!okR) okR = OpenCam(capR, ciR, camApi, camW, H, FPS);
+    if (!okR) { std::cout << "Impossible d'ouvrir la camera droite [" << ciR << "] (deja utilisee ? mode " << camW << "x" << H << " absent ?).\n"; return 1; }
+    std::cout << "Camera droite [" << ciR << "] ouverte : " << camW << "x" << H << (mfcamR.IsOpen() ? " (lecteur direct)" : " (OpenCV)") << "\n";
   }
 
   ImuState imu;
@@ -848,6 +870,23 @@ int main(int argc, char** argv) {
     };
   else
     grab = [&cap](cv::Mat& f) { return cap.read(f); };
+  if (ciR >= 0) {
+    // deux cameras : les deux lectures partent en meme temps (chacune attend sa prochaine image), puis les images sont collees cote a cote
+    std::function<bool(cv::Mat&)> gl = grab, gr;
+    if (mfcamR.IsOpen()) gr = [&mfcamR](cv::Mat& f) { return mfcamR.Read(f, nullptr); };
+    else gr = [&capR](cv::Mat& f) { return capR.read(f); };
+    grab = [gl, gr](cv::Mat& f) {
+      cv::Mat l, r;
+      auto fut = std::async(std::launch::async, [&gr, &r] { return gr(r); });
+      bool okL = gl(l);
+      bool okR = fut.get();
+      f.release();
+      if (!okL || !okR) return false;
+      if (l.empty() || r.empty() || l.rows != r.rows || l.type() != r.type()) return true;   // image manquante : on saute ce tour
+      cv::hconcat(l, r, f);
+      return true;
+    };
+  }
   std::thread capThread(CaptureThread, grab, &mb, &share, shareFrames != 0);
   std::cout << (windowsOn ? "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n"
                           : "\nMode sans fenetres : commandes par UDP 9877 (T recentrer, V sol, Z yaw, Q quitter).\n");

@@ -53,7 +53,7 @@ namespace AR6DoF
         {
             if (head == null && passthrough != null) head = passthrough.HeadView;
             if (head == null) return;
-            if (!started && summonOnStart && (rig == null || rig.HasPose)) { Summon(); started = true; }
+            if (!started && summonOnStart && (rig == null || rig.Ready)) { Summon(); started = true; }
             if (Ar6dofInput.Down(summonKey)) Summon();
             if (Ar6dofInput.Down(followKey)) follow = !follow;
             if (follow) FollowStep(Time.deltaTime);

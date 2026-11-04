@@ -26,7 +26,7 @@ endif()
 # et lance / arrete ar6dof_probe.exe. A placer a cote d'ar6dof_probe.exe (le zip du workflow les met ensemble).
 add_executable(ar6dof_app WIN32 src/app/ar6dof_app.cpp)
 target_include_directories(ar6dof_app PRIVATE src)
-target_link_libraries(ar6dof_app PRIVATE user32 gdi32 comctl32 shell32 ole32 ws2_32 advapi32 mfplat mf mfuuid)
+target_link_libraries(ar6dof_app PRIVATE user32 gdi32 comctl32 shell32 ole32 ws2_32 advapi32 mfplat mf mfuuid mfreadwrite)
 if(MSVC)
   target_compile_options(ar6dof_app PRIVATE /W3 /utf-8)
   target_compile_definitions(ar6dof_app PRIVATE NOMINMAX)
