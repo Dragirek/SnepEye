@@ -527,7 +527,7 @@ namespace AR6DoF
         void SetLayout(bool azerty)
         {
             Ar6dofSettings.Current.kbAzerty = azerty;
-            Ar6dofSettings.Save();      // le choix de disposition est gardé tout de suite
+            Ar6dofSettings.SaveFields(new[] { "kbAzerty", "kbNumpad" });      // le choix de disposition est gardé tout de suite
             Ar6dofSettings.Notify();
         }
 
@@ -544,7 +544,7 @@ namespace AR6DoF
                 case Kind.SetQwerty: SetLayout(false); return;
                 case Kind.Numpad:
                     Ar6dofSettings.Current.kbNumpad = !Ar6dofSettings.Current.kbNumpad;
-                    Ar6dofSettings.Save();
+                    Ar6dofSettings.SaveFields(new[] { "kbAzerty", "kbNumpad" });
                     Ar6dofSettings.Notify();
                     return;
                 case Kind.Vk:

@@ -193,6 +193,55 @@ namespace AR6DoF
             }
         }
 
+        // ---- opérations sur CERTAINS champs seulement (une page des réglages VR) : le reste de l'aperçu n'est pas touché ----
+        static Ar6dofSettingsData SavedCopy()
+        {
+            var d = new Ar6dofSettingsData();
+            try { JsonUtility.FromJsonOverwrite(savedJson, d); } catch (Exception) { }
+            Fix(d);
+            return d;
+        }
+
+        /// <summary>Vrai si l'un de ces champs a été modifié depuis le dernier enregistrement.</summary>
+        public static bool DirtyFields(string[] fields)
+        {
+            if (cur == null) return false;
+            return Ar6dofScope.Sig(cur, fields) != Ar6dofScope.Sig(SavedCopy(), fields);
+        }
+
+        /// <summary>Enregistre ces champs seulement : le fichier garde les autres tels qu'ils étaient enregistrés.</summary>
+        public static bool SaveFields(string[] fields)
+        {
+            try
+            {
+                var saved = SavedCopy();
+                Ar6dofScope.Copy(Current, saved, fields);
+                Directory.CreateDirectory(FolderPath);
+                File.WriteAllText(FilePath, JsonUtility.ToJson(saved, true));
+                savedJson = JsonUtility.ToJson(saved);
+                return true;
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogWarning("AR6DoF : impossible d'ecrire " + FilePath + " : " + e.Message);
+                return false;
+            }
+        }
+
+        /// <summary>Remet ces champs à leur dernier enregistrement.</summary>
+        public static void RevertFields(string[] fields)
+        {
+            Ar6dofScope.Copy(SavedCopy(), Current, fields);
+            Notify();
+        }
+
+        /// <summary>Remet ces champs aux valeurs d'usine (aperçu : il faut encore enregistrer).</summary>
+        public static void ResetFields(string[] fields)
+        {
+            Ar6dofScope.Copy(new Ar6dofSettingsData(), Current, fields);
+            Notify();
+        }
+
         /// <summary>Abandonne les changements non enregistrés.</summary>
         public static void Revert()
         {

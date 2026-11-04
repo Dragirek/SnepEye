@@ -46,6 +46,14 @@ namespace {
 bool g_en = false;                 // langue : false = français, true = English
 HWND g_wnd = nullptr;
 HFONT g_font = nullptr;
+HFONT g_fontTitle = nullptr;       // titre d'une carte
+HFONT g_fontBig = nullptr;         // titre de la page
+HFONT g_fontIcon = nullptr;        // icônes de la navigation (Segoe Fluent Icons / Segoe MDL2 Assets)
+int g_page = 0;                    // page affichée
+int g_buildPage = -1;              // page dont on crée les contrôles (-1 = visibles sur toutes les pages)
+struct Card { int page, x, y, w, h; const wchar_t* fr; const wchar_t* en; };
+std::vector<Card> g_cards;                     // cartes arrondies de chaque page (dessinées par WM_PAINT)
+std::vector<std::pair<HWND, int>> g_pageCtl;   // contrôle -> page
 int g_dpi = 96;
 bool g_loading = false;            // vrai pendant qu'on remplit les champs (pas de réaction aux changements)
 bool g_running = false;
@@ -82,8 +90,10 @@ enum {
   ID_DIAG, ID_THREADS, ID_KEEP,
   ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK,
   ID_M_STEP1, ID_M_STEP2, ID_M_RESET,
-  ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS
+  ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS,
+  ID_NAV0 = 300   // 6 pages : ID_NAV0 .. ID_NAV0 + 5
 };
+const int kNavCount = 6;
 
 // Modes courants proposés seulement quand la caméra ne répond pas à la question « quels modes as-tu ? » (déjà utilisée par ar6dof_probe, par exemple).
 struct Preset { int w, h, fps; };
@@ -175,12 +185,20 @@ HWND Mk(const wchar_t* cls, const wchar_t* fr, const wchar_t* en, DWORD style, i
                            (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
   SendMessageW(c, WM_SETFONT, (WPARAM)g_font, TRUE);
   if (fr) g_loc.push_back({c, fr, en});
+  g_pageCtl.push_back({c, g_buildPage});
   return c;
 }
 
-HWND Group(const wchar_t* fr, const wchar_t* en, int x, int y, int w, int h) { return Mk(L"BUTTON", fr, en, BS_GROUPBOX, x, y, w, h, -1); }
+// Carte arrondie (comme dans les Paramètres de Windows 11) : dessinée par WM_PAINT, avec son titre ; les contrôles se posent dessus.
+void CardBox(const wchar_t* fr, const wchar_t* en, int x, int y, int w, int h) { g_cards.push_back({g_buildPage, x, y, w, h, fr, en}); }
 HWND Label(const wchar_t* fr, const wchar_t* en, int x, int y, int w, int h = 20) { return Mk(L"STATIC", fr, en, SS_LEFT | SS_NOPREFIX, x, y, w, h, -1); }
-HWND Check(const wchar_t* fr, const wchar_t* en, int x, int y, int w, int id) { return Mk(L"BUTTON", fr, en, BS_AUTOCHECKBOX | WS_TABSTOP, x, y, w, 22, id); }
+// Case à cocher dessinée par nous (BS_OWNERDRAW) : carré arrondi qui prend la couleur d'accentuation de Windows ; l'état est gardé dans une propriété de la fenêtre.
+HWND Check(const wchar_t* fr, const wchar_t* en, int x, int y, int w, int id) {
+  HWND c = Mk(L"BUTTON", fr, en, BS_OWNERDRAW | WS_TABSTOP, x, y, w, 24, id);
+  SetPropW(c, L"ischk", (HANDLE)(INT_PTR)1);
+  SetPropW(c, L"chk", (HANDLE)(INT_PTR)0);
+  return c;
+}
 HWND Button(const wchar_t* fr, const wchar_t* en, int x, int y, int w, int h, int id) { return Mk(L"BUTTON", fr, en, BS_PUSHBUTTON | WS_TABSTOP, x, y, w, h, id); }
 HWND Combo(int x, int y, int w, int id) { return Mk(L"COMBOBOX", nullptr, nullptr, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, x, y, w, 260, id); }
 HWND Edit(int x, int y, int w, int id, bool number = false) {
@@ -205,8 +223,11 @@ std::wstring GetText(int id) {
   w.resize(n);
   return w;
 }
-bool IsChecked(int id) { return SendMessageW(H(id), BM_GETCHECK, 0, 0) == BST_CHECKED; }
-void SetChecked(int id, bool v) { SendMessageW(H(id), BM_SETCHECK, v ? BST_CHECKED : BST_UNCHECKED, 0); }
+bool IsChecked(int id) { return (INT_PTR)GetPropW(H(id), L"chk") != 0; }
+void SetChecked(int id, bool v) {
+  SetPropW(H(id), L"chk", (HANDLE)(INT_PTR)(v ? 1 : 0));
+  InvalidateRect(H(id), nullptr, FALSE);
+}
 int GetSel(int id) { return (int)SendMessageW(H(id), CB_GETCURSEL, 0, 0); }
 void SetSel(int id, int i) { SendMessageW(H(id), CB_SETCURSEL, i, 0); }
 void ClearCombo(int id) { SendMessageW(H(id), CB_RESETCONTENT, 0, 0); }
@@ -534,16 +555,18 @@ void SaveLanguageOnly() {
   SaveCfg();
 }
 
-// ------------------------------------------------------------------ thème sombre / clair (suit le réglage « mode des applications » de Windows)
+// ------------------------------------------------------------------ apparence Windows 11 : thème sombre / clair + couleur d'accentuation du système
 bool g_dark = false;
-HBRUSH g_brBg = nullptr, g_brEdit = nullptr;
-const COLORREF kDarkBg = RGB(32, 32, 32), kDarkEdit = RGB(48, 48, 48), kDarkText = RGB(236, 236, 236), kDarkDisabled = RGB(130, 130, 130);
+struct Pal { COLORREF bg, card, border, text, dim, field, sel; };
+Pal g_pal = {RGB(243, 243, 243), RGB(255, 255, 255), RGB(229, 229, 229), RGB(26, 26, 26), RGB(96, 96, 96), RGB(255, 255, 255), RGB(233, 233, 233)};
+COLORREF g_accent = RGB(0, 120, 212);
+HBRUSH g_brBg = nullptr, g_brCard = nullptr, g_brField = nullptr;
 
 bool SystemWantsDark() {
   HIGHCONTRASTW hc;
   memset(&hc, 0, sizeof(hc));
   hc.cbSize = sizeof(hc);
-  if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON)) return false;   // contraste élevé : couleurs du système
+  if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) && (hc.dwFlags & HCF_HIGHCONTRASTON)) return false;   // contraste élevé : on ne dessine pas nos couleurs
   DWORD v = 1, sz = sizeof(v);
   if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_REG_DWORD,
                    nullptr, &v, &sz) != ERROR_SUCCESS)
@@ -553,6 +576,7 @@ bool SystemWantsDark() {
 
 typedef HRESULT(WINAPI* SetWindowThemeFn)(HWND, LPCWSTR, LPCWSTR);
 typedef HRESULT(WINAPI* DwmSetWindowAttributeFn)(HWND, DWORD, LPCVOID, DWORD);
+typedef HRESULT(WINAPI* DwmGetColorizationColorFn)(DWORD*, BOOL*);
 
 // uxtheme.dll / dwmapi.dll sont chargées à la demande : l'application reste lancée sur n'importe quelle version de Windows.
 void SetCtlTheme(HWND c, LPCWSTR app, LPCWSTR list) {
@@ -563,15 +587,27 @@ void SetCtlTheme(HWND c, LPCWSTR app, LPCWSTR list) {
   if (fn) fn(c, app, list);
 }
 
+COLORREF SystemAccent() {
+  static DwmGetColorizationColorFn fn = [] {
+    HMODULE m = LoadLibraryW(L"dwmapi.dll");
+    return m ? (DwmGetColorizationColorFn)GetProcAddress(m, "DwmGetColorizationColor") : (DwmGetColorizationColorFn) nullptr;
+  }();
+  DWORD argb = 0;
+  BOOL opaque = FALSE;
+  if (fn && SUCCEEDED(fn(&argb, &opaque))) return RGB((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
+  return RGB(0, 120, 212);
+}
+
+double Luma(COLORREF c) { return (0.299 * GetRValue(c) + 0.587 * GetGValue(c) + 0.114 * GetBValue(c)) / 255.0; }
+
 BOOL CALLBACK ThemeChild(HWND c, LPARAM) {
   wchar_t cls[32] = L"";
   GetClassNameW(c, cls, 32);
   if (_wcsicmp(cls, L"Button") == 0) {
     DWORD type = (DWORD)GetWindowLongPtrW(c, GWL_STYLE) & 0xF;
-    bool push = (type == BS_PUSHBUTTON || type == BS_DEFPUSHBUTTON);
+    if (type == BS_OWNERDRAW) return TRUE;   // dessiné par nous
     if (!g_dark) SetCtlTheme(c, nullptr, nullptr);
-    else if (push) SetCtlTheme(c, L"DarkMode_Explorer", nullptr);
-    else SetCtlTheme(c, L"", L"");   // cases à cocher et cadres : sans style visuel, pour que leur texte prenne la couleur demandée
+    else SetCtlTheme(c, L"DarkMode_Explorer", nullptr);
   } else if (_wcsicmp(cls, L"ComboBox") == 0 || _wcsicmp(cls, L"Edit") == 0) {
     if (g_dark) SetCtlTheme(c, L"DarkMode_CFD", nullptr);
     else SetCtlTheme(c, nullptr, nullptr);
@@ -581,16 +617,169 @@ BOOL CALLBACK ThemeChild(HWND c, LPARAM) {
 
 void ApplyTheme() {
   g_dark = SystemWantsDark();
-  if (!g_brBg) g_brBg = CreateSolidBrush(kDarkBg);
-  if (!g_brEdit) g_brEdit = CreateSolidBrush(kDarkEdit);
+  g_accent = SystemAccent();
+  if (g_dark) g_pal = {RGB(32, 32, 32), RGB(43, 43, 43), RGB(58, 58, 58), RGB(255, 255, 255), RGB(172, 172, 172), RGB(51, 51, 51), RGB(55, 55, 55)};
+  else g_pal = {RGB(243, 243, 243), RGB(255, 255, 255), RGB(229, 229, 229), RGB(26, 26, 26), RGB(96, 96, 96), RGB(255, 255, 255), RGB(233, 233, 233)};
+  HBRUSH ob = g_brBg, oc = g_brCard, of = g_brField;
+  g_brBg = CreateSolidBrush(g_pal.bg);
+  g_brCard = CreateSolidBrush(g_pal.card);
+  g_brField = CreateSolidBrush(g_pal.field);
+  if (ob) DeleteObject(ob);
+  if (oc) DeleteObject(oc);
+  if (of) DeleteObject(of);
   static DwmSetWindowAttributeFn dwm = [] {
     HMODULE m = LoadLibraryW(L"dwmapi.dll");
     return m ? (DwmSetWindowAttributeFn)GetProcAddress(m, "DwmSetWindowAttribute") : (DwmSetWindowAttributeFn) nullptr;
   }();
-  BOOL on = g_dark ? TRUE : FALSE;
-  if (dwm && FAILED(dwm(g_wnd, 20, &on, sizeof(on)))) dwm(g_wnd, 19, &on, sizeof(on));   // barre de titre sombre (20 : Windows 10 20H1+ et 11 ; 19 : versions précédentes)
+  if (dwm) {
+    BOOL on = g_dark ? TRUE : FALSE;
+    if (FAILED(dwm(g_wnd, 20, &on, sizeof(on)))) dwm(g_wnd, 19, &on, sizeof(on));   // barre de titre sombre (20 : Windows 10 20H1+ et 11 ; 19 : versions précédentes)
+    COLORREF cap = g_pal.bg, txt = g_pal.text;
+    dwm(g_wnd, 35, &cap, sizeof(cap));   // Windows 11 : barre de titre de la couleur du fond (ignoré avant)
+    dwm(g_wnd, 36, &txt, sizeof(txt));
+  }
   EnumChildWindows(g_wnd, ThemeChild, 0);
   RedrawWindow(g_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+}
+
+RECT CardRect(const Card& c) { RECT r = {S(c.x), S(c.y), S(c.x + c.w), S(c.y + c.h)}; return r; }
+
+// Le contrôle est-il posé sur une carte de la page affichée ? (son fond est alors celui de la carte)
+bool OnCard(HWND ctl) {
+  RECT r;
+  GetWindowRect(ctl, &r);
+  POINT p = {(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+  ScreenToClient(g_wnd, &p);
+  for (const auto& c : g_cards) {
+    RECT cr = CardRect(c);
+    if (c.page == g_page && PtInRect(&cr, p)) return true;
+  }
+  return false;
+}
+
+void FillRound(HDC dc, RECT r, int rad, COLORREF fill, COLORREF line, bool outline) {
+  HBRUSH b = CreateSolidBrush(fill);
+  HPEN p = outline ? CreatePen(PS_SOLID, 1, line) : (HPEN)GetStockObject(NULL_PEN);
+  HGDIOBJ ob = SelectObject(dc, b), op = SelectObject(dc, p);
+  if (!outline) { r.right++; r.bottom++; }
+  RoundRect(dc, r.left, r.top, r.right, r.bottom, rad * 2, rad * 2);
+  SelectObject(dc, ob);
+  SelectObject(dc, op);
+  DeleteObject(b);
+  if (outline) DeleteObject(p);
+}
+
+const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Capteurs", L"Unity", L"Yeux", L"Suivi", L"Avancé"};
+const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Sensors", L"Unity", L"Eyes", L"Tracking", L"Advanced"};
+const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE768", L"\xE713"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
+
+// Fond de la fenêtre : titre de l'application, titre de la page et cartes de la page affichée.
+void PaintChrome(HDC dc) {
+  SetBkMode(dc, TRANSPARENT);
+  SelectObject(dc, g_fontBig);
+  SetTextColor(dc, g_pal.text);
+  RECT r = {S(24), S(18), S(190), S(52)};
+  DrawTextW(dc, L"AR6DoF", -1, &r, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+  r = {S(224), S(14), S(916), S(52)};
+  DrawTextW(dc, Tr(kNavFr[g_page], kNavEn[g_page]), -1, &r, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+  for (const auto& c : g_cards) {
+    if (c.page != g_page) continue;
+    FillRound(dc, CardRect(c), S(8), g_pal.card, g_pal.border, true);
+    SelectObject(dc, g_fontTitle);
+    SetTextColor(dc, g_pal.text);
+    RECT tr = {S(c.x + 20), S(c.y + 10), S(c.x + c.w - 20), S(c.y + 38)};
+    DrawTextW(dc, Tr(c.fr, c.en), -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+  }
+}
+
+// Dessin des contrôles BS_OWNERDRAW : navigation, cases à cocher, bouton principal.
+void DrawOwner(const DRAWITEMSTRUCT* d) {
+  HDC dc = d->hDC;
+  RECT r = d->rcItem;
+  int id = (int)d->CtlID;
+  bool disabled = (d->itemState & ODS_DISABLED) != 0;
+  bool pressed = (d->itemState & ODS_SELECTED) != 0;
+  wchar_t text[128] = L"";
+  GetWindowTextW(d->hwndItem, text, 128);
+  SetBkMode(dc, TRANSPARENT);
+  if (id >= ID_NAV0 && id < ID_NAV0 + kNavCount) {
+    FillRect(dc, &r, g_brBg);
+    bool sel = (id - ID_NAV0) == g_page;
+    RECT pill = {r.left + S(4), r.top + S(2), r.right - S(4), r.bottom - S(2)};
+    if (sel || pressed) FillRound(dc, pill, S(5), g_pal.sel, g_pal.sel, false);
+    if (sel) {
+      HBRUSH ab = CreateSolidBrush(g_accent);
+      RECT bar = {pill.left + S(1), (r.top + r.bottom) / 2 - S(9), pill.left + S(4), (r.top + r.bottom) / 2 + S(9)};
+      FillRect(dc, &bar, ab);
+      DeleteObject(ab);
+    }
+    SetTextColor(dc, g_pal.text);
+    if (g_fontIcon) {
+      SelectObject(dc, g_fontIcon);
+      RECT ir = {pill.left + S(12), r.top, pill.left + S(40), r.bottom};
+      DrawTextW(dc, kNavIcon[id - ID_NAV0], 1, &ir, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
+    SelectObject(dc, g_font);
+    RECT tr = {pill.left + S(48), r.top, pill.right, r.bottom};
+    DrawTextW(dc, text, -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+    return;
+  }
+  if (id == ID_START) {
+    FillRect(dc, &r, g_brBg);
+    COLORREF fill = disabled ? g_pal.border : g_accent;
+    if (pressed) fill = RGB(GetRValue(fill) * 8 / 10, GetGValue(fill) * 8 / 10, GetBValue(fill) * 8 / 10);
+    FillRound(dc, r, S(5), fill, fill, false);
+    SetTextColor(dc, disabled ? g_pal.dim : (Luma(fill) > 0.6 ? RGB(0, 0, 0) : RGB(255, 255, 255)));
+    SelectObject(dc, g_font);
+    DrawTextW(dc, text, -1, &r, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    return;
+  }
+  // case à cocher
+  bool onCard = OnCard(d->hwndItem);
+  FillRect(dc, &r, onCard ? g_brCard : g_brBg);
+  int box = S(18);
+  int cy = (r.top + r.bottom) / 2;
+  RECT br = {r.left + S(2), cy - box / 2, r.left + S(2) + box, cy - box / 2 + box};
+  bool on = IsChecked(id);
+  if (on) {
+    COLORREF f = disabled ? g_pal.border : g_accent;
+    FillRound(dc, br, S(4), f, f, false);
+    HPEN pen = CreatePen(PS_SOLID, std::max(2, S(2)), Luma(f) > 0.6 ? RGB(0, 0, 0) : RGB(255, 255, 255));
+    HGDIOBJ op = SelectObject(dc, pen);
+    MoveToEx(dc, br.left + box * 22 / 100, br.top + box * 52 / 100, nullptr);
+    LineTo(dc, br.left + box * 43 / 100, br.top + box * 72 / 100);
+    LineTo(dc, br.left + box * 78 / 100, br.top + box * 30 / 100);
+    SelectObject(dc, op);
+    DeleteObject(pen);
+  } else {
+    FillRound(dc, br, S(4), onCard ? g_pal.card : g_pal.bg, disabled ? g_pal.border : g_pal.dim, true);
+  }
+  SetTextColor(dc, disabled ? g_pal.dim : g_pal.text);
+  SelectObject(dc, g_font);
+  RECT tr = {br.right + S(10), r.top, r.right, r.bottom};
+  DrawTextW(dc, text, -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+  if (d->itemState & ODS_FOCUS) {
+    RECT fr = {r.left, r.top + S(1), r.right, r.bottom - S(1)};
+    DrawFocusRect(dc, &fr);
+  }
+}
+
+bool FontExists(const wchar_t* face) {
+  HDC dc = GetDC(nullptr);
+  LOGFONTW lf;
+  memset(&lf, 0, sizeof(lf));
+  lstrcpynW(lf.lfFaceName, face, 32);
+  lf.lfCharSet = DEFAULT_CHARSET;
+  bool found = false;
+  EnumFontFamiliesExW(dc, &lf, [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM p) -> int { *(bool*)p = true; return 0; }, (LPARAM)&found, 0);
+  ReleaseDC(nullptr, dc);
+  return found;
+}
+
+void ShowPage(int p) {
+  g_page = std::min(std::max(p, 0), kNavCount - 1);
+  for (const auto& pc : g_pageCtl) ShowWindow(pc.first, (pc.second < 0 || pc.second == g_page) ? SW_SHOW : SW_HIDE);
+  RedrawWindow(g_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
 // ------------------------------------------------------------------ ar6dof_probe : état, lancement, arrêt, commandes
@@ -755,6 +944,7 @@ void ApplyLanguage() {
   UpdateCamType();
   UpdateCamHint();
   UpdateState();
+  RedrawWindow(g_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
 void BrowseCalibDir() {
@@ -811,119 +1001,164 @@ void OnCamTypeChanged() {
 
 // ------------------------------------------------------------------ construction de la fenêtre
 void CreateControls() {
-  // colonne de gauche : x 12..422 ; colonne de droite : x 438..848
-  Group(L"Caméra stéréo", L"Stereo camera", 12, 6, 410, 222);
-  Label(L"Type", L"Type", 24, 28, 90);
-  Combo(120, 24, 290, ID_CAMTYPE);
-  g_lblCam = Label(L"Caméra", L"Camera", 24, 56, 94);
-  Combo(120, 52, 214, ID_CAM);
-  Button(L"Actualiser", L"Refresh", 340, 51, 70, 26, ID_CAM_REFRESH);
-  Label(L"Caméra droite", L"Right camera", 24, 84, 94);
-  Combo(120, 80, 290, ID_CAMR);
-  Label(L"Mode", L"Mode", 24, 112, 90);
-  Combo(120, 108, 290, ID_MODE);
-  Label(L"Taille / cadence", L"Size / rate", 24, 140, 96);
-  Edit(120, 136, 62, ID_W, true);
-  Label(L"×", L"×", 188, 140, 14);
-  Edit(204, 136, 62, ID_H, true);
-  Label(L"à", L"at", 272, 140, 18);
-  Edit(292, 136, 48, ID_FPS, true);
-  Label(L"i/s", L"fps", 346, 140, 40);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, 24, 166, 386, 32, ID_CAMHINT);
-  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", 24, 198, 386, ID_MFDIRECT);
+  // Disposition : navigation à gauche (x 0..204), page à droite (cartes de x 224 à 916), barre du bas (y 588..640). Contrôles posés à la main, en pixels à 96 ppp.
+  const int X = 224, CWd = 692, PAD = 20, C0 = 190, CR = 472;   // x de la carte, largeur, marge gauche, début des champs (relatif), largeur d'un champ plein
 
-  Group(L"Calibration de la caméra", L"Camera calibration", 12, 234, 410, 84);
-  Label(L"Dossier", L"Folder", 24, 258, 90);
-  Edit(120, 254, 218, ID_CALDIR);
-  Button(L"Parcourir…", L"Browse…", 344, 253, 66, 26, ID_CALBROWSE);
-  Label(L"Base réelle (mm)", L"Real baseline (mm)", 24, 288, 96);
-  Edit(120, 284, 60, ID_BASE);
-  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", 190, 288, 220);
+  // ---- navigation (visible sur toutes les pages)
+  g_buildPage = -1;
+  for (int i = 0; i < kNavCount; i++) Mk(L"BUTTON", kNavFr[i], kNavEn[i], BS_OWNERDRAW | WS_TABSTOP, 12, 64 + i * 44, 180, 40, ID_NAV0 + i);
+  Combo(16, 598, 172, ID_LANG);
 
-  Group(L"Avancé", L"Advanced", 12, 324, 410, 126);
-  Check(L"Fenêtres de diagnostic OpenCV (plus de CPU)", L"OpenCV diagnostic windows (more CPU)", 24, 344, 386, ID_DIAG);
-  Label(L"Threads de calcul", L"Compute threads", 24, 372, 130);
-  Edit(160, 368, 44, ID_THREADS, true);
-  Label(L"Pilote caméra", L"Camera driver", 24, 400, 96);
-  Combo(120, 396, 290, ID_BACKEND);
-  Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", 24, 424, 386, ID_KEEP);
+  // ---- barre du bas
+  Button(L"Enregistrer", L"Save", X, 596, 120, 34, ID_SAVE);
+  Mk(L"BUTTON", L"▶  Démarrer le suivi", L"▶  Start tracking", BS_OWNERDRAW | WS_TABSTOP, X + 132, 596, 210, 34, ID_START);
+  Button(L"Ouvrir le dossier", L"Open the folder", X + 354, 596, 140, 34, ID_OPENDIR);
+  Mk(L"STATIC", nullptr, nullptr, SS_RIGHT | SS_NOPREFIX | SS_ENDELLIPSIS, X + 506, 604, 186, 20, ID_STATUS);
 
-  Group(L"Sorties vers Unity", L"Output to Unity", 438, 6, 410, 130);
-  Label(L"Port UDP", L"UDP port", 450, 30, 100);
-  Edit(556, 26, 64, ID_UDP, true);
-  Label(L"0 = désactivé", L"0 = off", 628, 30, 200);
-  Check(L"Partager l'image de la caméra (passthrough)", L"Share the camera image (passthrough)", 450, 52, 386, ID_SHARE);
-  Check(L"Télécommande Bluetooth", L"Bluetooth remote", 450, 76, 386, ID_BLE);
-  Check(L"Démarrer le suivi dès la première image", L"Start tracking on the first frame", 450, 100, 386, ID_AUTOTRACK);
+  // ---- page 0 : Caméra
+  g_buildPage = 0;
+  CardBox(L"Caméra stéréo", L"Stereo camera", X, 62, CWd, 328);
+  Label(L"Type", L"Type", X + PAD, 100, 160);
+  Combo(X + C0, 96, CR, ID_CAMTYPE);
+  g_lblCam = Label(L"Caméra", L"Camera", X + PAD, 138, 160);
+  Combo(X + C0, 134, CR - 90, ID_CAM);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 133, 80, 28, ID_CAM_REFRESH);
+  Label(L"Caméra droite", L"Right camera", X + PAD, 176, 160);
+  Combo(X + C0, 172, CR, ID_CAMR);
+  Label(L"Mode", L"Mode", X + PAD, 214, 160);
+  Combo(X + C0, 210, CR, ID_MODE);
+  Label(L"Taille / cadence", L"Size / rate", X + PAD, 252, 160);
+  Edit(X + C0, 248, 76, ID_W, true);
+  Label(L"×", L"×", X + C0 + 84, 252, 14);
+  Edit(X + C0 + 102, 248, 76, ID_H, true);
+  Label(L"à", L"at", X + C0 + 188, 252, 18);
+  Edit(X + C0 + 212, 248, 62, ID_FPS, true);
+  Label(L"i/s", L"fps", X + C0 + 284, 252, 40);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + C0, 284, CR, 38, ID_CAMHINT);
+  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", X + PAD, 332, CWd - 2 * PAD, ID_MFDIRECT);
 
-  Group(L"Suivi des yeux (eye tracking)", L"Eye tracking", 438, 142, 410, 138);
-  Check(L"Activer avec 2 caméras d'œil", L"Enable with 2 eye cameras", 450, 162, 386, ID_EYE);
-  Label(L"Œil gauche", L"Left eye", 450, 190, 100);
-  Combo(556, 186, 280, ID_EYEL);
-  Label(L"Œil droit", L"Right eye", 450, 218, 100);
-  Combo(556, 214, 280, ID_EYER);
-  Label(L"Cadence", L"Rate", 450, 248, 100);
-  Edit(556, 244, 48, ID_EYEFPS, true);
-  Label(L"Pilote", L"Driver", 614, 248, 50);
-  Combo(666, 244, 170, ID_EYEBACK);
+  CardBox(L"Pilote", L"Driver", X, 404, CWd, 100);
+  Label(L"Pilote caméra", L"Camera driver", X + PAD, 452, 160);
+  Combo(X + C0, 448, CR, ID_BACKEND);
 
-  Group(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", 438, 286, 410, 186);
-  Label(L"Port série", L"Serial port", 450, 310, 70);
-  Combo(526, 306, 230, ID_PORT);
-  Button(L"Actualiser", L"Refresh", 762, 305, 74, 26, ID_PORT_REFRESH);
-  Label(L"Montage (une seule fois) : 1. Pose le casque à plat, à l'endroit, sans bouger, puis clique sur « 1 ».\r\n2. Penche-le vers l'avant (pointe vers le haut), immobile, puis clique sur « 2 ».",
-        L"Mounting (once): 1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", 450, 340, 386, 54);
-  Button(L"1 · Casque à plat", L"1 · Headset flat", 450, 402, 186, 30, ID_M_STEP1);
-  Button(L"2 · Penché en avant", L"2 · Tilted forward", 650, 402, 186, 30, ID_M_STEP2);
-  Button(L"Réinitialiser le montage", L"Reset the mounting", 450, 438, 386, 28, ID_M_RESET);
+  // ---- page 1 : Capteurs
+  g_buildPage = 1;
+  CardBox(L"Capteur de mouvement (IMU)", L"Motion sensor (IMU)", X, 62, CWd, 100);
+  Label(L"Port série", L"Serial port", X + PAD, 110, 160);
+  Combo(X + C0, 106, CR - 90, ID_PORT);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 105, 80, 28, ID_PORT_REFRESH);
 
-  Group(L"Pendant le suivi (remplacent les touches du clavier)", L"While tracking (replace the keyboard keys)", 12, 478, 836, 62);
-  Button(L"Redémarrer le suivi", L"Restart tracking", 24, 500, 156, 30, ID_A_RESTART);
-  Button(L"Verrouiller le sol", L"Lock the floor", 188, 500, 156, 30, ID_A_FLOOR);
-  Button(L"Cap à zéro", L"Zero the heading", 352, 500, 156, 30, ID_A_YAW);
-  Button(L"Inverser gauche / droite", L"Swap left / right", 516, 500, 156, 30, ID_A_SWAP);
-  Button(L"Vérifier la calibration", L"Check the calibration", 680, 500, 156, 30, ID_A_CHECK);
+  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 176, CWd, 138);
+  Label(L"Dossier", L"Folder", X + PAD, 224, 160);
+  Edit(X + C0, 220, CR - 100, ID_CALDIR);
+  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 219, 90, 28, ID_CALBROWSE);
+  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 262, 160);
+  Edit(X + C0, 258, 76, ID_BASE);
+  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 262, 330);
 
-  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 12, 546, 836, 44, ID_LOG, WS_EX_CLIENTEDGE);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, 14, 594, 832, 18, ID_STATS);
+  CardBox(L"Montage de l'IMU (une seule fois)", L"IMU mounting (once)", X, 328, CWd, 200);
+  Label(L"1. Pose le casque à plat, à l'endroit, sans bouger, puis clique sur « 1 ».\r\n2. Penche-le vers l'avant (pointe vers le haut), immobile, puis clique sur « 2 ».",
+        L"1. Put the headset flat, the right way up, motionless, then click “1”.\r\n2. Tilt it forward (nose up), motionless, then click “2”.", X + PAD, 372, CWd - 2 * PAD, 44);
+  Button(L"1 · Casque à plat", L"1 · Headset flat", X + PAD, 424, 316, 34, ID_M_STEP1);
+  Button(L"2 · Penché en avant", L"2 · Tilted forward", X + PAD + 328, 424, 316, 34, ID_M_STEP2);
+  Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 468, 644, 34, ID_M_RESET);
 
-  Button(L"Enregistrer", L"Save", 12, 618, 120, 32, ID_SAVE);
-  Button(L"▶  Démarrer le suivi", L"▶  Start tracking", 140, 618, 190, 32, ID_START);
-  Button(L"Ouvrir le dossier", L"Open the folder", 338, 618, 130, 32, ID_OPENDIR);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, 484, 625, 208, 20, ID_STATUS);
-  Combo(704, 620, 144, ID_LANG);
+  // ---- page 2 : Unity
+  g_buildPage = 2;
+  CardBox(L"Sorties vers Unity", L"Output to Unity", X, 62, CWd, 208);
+  Label(L"Port UDP", L"UDP port", X + PAD, 100, 160);
+  Edit(X + C0, 96, 90, ID_UDP, true);
+  Label(L"0 = désactivé", L"0 = off", X + C0 + 102, 100, 200);
+  Check(L"Partager l'image de la caméra (passthrough)", L"Share the camera image (passthrough)", X + PAD, 140, CWd - 2 * PAD, ID_SHARE);
+  Check(L"Télécommande Bluetooth", L"Bluetooth remote", X + PAD, 176, CWd - 2 * PAD, ID_BLE);
+  Check(L"Démarrer le suivi dès la première image", L"Start tracking on the first frame", X + PAD, 212, CWd - 2 * PAD, ID_AUTOTRACK);
+
+  // ---- page 3 : Yeux
+  g_buildPage = 3;
+  CardBox(L"Suivi des yeux (eye tracking)", L"Eye tracking", X, 62, CWd, 216);
+  Check(L"Activer avec 2 caméras d'œil", L"Enable with 2 eye cameras", X + PAD, 100, CWd - 2 * PAD, ID_EYE);
+  Label(L"Œil gauche", L"Left eye", X + PAD, 148, 160);
+  Combo(X + C0, 144, CR, ID_EYEL);
+  Label(L"Œil droit", L"Right eye", X + PAD, 186, 160);
+  Combo(X + C0, 182, CR, ID_EYER);
+  Label(L"Cadence", L"Rate", X + PAD, 224, 160);
+  Edit(X + C0, 220, 76, ID_EYEFPS, true);
+  Label(L"Pilote", L"Driver", X + C0 + 100, 224, 60);
+  Combo(X + C0 + 160, 220, CR - 160, ID_EYEBACK);
+
+  // ---- page 4 : Suivi
+  g_buildPage = 4;
+  CardBox(L"Pendant le suivi (remplacent les touches du clavier)", L"While tracking (replace the keyboard keys)", X, 62, CWd, 160);
+  Button(L"Redémarrer le suivi", L"Restart tracking", X + PAD, 106, 208, 34, ID_A_RESTART);
+  Button(L"Verrouiller le sol", L"Lock the floor", X + PAD + 218, 106, 208, 34, ID_A_FLOOR);
+  Button(L"Cap à zéro", L"Zero the heading", X + PAD + 436, 106, 208, 34, ID_A_YAW);
+  Button(L"Inverser gauche / droite", L"Swap left / right", X + PAD, 150, 208, 34, ID_A_SWAP);
+  Button(L"Vérifier la calibration", L"Check the calibration", X + PAD + 218, 150, 208, 34, ID_A_CHECK);
+
+  CardBox(L"Journal", L"Log", X, 236, CWd, 332);
+  Mk(L"EDIT", nullptr, nullptr, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, X + PAD, 280, CWd - 2 * PAD, 240, ID_LOG, WS_EX_CLIENTEDGE);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 530, CWd - 2 * PAD, 20, ID_STATS);
+
+  // ---- page 5 : Avancé
+  g_buildPage = 5;
+  CardBox(L"Avancé", L"Advanced", X, 62, CWd, 180);
+  Check(L"Fenêtres de diagnostic OpenCV (plus de CPU)", L"OpenCV diagnostic windows (more CPU)", X + PAD, 100, CWd - 2 * PAD, ID_DIAG);
+  Label(L"Threads de calcul", L"Compute threads", X + PAD, 148, 160);
+  Edit(X + C0, 144, 60, ID_THREADS, true);
+  Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", X + PAD, 190, CWd - 2 * PAD, ID_KEEP);
+
+  g_buildPage = -1;
 }
 
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
     case WM_ERASEBKGND:
-      if (g_dark) {
-        RECT rc;
-        GetClientRect(h, &rc);
-        FillRect((HDC)w, &rc, g_brBg);
-        return 1;
-      }
-      break;
+      return 1;   // tout est dessiné par WM_PAINT (double tampon) : pas de scintillement
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC dc = BeginPaint(h, &ps);
+      RECT rc;
+      GetClientRect(h, &rc);
+      HDC mem = CreateCompatibleDC(dc);
+      HBITMAP bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
+      HGDIOBJ old = SelectObject(mem, bmp);
+      FillRect(mem, &rc, g_brBg);
+      PaintChrome(mem);
+      BitBlt(dc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
+      SelectObject(mem, old);
+      DeleteObject(bmp);
+      DeleteDC(mem);
+      EndPaint(h, &ps);
+      return 0;
+    }
+    case WM_DRAWITEM:
+      DrawOwner(reinterpret_cast<const DRAWITEMSTRUCT*>(l));
+      return TRUE;
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
-    case WM_CTLCOLORBTN:
-      if (g_dark) {
-        HDC dc = (HDC)w;
-        HWND ctl = (HWND)l;
-        wchar_t cls[16] = L"";
-        GetClassNameW(ctl, cls, 16);
-        bool field = (m == WM_CTLCOLOREDIT || m == WM_CTLCOLORLISTBOX || _wcsicmp(cls, L"Edit") == 0);   // champ de saisie, liste, journal (EDIT en lecture seule)
-        SetTextColor(dc, IsWindowEnabled(ctl) ? kDarkText : kDarkDisabled);
-        SetBkColor(dc, field ? kDarkEdit : kDarkBg);
-        return (LRESULT)(field ? g_brEdit : g_brBg);
+    case WM_CTLCOLORBTN: {
+      HDC dc = (HDC)w;
+      HWND ctl = (HWND)l;
+      wchar_t cls[16] = L"";
+      GetClassNameW(ctl, cls, 16);
+      bool field = (m == WM_CTLCOLOREDIT || m == WM_CTLCOLORLISTBOX || _wcsicmp(cls, L"Edit") == 0);   // champ de saisie, liste, journal (EDIT en lecture seule)
+      SetTextColor(dc, IsWindowEnabled(ctl) ? g_pal.text : g_pal.dim);
+      if (field) {
+        SetBkColor(dc, g_pal.field);
+        return (LRESULT)g_brField;
       }
-      break;
+      bool card = OnCard(ctl);
+      SetBkColor(dc, card ? g_pal.card : g_pal.bg);
+      return (LRESULT)(card ? g_brCard : g_brBg);
+    }
     case WM_SETTINGCHANGE:
-      if (l && lstrcmpW((LPCWSTR)l, L"ImmersiveColorSet") == 0 && SystemWantsDark() != g_dark) ApplyTheme();   // l'utilisateur change de mode pendant que l'application tourne
+      if (l && lstrcmpW((LPCWSTR)l, L"ImmersiveColorSet") == 0) ApplyTheme();   // mode sombre / clair ou couleur d'accentuation changés pendant que l'application tourne
       break;
     case WM_COMMAND: {
       int id = LOWORD(w), code = HIWORD(w);
+      if (code == BN_CLICKED && id >= ID_NAV0 && id < ID_NAV0 + kNavCount) { ShowPage(id - ID_NAV0); return 0; }
+      if (code == BN_CLICKED && GetPropW(H(id), L"ischk")) SetChecked(id, !IsChecked(id));   // cases dessinées par nous : on bascule l'état ici
       switch (id) {
         case ID_LANG:
           if (code == CBN_SELCHANGE) { g_en = GetSel(ID_LANG) == 1; ApplyLanguage(); SaveLanguageOnly(); }
@@ -1011,6 +1246,24 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   ncm.cbSize = sizeof(ncm);
   SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
   g_font = CreateFontIndirectW(&ncm.lfMessageFont);
+  {
+    LOGFONTW lf = ncm.lfMessageFont;
+    lf.lfHeight = lf.lfHeight * 19 / 10;     // titre de la page
+    lf.lfWeight = FW_SEMIBOLD;
+    g_fontBig = CreateFontIndirectW(&lf);
+    lf = ncm.lfMessageFont;
+    lf.lfHeight = lf.lfHeight * 12 / 10;     // titre d'une carte
+    lf.lfWeight = FW_SEMIBOLD;
+    g_fontTitle = CreateFontIndirectW(&lf);
+    lf = ncm.lfMessageFont;
+    lf.lfHeight = lf.lfHeight * 12 / 10;     // icônes de la navigation
+    lf.lfWeight = FW_NORMAL;
+    const wchar_t* face = FontExists(L"Segoe Fluent Icons") ? L"Segoe Fluent Icons" : FontExists(L"Segoe MDL2 Assets") ? L"Segoe MDL2 Assets" : nullptr;
+    if (face) {
+      lstrcpynW(lf.lfFaceName, face, 32);
+      g_fontIcon = CreateFontIndirectW(&lf);
+    }
+  }
 
   LoadCfg();
   std::string lang = CfgStr("app_lang", "");
@@ -1022,13 +1275,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   wc.lpfnWndProc = WndProc;
   wc.hInstance = inst;
   wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+  wc.hbrBackground = nullptr;   // fond dessiné par WM_PAINT
+  wc.style = CS_HREDRAW | CS_VREDRAW;
   wc.lpszClassName = L"AR6DoFApp";
   wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
   RegisterClassW(&wc);
 
-  const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-  RECT r = {0, 0, S(860), S(660)};
+  const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
+  RECT r = {0, 0, S(940), S(644)};
   AdjustWindowRect(&r, style, FALSE);
   g_wnd = CreateWindowExW(0, wc.lpszClassName, Tr(L"AR6DoF — Centre de contrôle", L"AR6DoF — Control center"), style, CW_USEDEFAULT, CW_USEDEFAULT,
                           r.right - r.left, r.bottom - r.top, nullptr, nullptr, inst, nullptr);
@@ -1036,6 +1290,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
 
   CreateControls();
   ApplyTheme();
+  ShowPage(0);
   // liste de langue
   AddItem(ID_LANG, L"Français");
   AddItem(ID_LANG, L"English");

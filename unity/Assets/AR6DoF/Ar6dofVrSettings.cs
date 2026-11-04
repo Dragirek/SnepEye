@@ -24,14 +24,28 @@ namespace AR6DoF
         readonly List<Button> tabButtons = new List<Button>();
         readonly List<Action> refreshers = new List<Action>();
         readonly List<KeyValuePair<int, Action>> live = new List<KeyValuePair<int, Action>>();   // textes qui changent tout seuls (onglet, action)
-        int curTab;
+        int curTab;                 // PAGE affichée (voir PgView...)
         float nextLive;
 
-        // onglets
-        // 5 onglets qui tiennent dans la largeur : Image (image + optique), Ecrans, Appareils (suivi de la tete, telecommande, yeux), Style, Interface (dock, langue, performances).
-        // Plusieurs groupes partagent le même onglet : ils sont empilés l'un sous l'autre sur la même page.
-        const int TabImage = 0, TabOptics = 0, TabScreens = 1, TabSystem = 2, TabEyes = 2, TabStyle = 3, TabDock = 4, TabLang = 4, TabPerf = 4;
+        // 5 onglets (comme dans Style, chacun peut avoir des sous-pages en haut de sa page) :
+        //   Image      > Affichage, Optique
+        //   Ecrans
+        //   Appareils  > Tete, Telecommande, Yeux
+        //   Style      > Couleurs, Forme, Fenetres, Clavier (sous-pages propres a Style)
+        //   Interface  > Dock, Langue, Performances
+        // Chaque sous-page est une PAGE (défilement et textes vivants à elle) ; Enregistrer / Annuler / Par defaut ne touchent que la page affichée.
+        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PageCount = 10;
         static readonly string[] TabNames = { "Image", "Ecrans", "Appareils", "Style", "Interface" };
+        static readonly int[][] TabPages = { new[] { PgView, PgOptics }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf } };
+        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances" };
+        static int TabOf(int pg)
+        {
+            for (int t = 0; t < TabPages.Length; t++) foreach (int p in TabPages[t]) if (p == pg) return t;
+            return 0;
+        }
+        readonly int[] lastPage = { PgView, PgScreens, PgHead, PgStyle, PgDock };   // dernière sous-page vue de chaque onglet
+        readonly List<GameObject> tabDots = new List<GameObject>();                   // point « modifié, pas enregistré » sur chaque onglet
+        readonly List<KeyValuePair<int, GameObject>> subDots = new List<KeyValuePair<int, GameObject>>();   // idem sur chaque bouton de sous-page (page, point)
 
         // bas du panneau
         string imgSaved = "";          // réglages d'image tels qu'enregistrés (ils ont leur propre fichier, mais suivent Enregistrer / Annuler / Par defaut)
@@ -101,7 +115,7 @@ namespace AR6DoF
         // défilement des pages
         readonly List<GameObject> views = new List<GameObject>();
         readonly List<Ar6dofVrScrollArea> scrolls = new List<Ar6dofVrScrollArea>();
-        readonly float[] bottoms = new float[8];     // bas du dernier cadre de chaque onglet (ordonnée dans la page)
+        readonly float[] bottoms = new float[PageCount];     // bas du dernier cadre de chaque page (ordonnée dans la page)
         Button scrollUp, scrollDown;
         GameObject scrollBarGo;
         RectTransform scrollHandle;
@@ -144,8 +158,9 @@ namespace AR6DoF
                 Text t;
                 var b = Ar6dofVrUi.MakeButton(canvas.transform, TabNames[i], new Vector2((i - (TabNames.Length - 1) * 0.5f) * 148f, 380f), new Vector2(140f, 46f), () => ShowTab(idx), out t, 22);
                 tabButtons.Add(b);
+                tabDots.Add(Dot(b.transform, new Vector2(62f, 15f)));
             }
-            for (int i = 0; i < TabNames.Length; i++)
+            for (int i = 0; i < PageCount; i++)
             {
                 // fenêtre (découpe + zone vide qui capte le glissement) contenant la page, que le défilement déplace
                 var vp = new GameObject("Vue" + i, typeof(RectTransform));
@@ -171,15 +186,16 @@ namespace AR6DoF
                 views.Add(vp);
                 scrolls.Add(sa);
             }
-            BuildPassthrough(pages[TabImage]);
-            BuildOptics(pages[TabOptics]);
-            BuildScreens(pages[TabScreens]);
-            BuildSystem(pages[TabSystem]);
-            BuildEyes(pages[TabEyes]);
-            BuildStyle(pages[TabStyle]);
-            BuildDock(pages[TabDock]);
-            BuildLanguage(pages[TabLang]);
-            BuildPerf(pages[TabPerf]);
+            BuildPassthrough(pages[PgView]);
+            BuildOptics(pages[PgOptics]);
+            BuildScreens(pages[PgScreens]);
+            BuildHead(pages[PgHead]);
+            BuildRemote(pages[PgRemote]);
+            BuildEyes(pages[PgEyes]);
+            BuildStyle(pages[PgStyle]);
+            BuildDock(pages[PgDock]);
+            BuildLanguage(pages[PgLang]);
+            BuildPerf(pages[PgPerf]);
             imgSaved = ImgJson();
             BuildBottom();
             BuildScrollControls();
@@ -220,15 +236,44 @@ namespace AR6DoF
         /// <summary>Hauteur à découvrir en plus pour un onglet (0 = tout tient). Calculée d'après le bas du dernier cadre.</summary>
         float MaxScroll(int tab)
         {
-            float bottom = tab == TabStyle ? styleBottom : bottoms[tab];
+            float bottom = tab == PgStyle ? styleBottom : bottoms[tab];
             return Mathf.Max(0f, -bottom - VisTop + 16f);
         }
 
         /// <summary>Note où finit le contenu d'un onglet (c = curseur après le dernier cadre).</summary>
         void Finish(int tab, float c) { bottoms[tab] = c + 18f; }
 
-        /// <summary>Où commence le prochain groupe d'un onglet : en haut s'il est vide, sinon juste sous le groupe précédent (onglets qui en réunissent plusieurs).</summary>
-        float Cursor(int tab) { return bottoms[tab] == 0f ? Start : bottoms[tab] - 18f; }
+        /// <summary>
+        /// Début d'une page : si son onglet a plusieurs sous-pages, la rangée de boutons des sous-pages (comme les catégories de Style) est posée tout en haut
+        /// et le curseur démarre juste dessous ; sinon le curseur démarre en haut.
+        /// </summary>
+        float BeginPage(RectTransform page, int pg)
+        {
+            int tab = TabOf(pg);
+            int[] subs = TabPages[tab];
+            if (subs.Length < 2) return Start;
+            for (int k = 0; k < subs.Length; k++)
+            {
+                int target = subs[k];
+                float x = subs.Length == 2 ? (k == 0 ? -164f : 164f) : Col3(k);
+                float w = subs.Length == 2 ? 320f : 208f;
+                var b = Btn(page, x, Start - 23f, w, PageNames[target], () => ShowPage(target), 22, 46f);
+                subDots.Add(new KeyValuePair<int, GameObject>(target, Dot(b.transform, new Vector2(w * 0.5f - 18f, 15f))));
+                refreshers.Add(() => Ar6dofTheme.SetSelected(b, target == curTab));
+            }
+            return Start - 46f - 16f;
+        }
+
+        /// <summary>Petit point d'accent dans le coin d'un bouton : « cette page a des modifications pas encore enregistrées ».</summary>
+        static GameObject Dot(Transform parent, Vector2 pos)
+        {
+            var rt = Ar6dofVrUi.Rect(parent, "Point", pos, new Vector2(14f, 14f));
+            var im = rt.gameObject.AddComponent<Image>();
+            im.raycastTarget = false;
+            Ar6dofTheme.Attach(rt.gameObject, Ar6dofRole.Accent, 7);
+            rt.gameObject.SetActive(false);
+            return rt.gameObject;
+        }
 
         void ScrollBy(float d) { if (curTab < scrolls.Count) scrolls[curTab].By(d); }
 
@@ -316,16 +361,26 @@ namespace AR6DoF
             UpdateStatus();
         }
 
+        /// <summary>Affiche un onglet (sa dernière sous-page vue).</summary>
         public void ShowTab(int i)
         {
-            curTab = i;
-            if (i == TabStyle && styleSub == 1) Ar6dofTheme.RescanPictures();   // la liste d'images n'est relue qu'en entrant ici
+            ShowPage(lastPage[Mathf.Clamp(i, 0, lastPage.Length - 1)]);
+        }
+
+        /// <summary>Affiche une page (sous-page d'un onglet).</summary>
+        public void ShowPage(int pg)
+        {
+            curTab = pg;
+            int tab = TabOf(pg);
+            lastPage[tab] = pg;
+            if (pg == PgStyle && styleSub == 1) Ar6dofTheme.RescanPictures();   // la liste d'images n'est relue qu'en entrant ici
             for (int k = 0; k < pages.Count; k++)
             {
-                views[k].SetActive(k == i);
-                if (k != i) scrolls[k].SetOffset(0f);
-                Ar6dofTheme.SetSelected(tabButtons[k], k == i);
+                views[k].SetActive(k == pg);
+                if (k != pg) scrolls[k].SetOffset(0f);
             }
+            for (int k = 0; k < tabButtons.Count; k++) Ar6dofTheme.SetSelected(tabButtons[k], k == tab);
+            resetArmed = false;
             RefreshAll();
         }
 
@@ -477,15 +532,87 @@ namespace AR6DoF
             if (resetLbl != null) resetLbl.text = Ar6dofLoc.T(resetArmed ? "Confirmer ?" : "Par defaut");
         }
 
+        // ---- portée de Enregistrer / Annuler / Par defaut : la PAGE affichée seulement ----
+        static readonly string[] LookFields = { "global", "dock", "menus", "keyboard", "screens", "laser", "customStyles" };
+        static readonly string[] ChromeFields = { "chromeStyle", "chromeCorner", "chromeScale" };
+        static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
+        static readonly string[] HeadFields = { "moveScale" };
+        static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
+        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "keyboardScale" };
+        static readonly string[] LangFields = { "language" };
+        static readonly string[] PerfFields = { "perfFps", "perfMsaa", "perfRenderScale" };
+        static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite" };
+        static readonly string[] OpticsImgFields = { "left", "right", "linkEyes", "swapEyes", "layout", "centerOnImage" };
+
+        /// <summary>Champs d'Ar6dofSettings (settings.json) que contrôle cette page ; null si la page n'en a pas.</summary>
+        string[] SettingsScope(int pg)
+        {
+            switch (pg)
+            {
+                case PgHead: return HeadFields;
+                case PgRemote: return RemoteFields;
+                case PgDock: return DockFields;
+                case PgLang: return LangFields;
+                case PgPerf: return PerfFields;
+                case PgStyle: return styleSub >= 3 ? KbFields : styleSub == 2 ? ChromeFields : LookFields;
+                default: return null;
+            }
+        }
+
+        /// <summary>Champs des réglages d'image (passthrough) que contrôle cette page ; null si la page n'en a pas.</summary>
+        string[] ImgScope(int pg)
+        {
+            if (dock.passthrough == null) return null;
+            return pg == PgView ? ViewImgFields : pg == PgOptics ? OpticsImgFields : null;
+        }
+
+        bool ImgDirty(string[] f)
+        {
+            if (dock.passthrough == null || imgSaved.Length == 0) return false;
+            var saved = new Ar6dofPassthroughSettings();
+            JsonUtility.FromJsonOverwrite(imgSaved, saved);
+            return Ar6dofScope.Sig(saved, f) != Ar6dofScope.Sig(dock.passthrough.settings, f);
+        }
+
+        bool PageDirty(int pg)
+        {
+            if (pg == PgStyle) return Ar6dofSettings.DirtyFields(LookFields) || Ar6dofSettings.DirtyFields(ChromeFields) || Ar6dofSettings.DirtyFields(KbFields);
+            return ScopeDirty(pg);
+        }
+
+        /// <summary>Modifications non enregistrées dans la portée de cette page (pour Style : la sous-page affichée).</summary>
+        bool ScopeDirty(int pg)
+        {
+            var sf = SettingsScope(pg);
+            if (sf != null && Ar6dofSettings.DirtyFields(sf)) return true;
+            var imf = ImgScope(pg);
+            return imf != null && ImgDirty(imf);
+        }
+
         void UpdateStatus()
         {
             if (statusLbl == null) return;
-            bool dirty = Ar6dofSettings.Dirty || imgSaved != ImgJson();
+            bool hasScope = SettingsScope(curTab) != null || ImgScope(curTab) != null;
+            bool here = hasScope && ScopeDirty(curTab);
+            bool anyDirty = false;
+            var dirtyPage = new bool[PageCount];
+            for (int p = 0; p < PageCount; p++) { dirtyPage[p] = PageDirty(p); anyDirty |= dirtyPage[p]; }
+            // les points : un par bouton de sous-page, un par onglet
+            foreach (var kv in subDots) if (kv.Value != null) kv.Value.SetActive(dirtyPage[kv.Key]);
+            for (int t = 0; t < tabDots.Count; t++)
+            {
+                bool d = false;
+                foreach (int p in TabPages[t]) d |= dirtyPage[p];
+                tabDots[t].SetActive(d);
+            }
             string msg;
             if (Time.unscaledTime < statusUntil) msg = statusMsg;
-            else msg = Ar6dofLoc.T(dirty ? "Apercu : pas encore enregistre" : "Tout est enregistre");
+            else if (!hasScope) msg = Ar6dofLoc.T("Cette page s'applique tout de suite");
+            else if (here) msg = Ar6dofLoc.T("Apercu : pas encore enregistre");
+            else if (anyDirty) msg = Ar6dofLoc.T("Cette page est enregistree (d'autres pages ont des changements)");
+            else msg = Ar6dofLoc.T("Tout est enregistre");
             statusLbl.text = msg;
-            Ar6dofTheme.SetSelected(saveBtn, dirty);
+            Ar6dofTheme.SetSelected(saveBtn, here);
             UpdateResetLabel();
         }
 
@@ -498,21 +625,45 @@ namespace AR6DoF
 
         void OnSave()
         {
-            bool ok = Ar6dofSettings.Save();
-            if (dock.passthrough != null) { dock.passthrough.SaveSettings(); imgSaved = ImgJson(); }
+            var sf = SettingsScope(curTab);
+            var imf = ImgScope(curTab);
+            if (sf == null && imf == null) { Say("Cette page s'applique tout de suite : rien a enregistrer"); return; }
+            bool ok = true;
+            if (sf != null) ok &= Ar6dofSettings.SaveFields(sf);
+            if (imf != null)
+            {
+                // le fichier d'image garde les autres pages telles qu'elles sont enregistrées : seuls les champs de cette page changent
+                var saved = new Ar6dofPassthroughSettings();
+                if (imgSaved.Length > 0) JsonUtility.FromJsonOverwrite(imgSaved, saved);
+                Ar6dofScope.Copy(dock.passthrough.settings, saved, imf);
+                ok &= dock.passthrough.SaveSettings(saved);
+                imgSaved = JsonUtility.ToJson(saved);
+            }
             Say(ok ? "Enregistre" : "Echec de l'enregistrement");
+            UpdateStatus();
         }
 
         void OnCancel()
         {
-            Ar6dofSettings.Revert();
-            if (dock.passthrough != null && imgSaved.Length > 0) JsonUtility.FromJsonOverwrite(imgSaved, dock.passthrough.settings);
+            var sf = SettingsScope(curTab);
+            var imf = ImgScope(curTab);
+            if (sf == null && imf == null) { Say("Cette page s'applique tout de suite : rien a annuler"); return; }
+            if (sf != null) Ar6dofSettings.RevertFields(sf);
+            if (imf != null && imgSaved.Length > 0)
+            {
+                var saved = new Ar6dofPassthroughSettings();
+                JsonUtility.FromJsonOverwrite(imgSaved, saved);
+                Ar6dofScope.Copy(saved, dock.passthrough.settings, imf);
+            }
             RefreshAll();
-            Say("Modifications annulees");
+            Say("Modifications de cette page annulees");
         }
 
         void OnReset()
         {
+            var sf = SettingsScope(curTab);
+            var imf = ImgScope(curTab);
+            if (sf == null && imf == null) { Say("Cette page s'applique tout de suite : rien a remettre"); return; }
             if (!resetArmed)
             {
                 resetArmed = true;
@@ -521,31 +672,31 @@ namespace AR6DoF
                 return;
             }
             resetArmed = false;
-            Ar6dofSettings.ResetDefaults();
-            if (dock.passthrough != null) dock.passthrough.ResetSettings();
+            if (sf != null) Ar6dofSettings.ResetFields(sf);
+            if (imf != null) Ar6dofScope.Copy(new Ar6dofPassthroughSettings(), dock.passthrough.settings, imf);
             RefreshAll();
-            Say("Valeurs d'usine en apercu : clique Enregistrer pour les garder");
+            Say("Valeurs d'usine de cette page en apercu : clique Enregistrer pour les garder");
         }
 
         // ================================================================== IMAGE
         void BuildPassthrough(RectTransform page)
         {
             var pt = dock.passthrough;
-            float c = Start;
+            float c = BeginPage(page, PgView);
             if (pt == null)
             {
                 Ar6dofVrUi.Label(page, "Passthrough introuvable dans la scene", new Vector2(0f, c - 30f), new Vector2(CW, 40f), 24);
-                Finish(TabImage, c - 60f);
+                Finish(PgView, c - 60f);
                 return;
             }
             // état de l'image (avant : panneau F1)
             float top = OpenCard(page, ref c, "Etat de l'image");
-            InfoLine(page, Next(ref c, 28f, 4f), TabImage, () => pt.SourceOpen
+            InfoLine(page, Next(ref c, 28f, 4f), PgView, () => pt.SourceOpen
                 ? Ar6dofLoc.F("Source : {0} x {1}   -   {2} img/s   -   age {3} ms", pt.SourceWidth, pt.SourceHeight, pt.UploadsPerSec, pt.FrameAgeMs.ToString("0"))
                 : Ar6dofLoc.T("Source : camera non ouverte"), 19);
-            InfoLine(page, Next(ref c, 28f, 4f), TabImage, () => Ar6dofLoc.F("Envoi GPU : {0} ms   -   reprojection {1} deg   -   delai {2} ms",
+            InfoLine(page, Next(ref c, 28f, 4f), PgView, () => Ar6dofLoc.F("Envoi GPU : {0} ms   -   reprojection {1} deg   -   delai {2} ms",
                 pt.UploadMs.ToString("0.0"), pt.ReprojDeg.ToString("0.0"), pt.DelayUsedMs.ToString("0")), 19);
-            InfoLine(page, Next(ref c, 28f, 12f), TabImage, () => Ar6dofLoc.T(pt.HasCalibration ? "Calibration camera : chargee" : "Calibration camera : ABSENTE (camera_model.json)"), 19);
+            InfoLine(page, Next(ref c, 28f, 12f), PgView, () => Ar6dofLoc.T(pt.HasCalibration ? "Calibration camera : chargee" : "Calibration camera : ABSENTE (camera_model.json)"), 19);
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Affichage");
@@ -564,7 +715,7 @@ namespace AR6DoF
             y = Next(ref c, 48f, 16f);
             Toggle(page, -164f, y, "Rendu a l'envers", () => pt.settings.flipComposite, v => pt.settings.flipComposite = v);
             CloseCard(page, top, ref c);
-            Finish(TabImage, c);
+            Finish(PgView, c);
         }
 
         // ================================================================== OPTIQUE
@@ -576,8 +727,13 @@ namespace AR6DoF
         void BuildOptics(RectTransform page)
         {
             var pt = dock.passthrough;
-            float c = Cursor(TabOptics);
-            if (pt == null) return;   // le message "Passthrough introuvable" est déjà affiché par le groupe précédent
+            float c = BeginPage(page, PgOptics);
+            if (pt == null)
+            {
+                Ar6dofVrUi.Label(page, "Passthrough introuvable dans la scene", new Vector2(0f, c - 30f), new Vector2(CW, 40f), 24);
+                Finish(PgOptics, c - 60f);
+                return;
+            }
             const float cx = 164f, cw = 320f;
 
             float top = OpenCard(page, ref c, "Reglage par oeil");
@@ -632,13 +788,13 @@ namespace AR6DoF
             CloseCard(page, top, ref c);
 
             // plus de Recharger / Sauver / Remettre à zéro propres à l'image : Enregistrer / Annuler / Par defaut (en bas) s'en chargent aussi
-            Finish(TabOptics, c);
+            Finish(PgOptics, c);
         }
 
         // ================================================================== ECRANS
         void BuildScreens(RectTransform page)
         {
-            float c = Start;
+            float c = BeginPage(page, PgScreens);
             float top = OpenCard(page, ref c, "Images / s de tous les ecrans");
             float y = Next(ref c, 48f, 12f);
             Btn(page, Col3(0), y, 208f, "30", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.SetAllFps(30); });
@@ -657,11 +813,11 @@ namespace AR6DoF
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Ecrans");
-            InfoLine(page, Next(ref c, 28f, 10f), TabScreens, () => Ar6dofLoc.F("Ecrans : {0} / {1}  (clusters de 3 max)", Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.panels.Count : 0, Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.MaxAllowed : 12), 20);
+            InfoLine(page, Next(ref c, 28f, 10f), PgScreens, () => Ar6dofLoc.F("Ecrans : {0} / {1}  (clusters de 3 max)", Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.panels.Count : 0, Ar6dofScreens.Instance != null ? Ar6dofScreens.Instance.MaxAllowed : 12), 20);
             y = Next(ref c, 48f, 12f);
             Btn(page, 0f, y, 440f, "+ Ajouter un ecran", () => { if (Ar6dofScreens.Instance != null) Ar6dofScreens.Instance.RequestAddScreen(); }, 22);
             CloseCard(page, top, ref c);
-            Finish(TabScreens, c);
+            Finish(PgScreens, c);
         }
 
         // ================================================================== SYSTEME
@@ -749,11 +905,11 @@ namespace AR6DoF
             else calMsg.text = calMsgFr.Length > 0 ? Ar6dofLoc.T(calMsgFr) : "";
         }
 
-        void BuildSystem(RectTransform page)
+        void BuildHead(RectTransform page)
         {
-            float c = Cursor(TabSystem);
+            float c = BeginPage(page, PgHead);
             float top = OpenCard(page, ref c, "Suivi de la tete");
-            InfoLine(page, Next(ref c, 28f, 4f), TabSystem, () =>
+            InfoLine(page, Next(ref c, 28f, 4f), PgHead, () =>
             {
                 var rig = dock.rig;
                 if (rig == null) return Ar6dofLoc.T("Tete : casque introuvable");
@@ -761,7 +917,7 @@ namespace AR6DoF
                 if (rig.ConnectionLost) return Ar6dofLoc.T("Tete : liaison perdue");
                 return Ar6dofLoc.T(rig.TrackingOk ? "Tete : suivi OK" : "Tete : suivi degrade");
             });
-            InfoLine(page, Next(ref c, 28f, 12f), TabSystem, () =>
+            InfoLine(page, Next(ref c, 28f, 12f), PgHead, () =>
             {
                 var rig = dock.rig;
                 if (rig == null || !rig.HasPose) return "";
@@ -781,9 +937,15 @@ namespace AR6DoF
             refreshers.Add(UpdateScaleBtn);
             CloseCard(page, top, ref c);
 
+            Finish(PgHead, c);
+        }
+
+        void BuildRemote(RectTransform page)
+        {
+            float c = BeginPage(page, PgRemote);
             // télécommande : état, puis UN bouton de calibration
-            top = OpenCard(page, ref c, "Telecommande");
-            InfoLine(page, Next(ref c, 28f, 8f), TabSystem, () =>
+            float top = OpenCard(page, ref c, "Telecommande");
+            InfoLine(page, Next(ref c, 28f, 8f), PgRemote, () =>
             {
                 var r = Remote;
                 if (r == null) return Ar6dofLoc.T("Telecommande : composant introuvable");
@@ -807,13 +969,13 @@ namespace AR6DoF
             SliderRow(page, ref c, "Anticipation (ms)", 0f, 40f, () => Ar6dofSettings.Current.remotePredictMs, v => { Ar6dofSettings.Current.remotePredictMs = v; Touch(); }, "0");
             CloseCard(page, top, ref c);
 
-            Finish(TabSystem, c);
+            Finish(PgRemote, c);
         }
 
         // ================================================================== PERFORMANCES (onglet Interface)
         void BuildPerf(RectTransform page)
         {
-            float c = Cursor(TabPerf);
+            float c = BeginPage(page, PgPerf);
             // limiter les images par seconde évite que le GPU tourne à fond pour rien
             float top = OpenCard(page, ref c, "Performances (GPU)");
             Ar6dofVrUi.Label(page, "Images par seconde maximum", new Vector2(0f, Next(ref c, 28f, 8f)), new Vector2(CW, 28f), 20, TextAnchor.MiddleLeft);
@@ -824,11 +986,11 @@ namespace AR6DoF
                 fpsBtns.Add(Btn(page, -259f + 129.5f * i, fy, 124f, Ar6dofPerf.FpsNames[i], () => { Ar6dofSettings.Current.perfFps = fi; Touch(); }, 18, 46f));
             }
             refreshers.Add(() => { for (int i = 0; i < fpsBtns.Count; i++) Ar6dofTheme.SetSelected(fpsBtns[i], Ar6dofSettings.Current.perfFps == i); });
-            InfoLine(page, Next(ref c, 28f, 12f), TabPerf, () => Ar6dofLoc.F("Images par seconde actuelles : {0}", Ar6dofPerf.Fps));
+            InfoLine(page, Next(ref c, 28f, 12f), PgPerf, () => Ar6dofLoc.F("Images par seconde actuelles : {0}", Ar6dofPerf.Fps));
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Lissage des bords (MSAA x2) : plus beau, plus lourd", () => Ar6dofSettings.Current.perfMsaa > 1, v => { Ar6dofSettings.Current.perfMsaa = v ? 2 : 1; Touch(); }, 640f);
             SliderRow(page, ref c, "Resolution de l'interface (au prochain lancement)", 0.5f, 1f, () => Ar6dofSettings.Current.perfRenderScale, v => { Ar6dofSettings.Current.perfRenderScale = v; Touch(); }, "0.00");
             CloseCard(page, top, ref c);
-            Finish(TabPerf, c);
+            Finish(PgPerf, c);
         }
 
         static string CamTxt(int state, float fps)
@@ -840,11 +1002,11 @@ namespace AR6DoF
         void BuildEyes(RectTransform page)
         {
             var et = dock.eyes;
-            float c = Cursor(TabEyes);
+            float c = BeginPage(page, PgEyes);
             if (et == null)
             {
                 Ar6dofVrUi.Label(page, "Eye tracking introuvable", new Vector2(0f, c - 30f), new Vector2(CW, 40f), 24);
-                Finish(TabEyes, c - 60f);
+                Finish(PgEyes, c - 60f);
                 return;
             }
             float top = OpenCard(page, ref c, "Eye tracking");
@@ -853,7 +1015,7 @@ namespace AR6DoF
             Text l2 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
             Text l3 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 4f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
             Text l4 = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 30f, 12f)), new Vector2(CW, 30f), 20, TextAnchor.MiddleLeft);
-            Live(TabEyes, () =>
+            Live(PgEyes, () =>
             {
                 var st = et.Status;
                 var g = et.Gaze;
@@ -888,7 +1050,7 @@ namespace AR6DoF
             Btn(page, 0f, y, 440f, "Recentrer (regarde droit devant)", () => et.Recenter(), 22);
             Para(page, ref c, "Pendant l'etalonnage, garde la tete immobile et suis la cible\ndes yeux. Les donnees du regard sont lues par Unity dans\nAr6dofEyeTracker.Instance.Gaze (pour tes animations).", 100f);
             CloseCard(page, top, ref c);
-            Finish(TabEyes, c);
+            Finish(PgEyes, c);
         }
 
         // ================================================================== STYLE
@@ -951,7 +1113,7 @@ namespace AR6DoF
         {
             styleSub = k;
             if (k == 1) Ar6dofTheme.RescanPictures();
-            scrolls[TabStyle].SetOffset(0f);
+            scrolls[PgStyle].SetOffset(0f);
             RefreshAll();
         }
 
@@ -1620,7 +1782,7 @@ namespace AR6DoF
         // ================================================================== DOCK
         void BuildDock(RectTransform page)
         {
-            float c = Start;
+            float c = BeginPage(page, PgDock);
             float top = OpenCard(page, ref c, "Position");
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Dock aux pieds (cache, apparait en baissant la tete)", () => Ar6dofSettings.Current.dockAtFeet, v => { Ar6dofSettings.Current.dockAtFeet = v; Touch(); }, 600f);
             SliderRow(page, ref c, "Distance devant les pieds (m)", 0.3f, 1.4f, () => Ar6dofSettings.Current.dockDistance, v => { Ar6dofSettings.Current.dockDistance = v; Touch(); }, "0.00");
@@ -1633,13 +1795,13 @@ namespace AR6DoF
             SliderRow(page, ref c, "Inclinaison supplementaire (deg)", -30f, 30f, () => Ar6dofSettings.Current.dockTilt, v => { Ar6dofSettings.Current.dockTilt = v; Touch(); }, "0");
             SliderRow(page, ref c, "Taille du clavier", 0.5f, 2.5f, () => Ar6dofSettings.Current.keyboardScale, v => { Ar6dofSettings.Current.keyboardScale = v; Touch(); }, "0.00");
             CloseCard(page, top, ref c);
-            Finish(TabDock, c);
+            Finish(PgDock, c);
         }
 
         // ================================================================== LANGUE
         void BuildLanguage(RectTransform page)
         {
-            float c = Cursor(TabLang);
+            float c = BeginPage(page, PgLang);
             float top = OpenCard(page, ref c, "Langue de l'interface");
             langCodes.Clear();
             langCodes.Add("");
@@ -1655,7 +1817,7 @@ namespace AR6DoF
             }
             CloseCard(page, top, ref c);
             Para(page, ref c, "Ajouter ou corriger une langue : fichier texte dans\n%APPDATA%\\AR6DoF\\lang (voir le LISEZMOI),\nune ligne par texte (texte francais, fleche, traduction).", 100f);
-            Finish(TabLang, c);
+            Finish(PgLang, c);
             refreshers.Add(() =>
             {
                 string cur = Ar6dofSettings.Current.language ?? "";

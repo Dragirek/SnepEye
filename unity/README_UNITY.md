@@ -41,7 +41,7 @@ Lance **`ar6dof_app.exe`** (double-clic, dans le même dossier qu'`ar6dof_probe.
 - La fenêtre arrête le programme qu'elle a lancé quand tu la fermes (sauf *Laisser tourner quand je ferme cette fenêtre*). Quand Unity lance lui-même `ar6dof_probe.exe` (Launcher), l'application peut rester ouverte : ses boutons d'action fonctionnent aussi.
 - L'ancienne méthode (double-clic sur `ar6dof_probe.exe`, questions dans la console) fonctionne toujours.
 - **Deux .exe, c'est normal** : `ar6dof_probe.exe` est le **moteur** (caméra, IMU, suivi 6DoF, envoi vers Unity, télécommande) ; `ar6dof_app.exe` est la **fenêtre de contrôle** qui le règle et le lance. Garde-les dans le même dossier. Unity n'a besoin que du moteur (le Launcher le démarre avec la configuration enregistrée).
-- La fenêtre suit le **thème de Windows** (mode sombre ou clair, barre de titre comprise) et change toute seule si tu modifies le réglage pendant qu'elle est ouverte.
+- Look **Windows 11** : navigation à gauche par pages (*Caméra, Capteurs, Unity, Yeux, Suivi, Avancé*), réglages dans des cartes arrondies, cases à cocher et bouton principal à la **couleur d'accentuation de Windows**. La fenêtre suit le **thème de Windows** (mode sombre ou clair, barre de titre comprise) et change toute seule si tu modifies le réglage pendant qu'elle est ouverte.
 - **Suivi démarré tout seul** (case cochée par défaut) : sans suivi, Unity n'a pas de position, mais le dock et les écrans s'affichent quand même (devant toi) après 2 secondes ; le dock reste alors visible en permanence.
 
 > *Eye tracking* : laisse la case **décochée** si tu n'as pas les caméras d'oeil. Rien ne tourne alors.
@@ -123,11 +123,16 @@ Les angles, la distance, la taille et l'inclinaison se règlent dans l'onglet *D
 - Rangée du bas : une icône par application : **écrans virtuels** (une icône d'écran avec son **numéro** dedans ; les écrans d'un même **cluster** sont côte à côte sur un fond commun, et chacun se cache ou s'affiche séparément), **clavier**, **tes menus d'appareils**, et à droite, à part, la **roue des réglages** : plus grande et séparée par un trait, mais aux couleurs normales (elle n'est pas allumée en permanence ; le trait sous l'icône indique que les réglages sont ouverts).
 - **Un clic** sur l'icône affiche l'application, **un second clic** la range. Rangée, elle ne consomme rien. Un trait sous l'icône = affichée.
 - Pointer une icône affiche son nom ; une pastille verte / orange / rouge = connecté / en cours / déconnecté.
-- **La roue** ouvre les réglages en VR : **5 onglets** qui tiennent dans la largeur du panneau. *Image* (infos de l'image en direct, FOV, IPD, délai, puis l'optique : yeux, position, distorsion, flux), *Ecrans* (images/s, collage, angle des clusters, ajouter un écran),
-  *Appareils* (suivi de la tête et **échelle des déplacements**, télécommande, filtre du rayon, eye tracking), *Style*, et *Interface* (dock, taille du clavier, langue, performances du GPU).
+- **La roue** ouvre les réglages en VR : **5 onglets**, et chaque onglet a ses **sous-pages** en haut de sa page (comme *Couleurs / Forme / Fenetres / Clavier* dans Style) :
+  - *Image* : **Affichage** (infos de l'image en direct, FOV, IPD, délai, traitement) · **Optique** (réglage par œil, position, distorsion, flux).
+  - *Ecrans* : images/s, collage, angle des clusters, ajouter un écran.
+  - *Appareils* : **Tete** (suivi de la tête, **échelle des déplacements**) · **Telecommande** (état, calibration, filtre du rayon) · **Yeux** (eye tracking, étalonnage).
+  - *Style* : inchangé.
+  - *Interface* : **Dock** (position, taille, clavier) · **Langue** · **Performances** (GPU).
+- **Enregistrer / Annuler / Par defaut ne concernent que la page affichée** (pour Style : la sous-page : Couleurs et Forme ensemble, Fenetres, Clavier). Un petit **point** d'accent sur un onglet ou une sous-page = modifications pas encore enregistrées. Les pages sans point d'enregistrement (Ecrans, Yeux) s'appliquent tout de suite et le disent en bas.
 
 ### Défilement des menus
-Les réglages sont organisés ainsi : un **bandeau fixe en haut** (titre et onglets), un **bandeau fixe en bas** (état, *Enregistrer*, *Annuler*, *Par defaut*), et entre les deux une page qui défile, faite de **cadres** : chaque cadre regroupe, sous un titre, les réglages qui vont ensemble.
+Les réglages sont organisés ainsi : un **bandeau fixe en haut** (titre et onglets ; les sous-pages sont en haut de la page), un **bandeau fixe en bas** (état, *Enregistrer*, *Annuler*, *Par defaut*), et entre les deux une page qui défile, faite de **cadres** : chaque cadre regroupe, sous un titre, les réglages qui vont ensemble.
 Quand un onglet est plus haut que le panneau, une **barre de défilement** apparaît à droite : **vise-la, maintiens le bouton et glisse la poignée**, ou appuie sur la piste pour y sauter, ou utilise les boutons **^** et **v**. Tu peux aussi appuyer sur une zone vide et **glisser** avec le laser, ou utiliser la **molette** d'une souris.
 Le bouton visé par le laser est entouré d'un **contour net** dont la couleur est choisie pour se voir sur n'importe quelle palette.
 

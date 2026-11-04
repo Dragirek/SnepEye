@@ -455,6 +455,16 @@ namespace AR6DoF
             "Depart note : avance en ligne droite, puis clique a l'arrivee => Start noted: walk in a straight line, then click at the end",
             "Deplacement trop court : recommence => Movement too short: try again",
             "Echelle reglee a {0} (le suivi voyait {1} cm) => Scale set to {0} (tracking saw {1} cm)",
+            "Tete => Head",
+            "Dock => Dock",
+            "Performances => Performance",
+            "Cette page s'applique tout de suite => This page applies immediately",
+            "Cette page est enregistree (d'autres pages ont des changements) => This page is saved (other pages have changes)",
+            "Cette page s'applique tout de suite : rien a enregistrer => This page applies immediately: nothing to save",
+            "Cette page s'applique tout de suite : rien a annuler => This page applies immediately: nothing to cancel",
+            "Cette page s'applique tout de suite : rien a remettre => This page applies immediately: nothing to reset",
+            "Modifications de cette page annulees => Changes on this page cancelled",
+            "Valeurs d'usine de cette page en apercu : clique Enregistrer pour les garder => Factory values for this page in preview: click Save to keep them",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -900,6 +910,16 @@ namespace AR6DoF
             "Depart note : avance en ligne droite, puis clique a l'arrivee => Salida anotada: avanza en linea recta y pulsa al llegar",
             "Deplacement trop court : recommence => Desplazamiento demasiado corto: repite",
             "Echelle reglee a {0} (le suivi voyait {1} cm) => Escala ajustada a {0} (el seguimiento veia {1} cm)",
+            "Tete => Cabeza",
+            "Dock => Dock",
+            "Performances => Rendimiento",
+            "Cette page s'applique tout de suite => Esta pagina se aplica al instante",
+            "Cette page est enregistree (d'autres pages ont des changements) => Esta pagina esta guardada (otras paginas tienen cambios)",
+            "Cette page s'applique tout de suite : rien a enregistrer => Esta pagina se aplica al instante: nada que guardar",
+            "Cette page s'applique tout de suite : rien a annuler => Esta pagina se aplica al instante: nada que cancelar",
+            "Cette page s'applique tout de suite : rien a remettre => Esta pagina se aplica al instante: nada que restablecer",
+            "Modifications de cette page annulees => Cambios de esta pagina cancelados",
+            "Valeurs d'usine de cette page en apercu : clique Enregistrer pour les garder => Valores de fabrica de esta pagina en vista previa: pulsa Guardar para conservarlos",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -1352,6 +1372,16 @@ namespace AR6DoF
             "Depart note : avance en ligne droite, puis clique a l'arrivee => Start gemerkt: gehe geradeaus und klicke am Ziel",
             "Deplacement trop court : recommence => Strecke zu kurz: wiederhole",
             "Echelle reglee a {0} (le suivi voyait {1} cm) => Skala auf {0} gesetzt (Tracking sah {1} cm)",
+            "Tete => Kopf",
+            "Dock => Dock",
+            "Performances => Leistung",
+            "Cette page s'applique tout de suite => Diese Seite gilt sofort",
+            "Cette page est enregistree (d'autres pages ont des changements) => Diese Seite ist gespeichert (andere Seiten haben Aenderungen)",
+            "Cette page s'applique tout de suite : rien a enregistrer => Diese Seite gilt sofort: nichts zu speichern",
+            "Cette page s'applique tout de suite : rien a annuler => Diese Seite gilt sofort: nichts abzubrechen",
+            "Cette page s'applique tout de suite : rien a remettre => Diese Seite gilt sofort: nichts zurueckzusetzen",
+            "Modifications de cette page annulees => Aenderungen dieser Seite verworfen",
+            "Valeurs d'usine de cette page en apercu : clique Enregistrer pour les garder => Werkseinstellungen dieser Seite in der Vorschau: Speichern zum Behalten",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -1804,6 +1834,16 @@ namespace AR6DoF
             "Depart note : avance en ligne droite, puis clique a l'arrivee => Partenza annotata: cammina in linea retta e clicca all'arrivo",
             "Deplacement trop court : recommence => Spostamento troppo corto: riprova",
             "Echelle reglee a {0} (le suivi voyait {1} cm) => Scala impostata a {0} (il tracking vedeva {1} cm)",
+            "Tete => Testa",
+            "Dock => Dock",
+            "Performances => Prestazioni",
+            "Cette page s'applique tout de suite => Questa pagina si applica subito",
+            "Cette page est enregistree (d'autres pages ont des changements) => Questa pagina e salvata (altre pagine hanno modifiche)",
+            "Cette page s'applique tout de suite : rien a enregistrer => Questa pagina si applica subito: niente da salvare",
+            "Cette page s'applique tout de suite : rien a annuler => Questa pagina si applica subito: niente da annullare",
+            "Cette page s'applique tout de suite : rien a remettre => Questa pagina si applica subito: niente da ripristinare",
+            "Modifications de cette page annulees => Modifiche di questa pagina annullate",
+            "Valeurs d'usine de cette page en apercu : clique Enregistrer pour les garder => Valori di fabbrica di questa pagina in anteprima: premi Salva per tenerli",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -2255,6 +2295,16 @@ namespace AR6DoF
             "Depart note : avance en ligne droite, puis clique a l'arrivee => Partida anotada: ande em linha reta e clique na chegada",
             "Deplacement trop court : recommence => Deslocamento muito curto: tente de novo",
             "Echelle reglee a {0} (le suivi voyait {1} cm) => Escala ajustada para {0} (o rastreamento viu {1} cm)",
+            "Tete => Cabeca",
+            "Dock => Dock",
+            "Performances => Desempenho",
+            "Cette page s'applique tout de suite => Esta pagina se aplica na hora",
+            "Cette page est enregistree (d'autres pages ont des changements) => Esta pagina esta salva (outras paginas tem alteracoes)",
+            "Cette page s'applique tout de suite : rien a enregistrer => Esta pagina se aplica na hora: nada a salvar",
+            "Cette page s'applique tout de suite : rien a annuler => Esta pagina se aplica na hora: nada a cancelar",
+            "Cette page s'applique tout de suite : rien a remettre => Esta pagina se aplica na hora: nada a redefinir",
+            "Modifications de cette page annulees => Alteracoes desta pagina canceladas",
+            "Valeurs d'usine de cette page en apercu : clique Enregistrer pour les garder => Valores de fabrica desta pagina em previa: clique em Salvar para manter",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

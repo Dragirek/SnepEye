@@ -440,6 +440,13 @@ namespace AR6DoF
             catch (Exception e) { Debug.LogWarning("AR6DoF : sauvegarde impossible : " + e.Message); }
         }
 
+        /// <summary>Écrit ces réglages dans le fichier (sans toucher aux réglages en cours) : sert à n'enregistrer qu'une page des réglages VR.</summary>
+        public bool SaveSettings(Ar6dofPassthroughSettings s)
+        {
+            try { File.WriteAllText(SettingsPath, JsonUtility.ToJson(s, true)); return true; }
+            catch (Exception e) { Debug.LogWarning("AR6DoF : sauvegarde impossible : " + e.Message); return false; }
+        }
+
         // FOV (par oeil, carré) au-delà duquel l'image de la caméra ne couvre plus l'écran : des bords noirs apparaissent.
         // Approximation (sans la distorsion aux coins). Retourne 0 sans calibration.
         float MaxFovNoBlack()
