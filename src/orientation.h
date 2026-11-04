@@ -151,7 +151,7 @@ class Mahony {
 // l'envers...). Le résultat est une matrice R telle que  v_casque = R * v_capteur
 // dont les lignes sont des axes du capteur (montage à 90 degres près).
 //   Étape 1 : casque à plat, à l'endroit, immobile  -> trouve l'axe "haut".
-//   Étape 2 : casque penché vers l'avant (~30 deg), immobile -> trouve l'axe "avant".
+//   Étape 2 : casque incliné (~30 deg) vers l'avant (visière en bas) OU vers l'arrière (visière en haut), immobile -> trouve l'axe "avant".
 // ---------------------------------------------------------------------------
 inline int MaxAxis(const Vec3& v) {
   double ax = std::abs(v.x), ay = std::abs(v.y), az = std::abs(v.z);
@@ -176,19 +176,22 @@ inline bool MountStep1(const Vec3& acc, const Vec3& gyr, Vec3& up_s, std::string
   int i = MaxAxis(acc);
   if (std::abs(Comp(acc, i)) / n < 0.9) { msg = "etape 1 : pose le casque bien a plat (< 25 deg d'inclinaison)"; return false; }
   up_s = AxisVec(i, Comp(acc, i));
-  msg = "etape 1 OK : haut = " + AxisName(up_s) + ". Penche maintenant le casque vers l'avant (~30 deg), immobile";
+  msg = "etape 1 OK : haut = " + AxisName(up_s) + ". Incline maintenant le casque (~30 deg), immobile";
   return true;
 }
 
-inline bool MountStep2(const Vec3& up_s, const Vec3& acc, const Vec3& gyr, Mat3& R, std::string& msg) {
+// noseUp = faux : casque incline vers l'avant (visiere vers le bas) ; vrai : incline vers l'arriere (visiere vers le haut).
+// Les deux gestes donnent le meme montage : seul le sens de la composante horizontale de l'accel change.
+inline bool MountStep2(const Vec3& up_s, const Vec3& acc, const Vec3& gyr, Mat3& R, std::string& msg, bool noseUp = false) {
   if (Norm(gyr) > 0.15) { msg = "etape 2 : le casque bouge, immobilise-le"; return false; }
   Vec3 h = acc - up_s * Dot(acc, up_s);  // composante horizontale de l'accel
   double hn = Norm(h);
-  if (hn < 2.0) { msg = "etape 2 : penche plus vers l'avant (au moins 15 deg)"; return false; }
+  if (hn < 2.0) { msg = "etape 2 : incline plus (au moins 15 deg)"; return false; }
   int j = MaxAxis(h);
-  if (std::abs(Comp(h, j)) / hn < 0.75) { msg = "etape 2 : penche bien droit vers l'avant, pas sur le cote"; return false; }
-  // Penche vers l'avant => l'accel (qui mesure "le haut") pointe vers l'ARRIERE.
-  Vec3 forward = AxisVec(j, Comp(h, j)) * -1.0;
+  if (std::abs(Comp(h, j)) / hn < 0.75) { msg = "etape 2 : incline bien droit, pas sur le cote"; return false; }
+  // L'accel mesure "le haut". Casque incline vers l'avant (visiere vers le bas) : elle pointe vers l'ARRIERE.
+  // Incline vers l'arriere (visiere vers le haut) : elle pointe vers l'AVANT.
+  Vec3 forward = AxisVec(j, Comp(h, j)) * (noseUp ? 1.0 : -1.0);
   Vec3 left = Cross(up_s, forward);
   for (int c = 0; c < 3; c++) {
     R.m[0][c] = Comp(forward, c);

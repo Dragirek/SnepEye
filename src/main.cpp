@@ -483,9 +483,10 @@ struct MountCal {
   MountAuto au;   // calibration en un geste (commande MOUNT) : mesures moyennees, sans besoin de cliquer au bon moment
 };
 
-// Commandes texte MOUNT (demarre la calibration en un geste) et MOUNTX (l'annule). Vrai si la ligne a ete traitee.
+// Commandes texte MOUNT / MOUNTU (demarrent la calibration en un geste ; 2e pose visiere vers le bas / vers le haut) et MOUNTX (l'annule). Vrai si la ligne a ete traitee.
 static bool HandleMountLine(const std::string& line, MountCal& mc) {
-  if (line == "MOUNT") { mc.au.Start(NowS(), mc.msg); mc.havePendingUp = false; return true; }
+  if (line == "MOUNT") { mc.au.Start(NowS(), mc.msg, false); mc.havePendingUp = false; return true; }    // pose 2 : visiere vers le bas
+  if (line == "MOUNTU") { mc.au.Start(NowS(), mc.msg, true); mc.havePendingUp = false; return true; }    // pose 2 : visiere vers le haut
   if (line == "MOUNTX") { mc.au.Cancel(mc.msg); return true; }
   return false;
 }

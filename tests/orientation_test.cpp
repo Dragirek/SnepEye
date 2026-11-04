@@ -35,6 +35,14 @@ int main() {
     Vec3 a_tilt = Rsb * Vec3{-G * std::sin(tilt), G * std::sin(e), G * std::cos(tilt)};
     Vec3 gyr = Rsb * Vec3{0.01, 0.0, -0.01};
     Vec3 up; Mat3 R; std::string msg;
+    // meme pose inclinee de l'autre cote (visiere vers le haut) : la composante horizontale de l'accel s'inverse, le montage trouve est le meme
+    Vec3 a_tilt_up = Rsb * Vec3{G * std::sin(tilt), G * std::sin(e), G * std::cos(tilt)};
+    Mat3 R2; std::string msg2; Vec3 up2;
+    bool ok2 = MountStep1(a_level, gyr, up2, msg2) && MountStep2(up2, a_tilt_up, gyr, R2, msg2, true);
+    for (int i = 0; i < 3 && ok2; i++)
+      for (int j = 0; j < 3; j++)
+        if (std::abs(R2.m[i][j] - Rt.m[i][j]) > 1e-9) ok2 = false;
+    assert(ok2);
     bool ok = MountStep1(a_level, gyr, up, msg) && MountStep2(up, a_tilt, gyr, R, msg);
     bool same = ok;
     for (int i = 0; i < 3 && same; i++)

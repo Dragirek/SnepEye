@@ -92,7 +92,7 @@ enum {
   ID_PV_CAM, ID_PV_EYE, ID_PV_MOUTH, ID_PVW_CAM, ID_PVW_EYE, ID_PVW_MOUTH,
   ID_THREADS, ID_KEEP,
   ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK,
-  ID_M_STEP1, ID_M_STEP2, ID_M_RESET,
+  ID_M_STEP1, ID_M_STEP2, ID_M_RESET, ID_M_NOSEUP,
   ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS,
   ID_NAV0 = 300   // 7 pages : ID_NAV0 .. ID_NAV0 + 6
 };
@@ -466,6 +466,7 @@ void ConfigToFields() {
   RebuildModes(g_cfg.find("width") == g_cfg.end());   // première utilisation : on propose un mode que la caméra a vraiment
   SetSel(ID_BACKEND, CfgInt("backend", 0) == 1 ? 1 : 0);
   SetChecked(ID_MFDIRECT, CfgInt("mfdirect", 0) != 0);
+  SetChecked(ID_M_NOSEUP, CfgInt("mountup", 1) != 0);
 
   std::string pn = CfgStr("portname", "");
   int pi = 0;
@@ -549,6 +550,7 @@ bool SaveFields() {
   g_cfg["fps"] = std::to_string(f);
   g_cfg["backend"] = std::to_string(GetSel(ID_BACKEND) == 1 ? 1 : 0);
   g_cfg["mfdirect"] = IsChecked(ID_MFDIRECT) ? "1" : "0";
+  g_cfg["mountup"] = IsChecked(ID_M_NOSEUP) ? "1" : "0";
   std::string cd = W2A(GetText(ID_CALDIR));
   g_cfg["calibdir"] = cd.empty() ? "-" : cd;
   std::string base = W2A(GetText(ID_BASE));
@@ -1537,21 +1539,22 @@ void CreateControls() {
   Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 105, 80, 28, ID_PORT_REFRESH);
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 152, CWd - 2 * PAD, 68, ID_IMUSTAT);
 
-  CardBox(L"Montage de l'IMU (une seule fois, sans lancer le suivi)", L"IMU mounting (once, without starting tracking)", X, 246, CWd, 232);
-  Label(L"Un seul bouton : clique, puis suis les consignes (compte à rebours, bip à chaque mesure). Tu as le temps de lâcher le casque :\r\nd'abord à plat, à l'endroit ; ensuite penché vers l'avant (nez en haut). Chaque pose est mesurée sur 1 s.",
-        L"One button: click, then follow the prompts (countdown, a beep at each measurement). You have time to let go of the headset:\r\nfirst flat and the right way up, then tilted forward (nose up). Each pose is averaged over 1 s.", X + PAD, 290, CWd - 2 * PAD, 44);
-  Button(L"Calibrer le montage", L"Calibrate the mounting", X + PAD, 342, 316, 34, ID_M_STEP1);
-  Button(L"Annuler", L"Cancel", X + PAD + 328, 342, 316, 34, ID_M_STEP2);
-  Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 386, 644, 34, ID_M_RESET);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 430, CWd - 2 * PAD, 40, ID_MOUNTMSG);
+  CardBox(L"Montage de l'IMU (une seule fois, sans lancer le suivi)", L"IMU mounting (once, without starting tracking)", X, 246, CWd, 296);
+  Label(L"Un seul bouton : clique, puis suis les consignes (compte à rebours, bip à chaque mesure). Tu as le temps de lâcher le casque : d'abord à plat, à l'endroit ; ensuite incliné d'environ 30° vers l'arrière (visière vers le haut) ou vers l'avant (visière vers le bas), selon la case ci-dessous. Chaque pose est mesurée sur 1 s.",
+        L"One button: click, then follow the prompts (countdown, a beep at each measurement). You have time to let go of the headset: first flat and the right way up, then tilted about 30 degrees backward (visor up) or forward (visor down), depending on the box below. Each pose is averaged over 1 s.", X + PAD, 286, CWd - 2 * PAD, 84);
+  Check(L"2e pose : visière vers le HAUT (décoche : visière vers le BAS)", L"2nd pose: visor UP (untick: visor DOWN)", X + PAD, 376, CWd - 2 * PAD, ID_M_NOSEUP);
+  Button(L"Calibrer le montage", L"Calibrate the mounting", X + PAD, 410, 316, 34, ID_M_STEP1);
+  Button(L"Annuler", L"Cancel", X + PAD + 328, 410, 316, 34, ID_M_STEP2);
+  Button(L"Réinitialiser le montage", L"Reset the mounting", X + PAD, 454, 644, 34, ID_M_RESET);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 496, CWd - 2 * PAD, 40, ID_MOUNTMSG);
 
-  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 492, CWd, 138);
-  Label(L"Dossier", L"Folder", X + PAD, 540, 160);
-  Edit(X + C0, 536, CR - 100, ID_CALDIR);
-  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 535, 90, 28, ID_CALBROWSE);
-  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 578, 160);
-  Edit(X + C0, 574, 76, ID_BASE);
-  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 578, 330);
+  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 556, CWd, 138);
+  Label(L"Dossier", L"Folder", X + PAD, 604, 160);
+  Edit(X + C0, 600, CR - 100, ID_CALDIR);
+  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 599, 90, 28, ID_CALBROWSE);
+  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 642, 160);
+  Edit(X + C0, 638, 76, ID_BASE);
+  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 642, 330);
 
   // ---- page 2 : Unity
   g_buildPage = PG_UNITY;
@@ -1762,7 +1765,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_A_YAW: SendCmd('Z'); break;
         case ID_A_SWAP: SendCmd('x'); break;
         case ID_A_CHECK: SendCmd('c'); break;
-        case ID_M_STEP1: QueueUdp(9877, "MOUNT", EnsureProbe()); break;    // fonctionne sans suivi : le mode services lit l'IMU
+        case ID_M_STEP1: QueueUdp(9877, IsChecked(ID_M_NOSEUP) ? "MOUNTU" : "MOUNT", EnsureProbe()); break;    // fonctionne sans suivi : le mode services lit l'IMU
         case ID_M_STEP2: QueueUdp(9877, "MOUNTX", EnsureProbe()); break;
         case ID_M_RESET: QueueUdp(9877, "0", EnsureProbe()); break;
       }

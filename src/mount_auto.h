@@ -15,13 +15,15 @@ class MountAuto {
   double windowS = 1.0;     // duree de la fenetre de mesure immobile
   double timeoutS = 12.0;   // attente maximale d'une pose immobile
   int maxAttempts = 3;
+  bool noseUp = true;       // pose 2 : visiere vers le haut (vrai) ou vers le bas (faux). Choisi par Start().
 
   bool Active() const { return st_ != Idle; }
   State state() const { return st_; }
   // Vrai une fois (puis remis a faux) quand une mesure vient d'etre prise : l'appelant joue un bip.
   bool TakeBeep() { bool b = beep_; beep_ = false; return b; }
 
-  void Start(double now, std::string& msg) {
+  void Start(double now, std::string& msg, bool up = true) {
+    noseUp = up;
     st_ = Count1; t0_ = now; attempts_ = 0; last_ = -1; buf_.clear();
     msg = Countdown(0);
   }
@@ -67,7 +69,7 @@ class MountAuto {
       msg = "etape 1/2 OK. " + Countdown(0).substr(0);
       return false;
     }
-    if (!MountStep2(up_, ma, Vec3(), R, m)) return Fail(now, 2, m, msg);
+    if (!MountStep2(up_, ma, Vec3(), R, m, noseUp)) return Fail(now, 2, m, msg);
     st_ = Idle; beep_ = true;
     msg = m;
     return true;
@@ -85,7 +87,8 @@ class MountAuto {
   std::string Countdown(int sec) const {
     const bool one = st_ == Count1;
     std::string s = one ? "etape 1/2 : pose le casque a plat, a l'endroit, et lache-le"
-                        : "etape 2/2 : penche le casque vers l'avant (~30 deg, nez en haut) et tiens-le immobile";
+                        : (noseUp ? "etape 2/2 : incline le casque vers l'ARRIERE (~30 deg, visiere vers le HAUT) et tiens-le immobile"
+                              : "etape 2/2 : incline le casque vers l'AVANT (~30 deg, visiere vers le BAS) et tiens-le immobile");
     if (sec > 0) s += " - mesure dans " + std::to_string(sec) + " s";
     return s;
   }

@@ -9,7 +9,7 @@ int main() {
   Vec3 aFlat{0.1, 0.1, -G}, aTilt{-G * std::sin(tilt) * 0.0 + 0.0, G * std::sin(tilt), -G * std::cos(tilt)};
   Vec3 still{0.01, 0.0, -0.01}, moving{0.9, 0.2, 0.0};
   MountAuto m; std::string msg; Mat3 R;
-  m.Start(0, msg);
+  m.Start(0, msg, false);   // pose 2 visiere vers le bas (aTilt)
   assert(m.Active());
   bool done = false; int beeps = 0;
   double t = 0.0;
@@ -28,6 +28,29 @@ int main() {
   std::printf("termine a %.1f s : %s\n", t, msg.c_str());
   std::printf("done=%d beeps=%d\n", (int)done, beeps); assert(done && !m.Active() && beeps == 4);
   assert(std::abs(R.Det() - 1.0) < 1e-9);
+  // Meme montage, 2e pose visiere vers le HAUT (accel horizontale inversee) : meme matrice
+  {
+    Vec3 aTiltUp{0.0, -G * std::sin(tilt), -G * std::cos(tilt)};
+    MountAuto u; std::string m2; Mat3 R2; bool d3 = false;
+    u.Start(0, m2, true);
+    for (double t2 = 0.0; t2 < 40.0 && !d3; t2 += 0.02) {
+      Vec3 a = t2 < 8.0 ? aFlat : (t2 < 14.0 ? aFlat : aTiltUp), g = t2 < 8.0 ? moving : still;
+      if (t2 < 8.0) a = aFlat + Vec3{std::sin(t2 * 30) * 2, 0, 0};
+      d3 = u.Update(t2, a, g, R2, m2);
+    }
+    std::printf("visiere en haut : %s\n", m2.c_str());
+    assert(d3);
+    Vec3 aTiltDown{0.0, G * std::sin(tilt), -G * std::cos(tilt)};
+    MountAuto dn; std::string m3; Mat3 R3; bool d4 = false;
+    dn.Start(0, m3, false);
+    for (double t2 = 0.0; t2 < 40.0 && !d4; t2 += 0.02) {
+      Vec3 a = t2 < 14.0 ? aFlat : aTiltDown, g = t2 < 8.0 ? moving : still;
+      if (t2 < 8.0) a = aFlat + Vec3{std::sin(t2 * 30) * 2, 0, 0};
+      d4 = dn.Update(t2, a, g, R3, m3);
+    }
+    assert(d4);
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) assert(std::abs(R2.m[i][j] - R3.m[i][j]) < 1e-9);
+  }
   // Toujours agite : echec propre apres 3 essais
   MountAuto f; f.Start(0, msg); bool d2 = false;
   for (t = 0; t < 200 && f.Active(); t += 0.02) d2 = f.Update(t, aFlat + Vec3{std::sin(t * 30) * 2, 0, 0}, moving, R, msg);
