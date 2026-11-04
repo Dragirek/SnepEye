@@ -180,6 +180,7 @@ namespace AR6DoF
         public Action resizeEnd;
         public Action onSettings;                      // roue à droite de la barre de déplacement (même place pour toutes les fenêtres) ; vide = pas de roue
         public Func<bool> settingsOn;                  // vrai : le panneau de réglages de cette fenêtre est ouvert (la roue s'allume)
+        public Action moved;                           // appelé quand on commence à déplacer la fenêtre à la main (un panneau collé à son écran se détache)
         public Action<Vector3, int> moveBegin;         // vides : déplacement par défaut = le menu suit le laser
         public Action<Ray> moveDrag;
         public Action moveEnd;
@@ -396,6 +397,7 @@ namespace AR6DoF
 
         public void MoveBegin(Vector3 hit, int button = 0)
         {
+            if (moved != null) moved();
             if (moveBegin != null) { moveBegin(hit, button); return; }
             grabDist = Vector3.Distance(Ar6dofPointer.LastRay.origin, hit);
             grabOffset = target.position - hit;

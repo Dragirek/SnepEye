@@ -505,11 +505,11 @@ namespace AR6DoF
         Button gearBtn;
         Text gearLbl;
 
-        /// <summary>La roue des réglages est en couleur d'accent : son dessin prend la couleur (noir ou blanc) qui s'y lit le mieux.</summary>
+        /// <summary>La roue des réglages est un bouton comme les autres (couleur normale, pas allumée en permanence) : seuls sa taille et le séparateur la mettent à part. Son dessin suit la couleur du texte.</summary>
         void UpdateGearLook()
         {
             if (gearImg == null) return;
-            Color on = Ar6dofTheme.OnColor(Ar6dofSettings.StyleFor(Ar6dofElem.Dock).accent);
+            Color on = Ar6dofSettings.StyleFor(Ar6dofElem.Dock).text;
             gearImg.color = on;
             if (gearLbl != null) gearLbl.color = on;
         }
@@ -524,9 +524,7 @@ namespace AR6DoF
             iconOf[a] = rt;
             if (isGear)
             {
-                // bouton important : plein, en couleur d'accent, plus grand que les autres
-                var th = b.GetComponent<Ar6dofThemed>();
-                if (th != null) { th.concentric = true; th.Init(Ar6dofRole.Accent, 48); }
+                // plus grand que les autres et séparé par un trait ; couleurs normales (le soulignement indique qu'il est ouvert)
                 var g = new GameObject("Roue", typeof(RectTransform));
                 g.transform.SetParent(rt, false);
                 var grt = (RectTransform)g.transform;

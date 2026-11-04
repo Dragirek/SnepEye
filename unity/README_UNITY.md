@@ -31,12 +31,17 @@ Projet Unity 6, URP ou pipeline intégré. **API graphique : Direct3D 11 uniquem
 
 ---
 
-## 3. Première utilisation d'ar6dof_probe (une seule fois, à la main)
-Lance `ar6dof_probe.exe` (double-clic). Il pose des questions (caméra, port COM de l'IMU, 3200x1200, 60 fps, calibration, base 60 mm...).
-Presse Entrée pour garder les valeurs proposées. Ensuite : `g` puis `f` (montage de l'IMU), `t` (tracking), `q` pour quitter.
-Tes réponses sont gardées dans `ar6dof_config.txt` ; Unity les rejoue ensuite sans rien demander.
+## 3. Première utilisation : l'application `ar6dof_app.exe` (une seule fois)
+Lance **`ar6dof_app.exe`** (double-clic, dans le même dossier qu'`ar6dof_probe.exe`) : une vraie fenêtre Windows, sans console ni questions à taper.
+- **Langue** : français ou English (liste en bas à droite ; par défaut la langue de Windows).
+- **Caméra** et **port de l'IMU** : choisis-les dans des **listes** (*Actualiser* si tu viens de brancher quelque chose) ; **mode** de la caméra dans une liste de modes connus (ou tes propres valeurs largeur / hauteur / cadence) ; **cases à cocher** pour le reste (partage de l'image, télécommande Bluetooth, démarrage automatique du suivi, lecteur direct Media Foundation, eye tracking avec ses deux caméras...). *Parcourir…* pour le dossier de calibration, et la base réelle entre les objectifs en mm.
+- **Enregistrer** écrit `ar6dof_config.txt` (le fichier qu'Unity et `ar6dof_probe --auto` rejouent). **Démarrer le suivi** enregistre puis lance `ar6dof_probe.exe` **sans console ni fenêtres flottantes** ; le même bouton devient **Arrêter**. En bas : le journal du programme et ses statistiques en direct (caméra, suivi, délai, CPU).
+- **Montage de l'IMU** (une seule fois) : bouton *1* casque à plat, puis bouton *2* casque penché en avant. **Pendant le suivi**, des boutons remplacent les touches du clavier : redémarrer le suivi (T), verrouiller le sol (V), cap à zéro (Z), inverser gauche / droite (X), vérifier la calibration (C).
+- *Fenêtres de diagnostic OpenCV* (décoché par défaut) rouvre les anciennes fenêtres de contrôle si tu en as besoin ; elles utilisent plus de CPU.
+- La fenêtre arrête le programme qu'elle a lancé quand tu la fermes (sauf *Laisser tourner quand je ferme cette fenêtre*). Quand Unity lance lui-même `ar6dof_probe.exe` (Launcher), l'application peut rester ouverte : ses boutons d'action fonctionnent aussi.
+- L'ancienne méthode (double-clic sur `ar6dof_probe.exe`, questions dans la console) fonctionne toujours.
 
-> Question *Eye tracking* : réponds **0** si tu n'as pas les caméras d'oeil. Rien ne tourne alors.
+> *Eye tracking* : laisse la case **décochée** si tu n'as pas les caméras d'oeil. Rien ne tourne alors.
 
 ---
 
@@ -112,11 +117,11 @@ Puis : **supprime la Main Camera**, et ajoute `Ar6dofComposite.shader`, `Ar6dofS
 **Accrochée à tes pieds** : elle te suit où que tu ailles, reste **invisible** tant que tu regardes devant, puis **apparaît doucement** quand tu penches la tête vers le bas (par défaut dès 35° vers le bas, entièrement visible à 55°). Une fois visible elle ne bouge plus : tu peux la viser tranquillement. Rien ne passe devant tes menus.
 Les angles, la distance, la taille et l'inclinaison se règlent dans l'onglet *Dock* des réglages ; le mode « fixe sous les écrans » existe encore (décoche *Dock aux pieds*).
 - Rangée du haut = **actions rapides** : **Recentrer** (la tête), **Menus ici** (ramène les menus ouverts devant toi), **Clavier ici**, **Suivi** (le clavier te suit ou non).
-- Rangée du bas : une icône par application : **écrans virtuels** (une icône d'écran avec son **numéro** dedans ; les écrans d'un même **cluster** sont côte à côte sur un fond commun, et chacun se cache ou s'affiche séparément), **clavier**, **tes menus d'appareils**, et à droite, à part, la **roue des réglages** (plus grande, en couleur d'accent).
+- Rangée du bas : une icône par application : **écrans virtuels** (une icône d'écran avec son **numéro** dedans ; les écrans d'un même **cluster** sont côte à côte sur un fond commun, et chacun se cache ou s'affiche séparément), **clavier**, **tes menus d'appareils**, et à droite, à part, la **roue des réglages** : plus grande et séparée par un trait, mais aux couleurs normales (elle n'est pas allumée en permanence ; le trait sous l'icône indique que les réglages sont ouverts).
 - **Un clic** sur l'icône affiche l'application, **un second clic** la range. Rangée, elle ne consomme rien. Un trait sous l'icône = affichée.
 - Pointer une icône affiche son nom ; une pastille verte / orange / rouge = connecté / en cours / déconnecté.
-- **La roue** ouvre les réglages en VR : onglets *Image* (infos de l'image en direct, FOV, IPD, délai, calibration, reprojection...), *Optique* (décalage, lentilles, miroir, rotation, yeux liés), *Ecrans* (images/s, collage, angle des clusters, ajouter un écran),
-  *Systeme* (état de la tête et de la télécommande, calibration, filtre du rayon), *Yeux* (eye tracking), *Style*, *Dock* et *Langue*.
+- **La roue** ouvre les réglages en VR : **5 onglets** qui tiennent dans la largeur du panneau. *Image* (infos de l'image en direct, FOV, IPD, délai, puis l'optique : yeux, position, distorsion, flux), *Ecrans* (images/s, collage, angle des clusters, ajouter un écran),
+  *Appareils* (suivi de la tête et **échelle des déplacements**, télécommande, filtre du rayon, eye tracking), *Style*, et *Interface* (dock, taille du clavier, langue, performances du GPU).
 
 ### Défilement des menus
 Les réglages sont organisés ainsi : un **bandeau fixe en haut** (titre et onglets), un **bandeau fixe en bas** (état, *Enregistrer*, *Annuler*, *Par defaut*), et entre les deux une page qui défile, faite de **cadres** : chaque cadre regroupe, sous un titre, les réglages qui vont ensemble.
@@ -127,7 +132,7 @@ Le bouton visé par le laser est entouré d'un **contour net** dont la couleur e
 Chaque écran et chaque menu a, dans un coin, deux boutons : **Réduire** (range la fenêtre dans la barre, comme un clic sur son icône) et **Fermer** (pour un écran : le retire, avec un second clic de confirmation ; il en reste toujours au moins un, qui est alors rangé). La **même poignée de redimensionnement** (coin bas droit, sous la fenêtre) et la **même barre de déplacement** (une ligne, sous la fenêtre, au milieu) sur **tout** : écrans, clavier, réglages, nouvel écran, menus d'appareils. Vise la barre, maintiens le bouton et bouge : la fenêtre te suit en restant de face (écran : bouton gauche = tout le cluster, bouton droit = cet écran seul).
 Style **Windows** (par défaut) ou **Mac**, et coin au choix (haut/bas, gauche/droite ; par défaut en haut à droite) : onglet *Style* > *Fenetres*. La **roue des réglages** d'une fenêtre (écran, clavier) est toujours au même endroit : **juste à droite de la barre de déplacement**, avec le même dessin ; elle s'allume tant que le panneau est ouvert, un second clic le referme. Une fenêtre sans réglages n'a pas de roue.
 
-### Style, langue et paramètres globaux (onglets Style / Dock / Langue)
+### Style, langue et paramètres globaux (onglets Style et Interface)
 Tout ça est **global** (pas lié à un projet Unity) : fichier `%APPDATA%\AR6DoF\settings.json`.
 - **Aperçu puis Enregistrer** : un changement s'applique tout de suite mais n'est gardé que si tu cliques **Enregistrer** (en bas du panneau). **Annuler** revient au dernier enregistrement, **Par defaut** (2 clics) remet les valeurs d'usine, en aperçu aussi.
 - **Style**, du plus général au plus fin : (1) la **catégorie** tout en haut (*Couleurs*, *Forme*, *Fenetres*, *Clavier*) ; (2) pour *Couleurs* et *Forme* seulement, **Appliquer a** : *Tout* (style commun à toute l'interface) ou un élément : *Barre* (le dock), *Menus*, *Touches* (le clavier), *Cadres* (les écrans), *Rayon*. Coche **Style à part pour cet élément** pour qu'il ait ses propres réglages (ex. touches rouges, rayon vert) ; sinon il suit le style commun ; (3) les cadres de réglages.
@@ -136,10 +141,10 @@ Tout ça est **global** (pas lié à un projet Unity) : fichier `%APPDATA%\AR6Do
 - **Style d'usine : Eclipse** (noir, gris, jaune). Un ancien `settings.json` resté cyan d'origine passe à Eclipse automatiquement ; si tu avais choisi tes couleurs, rien ne change.
 - **Arrondis concentriques** : le panneau a l'arrondi réglé ; chaque cadre ou bandeau à l'intérieur en retire 12 px, et les boutons dedans encore 12 px, donc les coins suivent toujours le coin qui les entoure.
 - **Animation du clavier** (*Style* > *Clavier*) : mode, puis (sauf *Aucune*) les couleurs de l'animation, et **en dessous** la vitesse et l'intensité. Le sens n'apparaît que pour *Vague*.
-- **Clavier** : mêmes boutons de fenêtre que le reste (réduire, fermer, barre de déplacement, coin de taille). La taille se règle aussi dans l'onglet *Dock*.
+- **Clavier** : mêmes boutons de fenêtre que le reste (réduire, fermer, barre de déplacement, coin de taille). La taille se règle aussi dans l'onglet *Interface*.
 - **Langue** : français, English, Español, Deutsch, Italiano, Português, ou *Automatique* (langue de Windows). Pour ajouter ou corriger une langue sans toucher au code : fichier texte `%APPDATA%\AR6DoF\lang\xx.txt` (xx = code de la langue), première ligne `# Nom de la langue` (facultative), puis une ligne par texte : `texte français => traduction` (modèle : les textes français sont ceux du code).
 
-### Réglages du passthrough (onglets Image et Optique)
+### Réglages du passthrough (onglet Image)
 | Réglage | Effet |
 |---|---|
 | FOV affiché | champ de vision de chaque oeil. À accorder à ton optique |
@@ -154,7 +159,10 @@ Tout ça est **global** (pas lié à un projet Unity) : fichier `%APPDATA%\AR6Do
 | Délai capture -> écriture | mesuré automatiquement (tourne la tête quelques secondes au démarrage) ; réglable à la main |
 | Etirer les bords | au lieu de laisser du noir quand la reprojection sort de l'image |
 
-Bouton *Sauver ces réglages* pour les garder.
+Ces réglages ont leur propre fichier, mais ils suivent maintenant les boutons du bas : **Enregistrer** les garde (en même temps que le reste), **Annuler** revient au dernier enregistrement, **Par defaut** les remet à zéro (en aperçu). Les anciens boutons *Sauver / Recharger / Remettre à zéro* de l'onglet, en double, ont disparu.
+
+### Les menus bougent quand tu marches ? Échelle des déplacements
+Les menus sont **fixes dans la pièce** (seul le dock te suit, aux pieds, et le clavier si *Suivi : OUI*). Si tu avances d'un mètre et qu'ils semblent reculer de 50 cm, c'est que le suivi sous-estime tes pas : le plus souvent, la **base entre les deux objectifs** (en mm) est mal renseignée dans `ar6dof_app` (60 mm sur une ELP), ou la calibration a été faite avec une mauvaise taille de case. Pour le vérifier : onglet *Appareils*, la ligne *hauteur des yeux* doit donner ta vraie hauteur. Pour corriger sans refaire la calibration : *Appareils* > *Suivi de la tete* > **Mesurer l'echelle** : clique *point de depart*, avance en ligne droite de la distance réglée (par défaut 100 cm, mesure-la au mètre), puis clique *Arrivee*. L'**échelle des déplacements** est réglée toute seule (le curseur permet aussi de la fixer à la main). Elle multiplie les déplacements de la tête (et la hauteur des yeux) ; l'image caméra n'est pas touchée.
 
 ---
 
@@ -162,13 +170,14 @@ Bouton *Sauver ces réglages* pour les garder.
 1. Flashe `firmware/ar6dof_remote/ar6dof_remote.ino` sur l'ESP32-C3 (câblage et broches : en-tête du fichier). Pas de WiFi, pas de mot de passe.
 2. Active le Bluetooth du PC. **Ne l'appaire pas** dans les paramètres Windows. Si « AR6DoF-Remote » y apparaît déjà (essais précédents), **supprime-le** de la liste.
 3. Le Bluetooth passe par ar6dof_probe : il cherche « AR6DoF-Remote », se connecte, se reconnecte. Console : `[probe] [ble] telecommande connectee`.
-4. Réglages > *Systeme* > *Telecommande* : *Calibrer 1/2* (compte à rebours de 3 s pour avoir le temps de poser la manette) (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
+4. Réglages > *Appareils* > *Telecommande* : *Calibrer 1/2* (compte à rebours de 3 s pour avoir le temps de poser la manette) (à plat, immobile) puis *2/2* (pointe relevée de ~30°, immobile). Une seule fois.
 5. Recentrer : maintenir les 2 boutons 0,6 s en pointant devant toi. Bouton gauche = clic gauche, bouton droit = clic droit.
 6. **Latence et stabilité** (composant `Ar6dofRemote`) : le filtre tourne à chaque paquet (125 Hz) avec l'horloge du capteur. *Filter Min Cutoff Hz* (2) : plus bas = plus stable à l'arrêt. *Filter Beta* (0,15) : plus haut = moins de retard en mouvement. *Predict Ms* (10) : avance le laser de ce temps pour compenser le Bluetooth et l'affichage ; monte-le si le laser traîne, baisse-le s'il dépasse la cible. Dans `Ar6dofPointer`, *Extra Smoothing* reste décoché (il ajouterait du retard).
 7. **Portée** : antenne de l'ESP32-C3 dégagée (pas de main, batterie ni fils dessus), dongle Bluetooth sur un port USB 2 ou une rallonge (l'USB 3 brouille le 2,4 GHz). Au démarrage, ar6dof_probe demande à Windows un intervalle de connexion court : `[ble] intervalle de connexion court : accepte`.
 
 ## 8. Écrans virtuels
 La capture est faite par `ar6dof_screen.dll` (DXGI, GPU vers GPU, aucun travail quand le bureau ne change pas). Icône « écrans » de la barre.
+- **Le panneau de l'écran** (roue) s'ouvre **au-dessus de l'écran**, de face comme lui, **sans recouvrir** ses boutons réduire / fermer, et le **suit** (écran déplacé, redimensionné) tant que tu ne l'as pas déplacé à la main avec sa barre.
 - **12 écrans au maximum**, par **clusters de 3** (gauche, centre, droite) collés entre eux ; un nouvel écran se colle au premier cluster qui n'est pas complet, sinon il forme un nouveau cluster sur un arc autour de toi. Barre sous un écran = déplacer (bouton gauche : tout le cluster ; bouton droit : cet écran seul, il se décolle). **Coin bas droit** = taille. **Roue** à droite de la barre = panneau de l'écran : source, images/s, ajouter un écran, recentrer (pour retirer ou ranger l'écran : les boutons **-** et **X** de la fenêtre, comme partout ; le panneau n'a plus de bouton Fermer ni Retirer en double). Les lignes qui n'ont pas de sens sont **cachées** : *Angle avec les voisins* (curseur 0-60°, règle tout le cluster) et *Dissocier* n'apparaissent que si l'écran est collé à un autre ; *Coller aux bords* seulement s'il y a 2 écrans ou plus. Réduire / Fermer : voir « Fenêtres » plus haut. **Important** : 12 écrans demandent la nouvelle `ar6dof_screen.dll` (4 emplacements avant) ; avec l'ancienne, le maximum reste 4.
 - **Nouvel écran** : le bouton *+ Ajouter un écran* ouvre un choix à deux modes. (1) Un **moniteur réel**, avec sa résolution. (2) Un **écran virtuel logiciel** : une **fenêtre d'application** (navigateur, éditeur, lecteur vidéo...) affichée comme un écran. Tu choisis la fenêtre dans la liste et la taille de sa zone utile (garder, 1280x720, 1920x1080, 2560x1440, 3840x2160) : le programme redimensionne la fenêtre à cette taille.
 - **Écran virtuel par fenêtre** : capture via Windows.Graphics.Capture, donc **sans pilote** ni installation. La fenêtre est capturée même si elle est cachée derrière d'autres (pas si elle est réduite : elle est alors remise à l'écran). Un clic sur l'écran virtuel relit la position exacte de la fenêtre ; si autre chose (une autre fenêtre) se trouve à cet endroit, la fenêtre est ramenée devant et activée avant que le clic parte. Si le clic reste sans effet, la fenêtre est sans doute lancée **en administrateur** (Windows interdit d'y envoyer des clics depuis un programme normal) : lance aussi AR6DoF en administrateur. Le bouton source de la roue change la taille (pour une fenêtre) ou de moniteur. Les écrans-fenêtres ne sont pas conservés d'un lancement à l'autre (les fenêtres changent) ; les écrans-moniteurs, si.
@@ -203,7 +212,7 @@ Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit
 ## 11. Eye tracking (2 caméras d'oeil infrarouges)
 **Désactivé par défaut** : aucun port, aucun thread, caméras arrêtées.
 1. Dans ar6dof_probe (à la main, une fois) : *Eye tracking* = **1**, puis les numéros des caméras gauche et droite (ceux de la liste affichée au démarrage).
-2. Roue > onglet **Yeux** > *Eye tracking actif*. L'onglet montre l'état (programme en ligne, cadence, pupille vue ou non).
+2. Roue > onglet **Appareils** > *Eye tracking* > *Eye tracking actif*. L'onglet montre l'état (programme en ligne, cadence, pupille vue ou non).
 3. **Etalonner (9 points)** : garde la tête immobile et suis des yeux le point noir au centre de la cible (orange = attends, vert = mesure). A la fin : l'erreur en degrés
    (bon : moins de 1,5) et un point vert qui suit ton regard. Enregistré dans `ar6dof_eye_cal.txt` ; à refaire si le casque bouge sur ta tête.
 4. **Recentrer** : regarde droit devant et clique.
@@ -227,7 +236,7 @@ Le bouton **+** de la barre crée un menu lié à un appareil (ar6dof_probe doit
 | Tout est à l'envers | *Inverser verticalement le rendu* (réglages) ; pour les écrans, *Flip Y*. |
 | `[ble] ... a l'etape "lecture du service GATT"` | pilote Bluetooth capricieux : supprime « AR6DoF-Remote » des paramètres Bluetooth de Windows, rallume la télécommande. |
 | Télécommande non trouvée | firmware flashé ? moniteur série 115200 : « Bluetooth demarre... » ; nRF Connect doit voir « AR6DoF-Remote ». |
-| Pas d'eye tracking | question *Eye tracking* = 1 dans ar6dof_probe, bons numéros de caméra, onglet *Yeux* actif. |
+| Pas d'eye tracking | case *Eye tracking* cochée dans `ar6dof_app` (ou question *Eye tracking* = 1 dans ar6dof_probe), bonnes caméras gauche / droite, onglet *Appareils* > *Eye tracking* actif. |
 
 ## 13. Conventions
 - Pose : X avant, Y gauche, Z haut (main droite) -> Unity (conversion dans `Ar6dofConvert`).

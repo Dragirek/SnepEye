@@ -101,6 +101,7 @@ namespace AR6DoF
         public int perfFps = 0;            // 0 suit l'écran, 1 = 60, 2 = 90, 3 = 120, 4 = illimité
         public int perfMsaa = 1;           // 1 = pas de lissage des bords (inutile : textes et coins arrondis se lissent déjà), 2 = MSAA x2
         public float perfRenderScale = 1f; // 0.5 .. 1 : résolution de l'interface des yeux (appliqué au lancement suivant)
+        public float moveScale = 1f;       // échelle des déplacements de la tête (0,25 .. 4) : corrige un suivi qui sous- ou sur-estime les pas (base entre les objectifs mal réglée)
 
         // Télécommande
         public float remoteMinCutoff = 2f;

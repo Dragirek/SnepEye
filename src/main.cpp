@@ -851,6 +851,9 @@ int main(int argc, char** argv) {
   std::thread capThread(CaptureThread, grab, &mb, &share, shareFrames != 0);
   std::cout << (windowsOn ? "\nFenetres ouvertes. Aide des touches : voir l'en-tete du programme / README.\n"
                           : "\nMode sans fenetres : commandes par UDP 9877 (T recentrer, V sol, Z yaw, Q quitter).\n");
+  // Les messages d'état (montage de l'IMU, suivi, vérification de la calibration) ne s'affichaient que dans les fenêtres :
+  // ils sont aussi écrits dans la console / le journal, que lit l'application ar6dof_app (boutons à la place des touches).
+  std::string lastMountMsg = mountMsg, lastTrackMsg = trackMsg, lastCheckMsg = checkMsg;
 
   while (true) {
     double tRead = 0, tSm = 0;
@@ -1279,6 +1282,9 @@ int main(int argc, char** argv) {
     if (k == 'a') autoDelay = !autoDelay;
     if (k == '-') predS = std::max(0.0, predS - 0.005);
     if (k == '=') predS = std::min(0.1, predS + 0.005);
+    if (mountMsg != lastMountMsg) { lastMountMsg = mountMsg; std::cout << "[montage] " << mountMsg << std::endl; }
+    if (trackMsg != lastTrackMsg) { lastTrackMsg = trackMsg; std::cout << "[suivi] " << trackMsg << std::endl; }
+    if (checkMsg != lastCheckMsg) { lastCheckMsg = checkMsg; std::cout << "[calibration] " << checkMsg << std::endl; }
   }
 
   g_run = false;

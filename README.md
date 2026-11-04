@@ -33,13 +33,13 @@ Deux caméras d'oeil infrarouges (ex. GC0308 320x240 @ 120 fps, avec LED IR) -> 
 - Le journal de l'exe affiche `cpu NN%` une fois par seconde en mode sans fenêtre : compare avant / après.
 
 ## Compiler
-Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6dof_probe.exe`, ses DLL et `ar6dof_screen.dll`.
+Poussée sur GitHub, l'onglet *Actions* compile (vcpkg + OpenCV) et publie `ar6dof_app.exe` (la fenêtre de contrôle), `ar6dof_probe.exe`, ses DLL et `ar6dof_screen.dll`.
 
 ## Première utilisation
 1. Flasher `firmware/bno085_streamer` sur l'ESP32-C3 (Arduino IDE : *USB CDC On Boot = Enabled*).
-2. Lancer `ar6dof_probe.exe` : choisir la caméra, le port COM, la résolution (3200x1200 = 2 yeux de 1600x1200) et le dossier de calibration.
-   Les réponses sont gardées dans `ar6dof_config.txt`. Touches : `r` brut/rectifié, `c` qualité de la calibration, `x` inverser G/D,
-   `s` sauver une paire, `g` / `f` / `t` gravité / montage de l'IMU / tracking, `q` quitter.
+2. Lancer **`ar6dof_app.exe`** (fenêtre Windows : langue, listes de caméras et de ports, cases à cocher, boutons à la place des touches) : choisir la caméra, le port COM,
+   la résolution (3200x1200 = 2 yeux de 1600x1200) et le dossier de calibration, *Enregistrer*, puis *Démarrer le suivi*. Les réglages sont gardés dans `ar6dof_config.txt`.
+   (L'ancienne méthode, `ar6dof_probe.exe` en console avec ses touches `r` `c` `x` `s` `g` `f` `t` `q`, fonctionne toujours.)
 3. Côté Unity : suivre `unity/README_UNITY.md`.
 
 ## Tests (g++)

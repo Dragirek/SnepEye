@@ -449,6 +449,7 @@ namespace AR6DoF
         // pas d'angle ni de « dissocier » pour un écran seul, pas de « retirer » pour le dernier écran, pas de « coller aux bords » s'il n'y en a qu'un.
         Canvas settings;
         Ar6dofScreenPanel settingsFor;
+        bool settingsFollow;        // le panneau reste collé au-dessus de son écran tant qu'on ne l'a pas déplacé à la main
         Text titleText, sourceText, fpsText, snapText, hingeText, addText;
         Slider angleSlider;
         class Row { public RectTransform rt; public float h; public Func<bool> vis; }
@@ -496,7 +497,30 @@ namespace AR6DoF
             go.SetActive(false);
             if (pointer != null) pointer.AddCanvas(settings);
             // réduire / fermer : ferment tous les deux le panneau ; coin bas droit : agrandit / réduit le panneau
-            Ar6dofWindowChrome.Create("Parametres ecrans", settings.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(settings), CloseSettings, CloseSettings).canMove = true;
+            var sch = Ar6dofWindowChrome.Create("Parametres ecrans", settings.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(settings), CloseSettings, CloseSettings);
+            sch.canMove = true;
+            sch.moved = () => settingsFollow = false;   // déplacé à la main : il ne suit plus l'écran (jusqu'à la prochaine ouverture)
+        }
+
+        /// <summary>
+        /// Place le panneau AU-DESSUS de son écran, de face comme lui, et le garde collé (l'écran bouge, se redimensionne, le panneau change de hauteur : il suit).
+        /// La marge laisse de la place aux boutons de l'écran (réduire / fermer) et à la rangée de boutons du panneau lui-même (barre de déplacement, roue, taille).
+        /// </summary>
+        void PlaceSettings()
+        {
+            var p = settingsFor;
+            if (p == null || settings == null) return;
+            float sc = settings.transform.lossyScale.x;
+            float halfH = ((RectTransform)settings.transform).rect.height * 0.5f * sc;
+            float S = Ar6dofWindowChrome.ButtonSize, g = Ar6dofWindowChrome.EdgeGap;
+            float margin = 2f * S + 4f * g + 0.02f;
+            Vector3 pos = p.transform.position + p.transform.up * (p.Height * 0.5f + margin + halfH);
+            settings.transform.SetPositionAndRotation(pos, p.transform.rotation);
+        }
+
+        void LateUpdate()
+        {
+            if (settingsFollow && settings != null && settings.gameObject.activeSelf) PlaceSettings();
         }
 
         /// <summary>Empile les lignes utiles de haut en bas et ajuste la hauteur du panneau (le fond suit).</summary>
@@ -678,16 +702,10 @@ namespace AR6DoF
         {
             if (settings == null) return;
             settingsFor = p;
-            Transform h = Head;
-            Vector3 pos = p.transform.position + Vector3.down * (p.Height * 0.5f + 0.42f);
-            Vector3 toHead = h != null ? h.position - pos : -p.transform.forward;
-            toHead.y = 0f;
-            if (toHead.sqrMagnitude < 1e-4f) toHead = -p.transform.forward;
-            pos += toHead.normalized * 0.05f;
-            pos.y = Mathf.Max(pos.y, 0.5f);
-            settings.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toHead.normalized));   // le texte est lisible de ton côté
+            settingsFollow = true;
             settings.gameObject.SetActive(true);
             Refresh();
+            PlaceSettings();
         }
 
         void CloseSettings() { if (settings != null) settings.gameObject.SetActive(false); settingsFor = null; }

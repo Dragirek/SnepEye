@@ -22,6 +22,16 @@ if(MSVC)
   set_source_files_properties(src/ble_remote.cpp src/ble_hub.cpp PROPERTIES COMPILE_OPTIONS "/permissive-" COMPILE_DEFINITIONS "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS=1")
 endif()
 
+# Application Windows (fenetre de controle, sans console) : choix de la langue, listes, cases a cocher ; elle ecrit ar6dof_config.txt
+# et lance / arrete ar6dof_probe.exe. A placer a cote d'ar6dof_probe.exe (le zip du workflow les met ensemble).
+add_executable(ar6dof_app WIN32 src/app/ar6dof_app.cpp)
+target_include_directories(ar6dof_app PRIVATE src)
+target_link_libraries(ar6dof_app PRIVATE user32 gdi32 comctl32 shell32 ole32 ws2_32 advapi32 mfplat mf mfuuid)
+if(MSVC)
+  target_compile_options(ar6dof_app PRIVATE /W3 /utf-8)
+  target_compile_definitions(ar6dof_app PRIVATE NOMINMAX)
+endif()
+
 # Capture d'ecran GPU pour Unity (a copier dans Assets/AR6DoF/Plugins/x86_64/ ; remplace uWindowCapture)
 add_library(ar6dof_screen SHARED src/screen/ar6dof_screen.cpp)
 target_link_libraries(ar6dof_screen PRIVATE d3d11 dxgi windowsapp)   # windowsapp : capture de fenetre (Windows.Graphics.Capture, C++/WinRT)
