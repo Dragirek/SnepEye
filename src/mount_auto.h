@@ -11,7 +11,7 @@
 class MountAuto {
  public:
   enum State { Idle, Count1, Hold1, Count2, Hold2 };
-  double countS = 6.0;      // compte a rebours avant chaque pose (le temps de lacher le casque)
+  double countS = 3.0;      // compte a rebours avant chaque pose (le temps de lacher le casque)
   double windowS = 1.0;     // duree de la fenetre de mesure immobile
   double timeoutS = 12.0;   // attente maximale d'une pose immobile
   int maxAttempts = 3;

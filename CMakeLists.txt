@@ -14,7 +14,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui c
 
 add_executable(ar6dof_probe src/main.cpp src/ble_remote.cpp src/ble_hub.cpp src/eye_tracker.cpp src/mouth_tracker.cpp)
 target_include_directories(ar6dof_probe PRIVATE src)
-target_link_libraries(ar6dof_probe PRIVATE ${OpenCV_LIBS} mfplat mf mfuuid mfreadwrite ole32 ws2_32 windowsapp)
+target_link_libraries(ar6dof_probe PRIVATE ${OpenCV_LIBS} setupapi mfplat mf mfuuid mfreadwrite ole32 ws2_32 windowsapp)
 if(MSVC)
   target_compile_options(ar6dof_probe PRIVATE /W3 /utf-8)
   target_compile_definitions(ar6dof_probe PRIVATE NOMINMAX)
@@ -26,7 +26,7 @@ endif()
 # et lance / arrete ar6dof_probe.exe. A placer a cote d'ar6dof_probe.exe (le zip du workflow les met ensemble).
 add_executable(ar6dof_app WIN32 src/app/ar6dof_app.cpp)
 target_include_directories(ar6dof_app PRIVATE src)
-target_link_libraries(ar6dof_app PRIVATE user32 gdi32 comctl32 shell32 ole32 ws2_32 advapi32 mfplat mf mfuuid mfreadwrite)
+target_link_libraries(ar6dof_app PRIVATE user32 gdi32 comctl32 shell32 ole32 ws2_32 advapi32 setupapi mfplat mf mfuuid mfreadwrite)
 if(MSVC)
   target_compile_options(ar6dof_app PRIVATE /W3 /utf-8)
   target_compile_definitions(ar6dof_app PRIVATE NOMINMAX)

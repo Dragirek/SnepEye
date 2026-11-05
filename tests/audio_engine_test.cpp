@@ -128,6 +128,53 @@ int main() {
     for (int i = 0; i < 30; i++) m.Play(6, 1.f, 0, 1, false);
     CHECK(RenderPeak(m, 10) <= 1.0001f);
   }
+  // 11) table de mixage : balance, solo, egaliseur, limiteur coupe
+  {
+    // balance de la tranche soundboard : tout a droite -> la gauche se tait
+    Mixer m; m.SetSound(7, Tone(440, 3.f, 0.5f));
+    m.Handle("PLAY 7 1 0 1 1");
+    m.Handle("PAN sfx 1");
+    std::vector<float> o(480 * 2);
+    float l = 0, r = 0;
+    for (int b = 0; b < 4; b++) { m.Render(o.data(), 480); for (int i = 0; i < 480; i++) { l = std::max(l, std::fabs(o[2 * i])); r = std::max(r, std::fabs(o[2 * i + 1])); } }
+    CHECK(l < 0.001f && r > 0.2f);
+    // solo musique alors que le son joue : le son se tait ; le solo retire, il revient
+    m.Handle("PAN sfx 0");
+    m.Handle("SOLO music 1");
+    CHECK(RenderPeak(m, 4) == 0.f);
+    m.Handle("SOLO music 0");
+    CHECK(RenderPeak(m, 4) > 0.2f);
+    // le maitre n'a pas de solo
+    m.Handle("SOLO master 1");
+    CHECK(RenderPeak(m, 4) > 0.2f);
+  }
+  {
+    // egaliseur : -12 dB de graves sur un 60 Hz le coupe nettement, +0 le laisse intact (et ne coute rien)
+    auto level = [](const char* eqCmd) {
+      Mixer m; m.SetSound(8, Tone(60, 3.f, 0.4f));
+      m.Handle("PLAY 8 1 0 1 1");
+      if (eqCmd) m.Handle(eqCmd);
+      RenderPeak(m, 20);   // laisse le filtre s'etablir
+      return RenderPeak(m, 10);
+    };
+    const float flat = level(nullptr), cut = level("EQ sfx -12 0 0"), boost = level("EQ sfx 12 0 0"), hiOnly = level("EQ sfx 0 0 12");
+    CHECK(flat > 0.35f && flat < 0.45f);
+    CHECK(cut < flat * 0.4f);
+    CHECK(boost > flat * 1.8f);
+    CHECK(std::fabs(hiOnly - flat) < 0.05f);   // des aigus ajoutes ne changent pas un 60 Hz
+    Mixer m; m.Handle("EQ voice 99 -99 5");
+    CHECK(m.ch[Mixer::kVoice].eqLo == 12.f && m.ch[Mixer::kVoice].eqMid == -12.f && m.ch[Mixer::kVoice].eqHi == 5.f);
+  }
+  {
+    // limiteur coupe : ecretage dur a 1.0 ; limiteur actif : jamais au-dessus de 1 non plus, mais plus doux sous 1
+    Mixer m; m.SetSound(9, Tone(200, 1.f, 0.9f));
+    for (int i = 0; i < 30; i++) m.Play(9, 1.f, 0, 1, false);
+    m.Handle("LIMIT 0");
+    CHECK(!m.limiter);
+    CHECK(RenderPeak(m, 5) == 1.f);
+    m.Handle("LIMIT 1");
+    CHECK(m.limiter);
+  }
   if (!fails) std::printf("audio_engine_test : OK\n");
   return fails;
 }

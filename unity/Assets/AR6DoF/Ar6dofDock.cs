@@ -8,12 +8,12 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Appui long (1,5 s) sur une icône du dock : ramene la fenetre de l'application pres de toi (et l'ouvre si elle est fermee ou reduite).
+    /// Appui long (1 s) sur une icône du dock : ramene la fenetre de l'application pres de toi (et l'ouvre si elle est fermee ou reduite).
     /// Le relachement qui suit ne declenche pas le clic normal. Quasi gratuit : un Update qui sort tout de suite tant que personne n'appuie (le composant doit rester actif pour recevoir les evenements du pointeur).
     /// </summary>
     public class Ar6dofLongPress : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
     {
-        public float seconds = 1.5f;
+        public float seconds = 1.0f;
         public Action onLong;
         float downAt = -1f;
         bool fired;

@@ -7,7 +7,8 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Table de mixage : volumes, muets et niveaux de la voix, du soundboard et de la musique, volume général, spectre de la sortie, et un lecteur de musique
+    /// Table de mixage : volumes, muets et niveaux de la voix, du soundboard et de la musique, volume général, visualisation de la sortie (8 au choix),
+    /// une console avancée (faders, solo, balance, égaliseur 3 bandes, limiteur : tout visible d'un coup, sans défiler) et un lecteur de musique
     /// avec liste de lecture (pour un fursuiter qui joue de la musique sur ses enceintes). Tout sort sur les enceintes choisies dans la fenêtre Voix.
     /// </summary>
     public class Ar6dofMixerApp : Ar6dofAppWindow
@@ -17,7 +18,9 @@ namespace AR6DoF
         int plPage;
         readonly List<Ar6dofMeterBar> bars = new List<Ar6dofMeterBar>();
         readonly List<Func<AudioMeters, float>> barSel = new List<Func<AudioMeters, float>>();
-        Ar6dofSpectrum spec;
+        Ar6dofViz viz;
+        Text vizName;
+        const float ConsoleW = 1000f, NormalW = 720f;
         Slider seek;
         Text timeLbl;
         float lastUserSeek = -10f;
@@ -28,15 +31,18 @@ namespace AR6DoF
 
         public override void OnClosed() { var a = Ar6dofAudio.Instance; if (a != null) a.StopMusic(); }
 
-        protected override void OnRebuildStart() { bars.Clear(); barSel.Clear(); spec = null; seek = null; timeLbl = null; }
+        // la console avancée est large : la fenêtre s'élargit pour qu'on ne défile jamais
+        protected override float MainWidth() { return tab == 1 ? ConsoleW : NormalW; }
+
+        protected override void OnRebuildStart() { bars.Clear(); barSel.Clear(); viz = null; vizName = null; seek = null; timeLbl = null; }
 
         protected override void BuildMain()
         {
             var a = Ar6dofAudio.Instance;
             if (a == null) { Lbl("Audio indisponible", 40, 22); return; }
-            Tabs(new[] { "Table", "Musique" }, tab, t => tab = t);
-            EngineRow();
-            if (tab == 0) Table(a); else Music(a);
+            Tabs(new[] { "Table", "Console", "Musique" }, tab, t => tab = t);
+            if (!a.Enabled) EngineRow();   // le moteur se lance tout seul a l'usage ; l'interrupteur n'apparait que s'il est eteint
+            if (tab == 0) Table(a); else if (tab == 1) ConsoleTab(a); else Music(a);
         }
 
         // ------------------------------------------------------------------ table
@@ -71,11 +77,182 @@ namespace AR6DoF
             ChannelRow(a, "Soundboard", 1, m => m.peak[2]);
             ChannelRow(a, "Musique", 2, m => m.peak[3]);
             ChannelRow(a, "General", 3, m => Mathf.Max(m.peak[4], m.peak[5]));
-            Section("Spectre de la sortie");
-            spec = Ar6dofSpectrum.Make(content, new Vector2(0f, RowY(110f)), new Vector2(IW, 110f), 32);
+            Section("Visuel de la sortie");
+            viz = Ar6dofViz.Make(content, new Vector2(0f, RowY(150f)), new Vector2(IW, 150f));
+            viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
+            VizSelector(a, 0f, RowY(48f), IW);
             var info = Lbl("", 26, 18);
             refreshers.Add(() => info.text = Ar6dofLoc.F("Sons en cours : {0}", a.Meters.voices));
             Btn("Tout arreter (sons et musique)", () => { a.StopAllSounds(); a.StopMusic(); Refresh(); }, 48f, 22);
+        }
+
+        // ------------------------------------------------------------------ sélecteur de visuel
+        void VizSelector(Ar6dofAudio a, float cx, float cy, float w)
+        {
+            const float bw = 64f, h = 44f;
+            Text t1, t2, t3;
+            BtnAt(cx - w * 0.5f + bw * 0.5f, cy, bw, h, "<", () => ChooseViz(a, -1), out t1, 24);
+            var mid = BtnAt(cx, cy, w - 2f * bw - 16f, h, "", () => ChooseViz(a, 1), out t2, 21);
+            BtnAt(cx + w * 0.5f - bw * 0.5f, cy, bw, h, ">", () => ChooseViz(a, 1), out t3, 24);
+            vizName = t2;
+            t2.text = VizLabel(a);
+        }
+
+        string VizLabel(Ar6dofAudio a)
+        {
+            int m = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
+            return Ar6dofLoc.T("Visuel") + " " + (m + 1) + "/" + Ar6dofViz.Count + " : " + Ar6dofLoc.T(Ar6dofViz.Names[m]);
+        }
+
+        void ChooseViz(Ar6dofAudio a, int dir)
+        {
+            int n = Ar6dofViz.Count;
+            a.SetViz(((a.data.viz + dir) % n + n) % n);
+            if (viz != null) { viz.mode = a.data.viz; viz.Clear(); }
+            if (vizName != null) vizName.text = VizLabel(a);
+        }
+
+        // ------------------------------------------------------------------ console avancée
+        static readonly string[] StripNames = { "Voix", "Soundboard", "Musique", "General" };
+        static readonly string[] EqNames = { "Gr", "Md", "Ai" };   // graves, medium, aigus
+        const float StripW = 156f, StripGap = 6f, StripH = 564f, FaderH = 260f;
+
+        static float GainToPos(float g) { return Mathf.Sqrt(Mathf.Clamp(g, 0f, 1.5f) / 1.5f); }   // fader : courbe douce, 0 dB aux 82 % de la course
+        static float PosToGain(float p) { float g = 1.5f * p * p; return Mathf.Abs(g - 1f) < 0.035f ? 1f : g; }
+
+        static string DbText(float g)
+        {
+            if (g < 0.001f) return "-inf dB";
+            float db = 20f * Mathf.Log10(g);
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:+0.0;-0.0;0.0} dB", db);
+        }
+
+        void ConsoleTab(Ar6dofAudio a)
+        {
+            float top = y;
+            float x0 = -IW * 0.5f;
+            for (int c = 0; c < 4; c++) BuildStrip(a, c, x0 + c * (StripW + StripGap) + StripW * 0.5f, top);
+
+            // panneau de droite : visuel, sons en cours, micro, boutons globaux
+            float px = x0 + 4f * (StripW + StripGap) + 6f;
+            float pw = IW - (px - x0);
+            float pc = px + pw * 0.5f;
+            viz = Ar6dofViz.Make(content, new Vector2(pc, -(top + 115f)), new Vector2(pw, 230f));
+            viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
+            VizSelector(a, pc, -(top + 230f + 8f + 22f), pw);
+
+            var info = Ar6dofVrUi.Label(content, "", new Vector2(pc, -(top + 306f)), new Vector2(pw, 28f), 19, TextAnchor.MiddleLeft);
+            refreshers.Add(() => info.text = Ar6dofLoc.F("Sons en cours : {0}", a.Meters.voices));
+
+            Ar6dofVrUi.Label(content, "Micro", new Vector2(px + 40f, -(top + 346f)), new Vector2(80f, 32f), 19, TextAnchor.MiddleLeft);
+            var mic = Ar6dofMeterBar.Make(content, new Vector2(px + 84f + (pw - 84f) * 0.5f, -(top + 346f)), new Vector2(pw - 84f, 28f));
+            bars.Add(mic); barSel.Add(m => m.peak[0]);
+
+            Text t1, t2;
+            BtnAt(pc, -(top + 398f), pw, 48f, "Tout arreter (sons et musique)", () => { a.StopAllSounds(); a.StopMusic(); Refresh(); }, out t1, 20);
+            BtnAt(pc, -(top + 454f), pw, 48f, "Remettre les tranches a zero", () =>
+            {
+                for (int c = 0; c < 4; c++) a.ResetStrip(c);
+                Rebuild();
+            }, out t2, 20);
+            var hint = Ar6dofVrUi.Label(content, Ar6dofLoc.T("Touche une valeur pour la remettre a zero."), new Vector2(pc, -(top + 512f)), new Vector2(pw, 40f), 16, TextAnchor.UpperLeft);
+            hint.horizontalOverflow = HorizontalWrapMode.Wrap;
+            hint.verticalOverflow = VerticalWrapMode.Truncate;
+
+            y = top + StripH + 6f;
+        }
+
+        void BuildStrip(Ar6dofAudio a, int c, float cx, float top)
+        {
+            bool master = c == 3;
+            // fond de la tranche
+            var bgRt = Ar6dofVrUi.Rect(content, "Tranche", new Vector2(cx, -(top + StripH * 0.5f)), new Vector2(StripW, StripH));
+            var bgImg = bgRt.gameObject.AddComponent<Image>();
+            bgImg.raycastTarget = false;
+            Ar6dofTheme.Attach(bgRt.gameObject, Ar6dofRole.Band, 14);
+
+            var name = Ar6dofVrUi.Label(content, StripNames[c], new Vector2(cx, -(top + 18f)), new Vector2(StripW - 8f, 30f), 22);
+            name.fontStyle = FontStyle.Bold;
+            if (master) name.MakeAccent();
+            name.gameObject.AddComponent<Ar6dofFitText>().Init(name, 22);
+
+            // fader + vu-mètre vertical
+            float fy = -(top + 36f + FaderH * 0.5f);
+            Slider fader = Ar6dofVrUi.MakeVSlider(content, new Vector2(cx - 28f, fy), new Vector2(62f, FaderH), 0f, 1f, GainToPos(a.data.vol[c]), p => { a.SetVolume(c, PosToGain(p)); });
+            var tickRt = Ar6dofVrUi.Rect(content, "ZeroDB", new Vector2(cx - 28f, -(top + 36f + 16f + (1f - GainToPos(1f)) * (FaderH - 32f))), new Vector2(76f, 2f));
+            var tickImg = tickRt.gameObject.AddComponent<Image>();
+            tickImg.raycastTarget = false;
+            Ar6dofTheme.Attach(tickRt.gameObject, Ar6dofRole.Dim, 1);
+            var meter = Ar6dofMeterBar.Make(content, new Vector2(cx + 40f, fy), new Vector2(30f, FaderH), true);
+            bars.Add(meter);
+            if (c == 0) barSel.Add(m => m.peak[1]);
+            else if (c == 1) barSel.Add(m => m.peak[2]);
+            else if (c == 2) barSel.Add(m => m.peak[3]);
+            else barSel.Add(m => Mathf.Max(m.peak[4], m.peak[5]));
+
+            // valeur du fader en dB : toucher = 0 dB
+            Text rt;
+            var rb = BtnAt(cx, -(top + 314f), StripW - 16f, 30f, "", () => { a.SetVolume(c, 1f); Refresh(); }, out rt, 18);
+            Text rtt = rt;
+            Slider fd = fader;
+
+            // muet / solo (ou limiteur pour le général)
+            Text mt, st;
+            float bw = (StripW - 8f - 6f) * 0.5f;
+            var mb = BtnAt(cx - bw * 0.5f - 3f, -(top + 356f), bw, 44f, "Muet", () => { a.SetMute(c, !a.data.mute[c]); Refresh(); }, out mt, 17);
+            Button sb;
+            if (!master) sb = BtnAt(cx + bw * 0.5f + 3f, -(top + 356f), bw, 44f, "Solo", () => { a.SetSolo(c, !a.data.solo[c]); Refresh(); }, out st, 17);
+            else sb = BtnAt(cx + bw * 0.5f + 3f, -(top + 356f), bw, 44f, "Limiteur", () => { a.SetLimiter(!a.data.limiter); Refresh(); }, out st, 17);
+
+            // balance
+            Text pv = MiniStep(cx, -(top + 404f), StripW - 8f, "", () => a.SetPan(c, Mathf.Max(-1f, Mathf.Round(a.data.pan[c] * 10f) / 10f - 0.1f)),
+                () => a.SetPan(c, Mathf.Min(1f, Mathf.Round(a.data.pan[c] * 10f) / 10f + 0.1f)), () => a.SetPan(c, 0f), 0f);
+
+            // égaliseur 3 bandes
+            var ev = new Text[3];
+            for (int b = 0; b < 3; b++)
+            {
+                int band = b;
+                ev[b] = MiniStep(cx, -(top + 452f + b * 44f), StripW - 8f, EqNames[b],
+                    () => a.SetEq(c, band, Mathf.Max(-12f, a.data.eq[c * 3 + band] - 2f)),
+                    () => a.SetEq(c, band, Mathf.Min(12f, a.data.eq[c * 3 + band] + 2f)),
+                    () => a.SetEq(c, band, 0f), 28f);
+            }
+
+            refreshers.Add(() =>
+            {
+                float g = a.data.vol[c];
+                fd.SetValueWithoutNotify(GainToPos(g));
+                rtt.text = DbText(g);
+                Ar6dofTheme.SetSelected(mb, a.data.mute[c]);
+                Ar6dofTheme.SetSelected(sb, master ? a.data.limiter : a.data.solo[c]);
+                int pan = Mathf.RoundToInt(a.data.pan[c] * 100f);
+                pv.text = pan == 0 ? "C" : (pan < 0 ? "L " + (-pan) : "R " + pan);
+                for (int b2 = 0; b2 < 3; b2++)
+                {
+                    int e = Mathf.RoundToInt(a.data.eq[c * 3 + b2]);
+                    ev[b2].text = e > 0 ? "+" + e : e.ToString();
+                }
+            });
+        }
+
+        /// <summary>Petit réglage compact : [-] valeur [+] avec une étiquette facultative à gauche. Toucher la valeur la remet à zéro. Renvoie le texte de la valeur.</summary>
+        Text MiniStep(float cx, float cy, float w, string label, Action minus, Action plus, Action zero, float labelW)
+        {
+            const float bw = 34f, h = 38f, g = 4f;
+            float x = cx - w * 0.5f;
+            if (labelW > 0f)
+            {
+                var l = Ar6dofVrUi.Label(content, Ar6dofLoc.T(label), new Vector2(x + labelW * 0.5f, cy), new Vector2(labelW, h), 17, TextAnchor.MiddleLeft);
+                l.gameObject.AddComponent<Ar6dofFitText>().Init(l, 17);
+                x += labelW + g;
+            }
+            float vw = w - (labelW > 0f ? labelW + g : 0f) - 2f * bw - 2f * g;
+            Text a1, a2, a3;
+            BtnAt(x + bw * 0.5f, cy, bw, h, "-", () => { minus(); Refresh(); }, out a1, 22);
+            BtnAt(x + bw + g + vw * 0.5f, cy, vw, h, "", () => { zero(); Refresh(); }, out a2, 17);
+            BtnAt(x + bw + g + vw + g + bw * 0.5f, cy, bw, h, "+", () => { plus(); Refresh(); }, out a3, 22);
+            return a2;
         }
 
         // ------------------------------------------------------------------ musique
@@ -176,7 +353,7 @@ namespace AR6DoF
             a.WantMeters();
             var m = a.Meters;
             for (int i = 0; i < bars.Count; i++) bars[i].SetPeak(barSel[i](m));
-            if (spec != null) spec.Set(m.specOut);
+            if (viz != null) viz.Feed(m, Time.unscaledTime);
             if (seekPending && seek != null && Time.unscaledTime - lastUserSeek > 0.2f) { seekPending = false; a.SeekMusic(seek.value); }
         }
     }

@@ -35,6 +35,12 @@ namespace AR6DoF
         public List<AudioKV> voice = new List<AudioKV>();
         public float[] vol = { 1f, 1f, 1f, 1f };      // voix, soundboard, musique, général
         public bool[] mute = new bool[4];
+        // table de mixage avancée : tranches voix, soundboard, musique, général
+        public bool[] solo = new bool[4];
+        public float[] pan = new float[4];
+        public float[] eq = new float[12];            // graves, medium, aigus (dB) pour chaque tranche
+        public bool limiter = true;
+        public int viz = 0;                           // visualisation choisie dans la table de mixage
         public List<PadDef> pads = new List<PadDef>();
         public int nextSlot = 1;
         public int layout = 0;                        // 0 grille, 1 liste, 2 flux, 3 cercle
@@ -53,6 +59,7 @@ namespace AR6DoF
     {
         public readonly float[] peak = new float[6];
         public readonly float[] specIn = new float[32], specOut = new float[32];
+        public readonly float[] wave = new float[128];   // forme d'onde de la sortie (oscilloscope)
         public float musicPos, musicDur;
         public int voices, flags;
         public bool GateOpen { get { return (flags & 4) != 0; } }
@@ -221,6 +228,9 @@ namespace AR6DoF
                         data = d;
                         if (data.vol == null || data.vol.Length < 4) data.vol = new[] { 1f, 1f, 1f, 1f };
                         if (data.mute == null || data.mute.Length < 4) data.mute = new bool[4];
+                        if (data.solo == null || data.solo.Length < 4) data.solo = new bool[4];
+                        if (data.pan == null || data.pan.Length < 4) data.pan = new float[4];
+                        if (data.eq == null || data.eq.Length < 12) data.eq = new float[12];
                         if (data.voice == null) data.voice = new List<AudioKV>();
                         if (data.pads == null) data.pads = new List<PadDef>();
                         if (data.playlist == null) data.playlist = new List<string>();
@@ -245,7 +255,7 @@ namespace AR6DoF
             string dir = "";
             var l = Ar6dofDock.Instance != null ? Ar6dofDock.Instance.launcher : null;
             if (l != null) dir = l.ExeDirectory();
-            if (string.IsNullOrEmpty(dir)) dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64"));
+            if (string.IsNullOrEmpty(dir)) dir = Ar6dofProbePaths.Dir("");
             return Path.Combine(dir, "ar6dof_audio.exe");
         }
 
@@ -373,7 +383,7 @@ namespace AR6DoF
                 try { d = udp.Receive(ref any); }
                 catch (SocketException) { if (!running) break; continue; }
                 catch (ObjectDisposedException) { break; }
-                if (d.Length != 308 || BitConverter.ToUInt32(d, 0) != 0x31445541u) continue;
+                if ((d.Length != 308 && d.Length != 820) || BitConverter.ToUInt32(d, 0) != 0x31445541u) continue;
                 var m = back;
                 for (int i = 0; i < 6; i++) m.peak[i] = BitConverter.ToSingle(d, 12 + 4 * i);
                 m.musicPos = BitConverter.ToSingle(d, 36);
@@ -382,6 +392,7 @@ namespace AR6DoF
                 m.flags = BitConverter.ToUInt16(d, 6);
                 Buffer.BlockCopy(d, 52, m.specIn, 0, 128);
                 Buffer.BlockCopy(d, 180, m.specOut, 0, 128);
+                if (d.Length == 820) Buffer.BlockCopy(d, 308, m.wave, 0, 512);
                 lock (lockObj) { var t = front; front = back; back = t; }
             }
         }
@@ -482,6 +493,26 @@ namespace AR6DoF
 
         public void SetVolume(int ch, float v) { data.vol[ch] = v; MarkDirty(); Send("VOL " + ChannelNames[ch] + " " + N(v)); }
         public void SetMute(int ch, bool m) { data.mute[ch] = m; MarkDirty(); Send("MUTE " + ChannelNames[ch] + " " + (m ? "1" : "0")); }
+        public void SetSolo(int ch, bool s) { if (ch >= 3) return; data.solo[ch] = s; MarkDirty(); Send("SOLO " + ChannelNames[ch] + " " + (s ? "1" : "0")); }
+        public void SetPan(int ch, float p) { data.pan[ch] = p; MarkDirty(); Send("PAN " + ChannelNames[ch] + " " + N(p)); }
+        /// <summary>Égaliseur d'une tranche : band 0 graves, 1 medium, 2 aigus, en dB (-12 à +12).</summary>
+        public void SetEq(int ch, int band, float db)
+        {
+            data.eq[ch * 3 + band] = db;
+            MarkDirty();
+            Send("EQ " + ChannelNames[ch] + " " + N(data.eq[ch * 3]) + " " + N(data.eq[ch * 3 + 1]) + " " + N(data.eq[ch * 3 + 2]));
+        }
+        public void SetLimiter(bool on) { data.limiter = on; MarkDirty(); Send("LIMIT " + (on ? "1" : "0")); }
+        public void SetViz(int v) { data.viz = v; MarkDirty(); }
+        /// <summary>Remet une tranche à zéro (balance au centre, égaliseur à plat, ni muet ni solo) sans toucher à son fader.</summary>
+        public void ResetStrip(int ch)
+        {
+            SetPan(ch, 0f);
+            data.eq[ch * 3] = data.eq[ch * 3 + 1] = data.eq[ch * 3 + 2] = 0f;
+            SetEq(ch, 0, 0f);
+            SetMute(ch, false);
+            SetSolo(ch, false);
+        }
 
         // Lancer un son ou une musique doit toujours faire du bruit : moteur démarré et sortie choisie (sinon rien ne consomme le son
         // et la position de la musique reste à 0). La commande attend que le moteur réponde s'il démarre.
@@ -607,7 +638,16 @@ namespace AR6DoF
             var sb = new StringBuilder("V");
             foreach (var kv in data.voice) sb.Append(' ').Append(kv.k).Append(' ').Append(N(kv.v));
             if (data.voice.Count > 0) Send(sb.ToString());
-            for (int i = 0; i < 4; i++) { Send("VOL " + ChannelNames[i] + " " + N(data.vol[i])); Send("MUTE " + ChannelNames[i] + " " + (data.mute[i] ? "1" : "0")); }
+            for (int i = 0; i < 4; i++)
+            {
+                Send("VOL " + ChannelNames[i] + " " + N(data.vol[i]));
+                Send("MUTE " + ChannelNames[i] + " " + (data.mute[i] ? "1" : "0"));
+                if (i < 3 && data.solo[i]) Send("SOLO " + ChannelNames[i] + " 1");
+                if (data.pan[i] != 0f) Send("PAN " + ChannelNames[i] + " " + N(data.pan[i]));
+                if (data.eq[i * 3] != 0f || data.eq[i * 3 + 1] != 0f || data.eq[i * 3 + 2] != 0f)
+                    Send("EQ " + ChannelNames[i] + " " + N(data.eq[i * 3]) + " " + N(data.eq[i * 3 + 1]) + " " + N(data.eq[i * 3 + 2]));
+            }
+            if (!data.limiter) Send("LIMIT 0");
             foreach (var p in data.pads) LoadPad(p);
             Send("DEVLIST");
         }

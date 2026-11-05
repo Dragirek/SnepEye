@@ -141,6 +141,39 @@ namespace AR6DoF
             return s;
         }
 
+        /// <summary>Curseur vertical (fader de table de mixage) : le bas = min, le haut = max. La poignée est large, comme le capuchon d'un fader.</summary>
+        public static Slider MakeVSlider(Transform parent, Vector2 pos, Vector2 size, float min, float max, float value, UnityAction<float> onChange)
+        {
+            var root = Child(parent, "Fader", pos, size);
+            root.gameObject.AddComponent<Image>();
+            Ar6dofTheme.Attach(root.gameObject, Ar6dofRole.Track, 14);
+
+            var fillArea = Child(root, "Zone remplie", Vector2.zero, Vector2.zero);
+            fillArea.anchorMin = new Vector2(0.42f, 0f); fillArea.anchorMax = new Vector2(0.58f, 1f);
+            fillArea.offsetMin = new Vector2(0f, 16f); fillArea.offsetMax = new Vector2(0f, -16f);
+            var fill = Child(fillArea, "Remplissage", Vector2.zero, new Vector2(0f, 10f));
+            fill.gameObject.AddComponent<Image>();
+            Ar6dofTheme.Attach(fill.gameObject, Ar6dofRole.Accent, 8);
+
+            var handleArea = Child(root, "Zone poignee", Vector2.zero, Vector2.zero);
+            handleArea.anchorMin = Vector2.zero; handleArea.anchorMax = Vector2.one;
+            handleArea.offsetMin = new Vector2(0f, 16f); handleArea.offsetMax = new Vector2(0f, -16f);
+            var handle = Child(handleArea, "Poignee", Vector2.zero, new Vector2(0f, 32f));
+            var hImg = handle.gameObject.AddComponent<Image>();
+            Ar6dofTheme.Attach(handle.gameObject, Ar6dofRole.Handle, 8);
+
+            var s = root.gameObject.AddComponent<Slider>();
+            s.fillRect = fill;
+            s.handleRect = handle;
+            s.targetGraphic = hImg;
+            s.direction = Slider.Direction.BottomToTop;
+            s.minValue = min;
+            s.maxValue = max;
+            s.SetValueWithoutNotify(Mathf.Clamp(value, min, max));
+            if (onChange != null) s.onValueChanged.AddListener(onChange);
+            return s;
+        }
+
         /// <summary>Conteneur collé en haut du canvas, de hauteur nulle : placer les éléments avec des y négatifs (vers le bas), puis appeler FitHeight.</summary>
         public static RectTransform NewContent(Canvas c)
         {

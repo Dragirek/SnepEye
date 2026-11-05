@@ -129,9 +129,7 @@ namespace AR6DoF
             var nl = Ar6dofVrUi.Label(rt, shown, new Vector2(0f, -42f), new Vector2(w - 10f, 28f), 18);
             nl.gameObject.AddComponent<Ar6dofFitText>().Init(nl, 18);
 
-            var tip = b.gameObject.AddComponent<Ar6dofVrTooltip>();
-            tip.offsetY = TileH * 0.5f + 34f;
-            tip.text = () => shown + " - " + Ar6dofLoc.T(desc);
+            // pas d'infobulle : le nom et l'icone suffisent
 
             if (isOpen == null) return;
             var ind = new GameObject("Indicateur", typeof(RectTransform));

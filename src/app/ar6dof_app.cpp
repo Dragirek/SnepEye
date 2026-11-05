@@ -66,7 +66,8 @@ std::string g_lastLogText;
 ULONGLONG g_lastLogSize = ~0ull;
 
 std::vector<std::string> g_cams;
-std::vector<std::string> g_ports;
+std::vector<std::string> g_ports;        // ids « COM5 » (ce qui est enregistre)
+std::vector<std::string> g_portLabels;   // noms affiches (Gestionnaire de peripheriques)
 
 // Modes de la liste « Mode » : ceux que la caméra annonce vraiment (Media Foundation), pas des réglages écrits d'avance.
 struct ModeEntry { int w, h, fps; };
@@ -84,7 +85,7 @@ struct Loc { HWND h; const wchar_t* fr; const wchar_t* en; };
 std::vector<Loc> g_loc;
 
 enum {
-  ID_LANG = 100, ID_CAMTYPE, ID_CAM, ID_CAM_REFRESH, ID_CAMR, ID_CAMHINT, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT,
+  ID_LANG = 100, ID_CAMTYPE, ID_CAM, ID_CAM_REFRESH, ID_CAMR_REFRESH, ID_EYEL_REFRESH, ID_EYER_REFRESH, ID_MOUTH_REFRESH, ID_CAMR, ID_CAMHINT, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT,
   ID_PORT, ID_PORT_REFRESH, ID_CALDIR, ID_CALBROWSE, ID_BASE, ID_IMUSTAT, ID_MOUNTMSG,
   ID_UDP, ID_SHARE, ID_BLE, ID_AUTOTRACK,
   ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK, ID_EYE_CAL, ID_EYE_RECENTER, ID_EYE_CLEAR, ID_EYE_FOV, ID_EYESTAT,
@@ -313,11 +314,17 @@ void FillPorts() {
   if (sel > 0 && (size_t)sel - 1 < g_ports.size()) cur = A2W(g_ports[sel - 1]);
   ClearCombo(ID_PORT);
   AddItem(ID_PORT, Tr(L"Pas d'IMU", L"No IMU"));
-  for (const auto& p : g_ports) AddItem(ID_PORT, A2W(p));
+  for (size_t i = 0; i < g_ports.size(); i++) AddItem(ID_PORT, A2W(i < g_portLabels.size() ? g_portLabels[i] : g_ports[i], CP_UTF8));
   int idx = 0;
   for (size_t i = 0; i < g_ports.size(); i++)
     if (A2W(g_ports[i]) == cur) idx = (int)i + 1;
   SetSel(ID_PORT, idx);
+}
+
+void ScanPorts() {
+  g_ports.clear();
+  g_portLabels.clear();
+  for (const auto& p : ListComPortInfo()) { g_ports.push_back(p.id); g_portLabels.push_back(p.label); }
 }
 
 void ScanDevices() {
@@ -326,7 +333,7 @@ void ScanDevices() {
   std::thread t([&cams] { cams = ListCameras(); });
   t.join();
   g_cams = cams;
-  g_ports = ListComPorts();
+  ScanPorts();
 }
 
 // ------------------------------------------------------------------ modes réellement proposés par la ou les caméras
@@ -1530,14 +1537,15 @@ void CreateControls() {
 
   // ---- page 0 : Caméra
   g_buildPage = PG_CAM;
-  CardBox(L"Caméra stéréo", L"Stereo camera", X, 62, CWd, 352);
+  CardBox(L"Caméra stéréo", L"Stereo camera", X, 62, CWd, 272);
   Label(L"Type", L"Type", X + PAD, 100, 160);
   Combo(X + C0, 96, CR, ID_CAMTYPE);
   g_lblCam = Label(L"Caméra", L"Camera", X + PAD, 138, 160);
   Combo(X + C0, 134, CR - 90, ID_CAM);
   Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 133, 80, 28, ID_CAM_REFRESH);
   Label(L"Caméra droite", L"Right camera", X + PAD, 176, 160);
-  Combo(X + C0, 172, CR, ID_CAMR);
+  Combo(X + C0, 172, CR - 90, ID_CAMR);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 171, 80, 28, ID_CAMR_REFRESH);
   Label(L"Mode", L"Mode", X + PAD, 214, 160);
   Combo(X + C0, 210, CR, ID_MODE);
   Label(L"Taille / cadence", L"Size / rate", X + PAD, 252, 160);
@@ -1548,15 +1556,22 @@ void CreateControls() {
   Edit(X + C0 + 212, 248, 62, ID_FPS, true);
   Label(L"i/s", L"fps", X + C0 + 284, 252, 40);
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + C0, 284, CR, 38, ID_CAMHINT);
-  Label(L"Pilote caméra", L"Camera driver", X + PAD, 336, 160);
-  Combo(X + C0, 332, CR, ID_BACKEND);
-  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", X + PAD, 374, CWd - 2 * PAD, ID_MFDIRECT);
 
-  CardBox(L"Aperçu de la caméra", L"Camera preview", X, 428, CWd, 244);
-  Mk(L"AR6Preview", nullptr, nullptr, 0, X + PVX, 474, PVW, PVH, ID_PVW_CAM);
-  Button(L"Voir l'aperçu", L"Show the preview", X + COLX, 474, COLW, 34, ID_PV_CAM);
+  // aperçu un peu plus petit que sur les autres pages (400x150) pour que la calibration de la caméra tienne dans la même page
+  const int CPW = 400, CPH = 150, CCX = PAD + CPW + 16, CCW = CWd - CCX - PAD;
+  CardBox(L"Aperçu de la caméra", L"Camera preview", X, 348, CWd, 212);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + PVX, 394, CPW, CPH, ID_PVW_CAM);
+  Button(L"Voir l'aperçu", L"Show the preview", X + CCX, 394, CCW, 34, ID_PV_CAM);
   Label(L"La caméra n'est ouverte que pendant l'aperçu. Elle est rendue quand tu quittes la page ou démarres le suivi.",
-        L"The camera is only opened while the preview is shown. It is released when you leave the page or start tracking.", X + COLX, 520, COLW, 110);
+        L"The camera is only opened while the preview is shown. It is released when you leave the page or start tracking.", X + CCX, 440, CCW, 100);
+
+  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 574, CWd, 122);
+  Label(L"Dossier", L"Folder", X + PAD, 626, 160);
+  Edit(X + C0, 622, CR - 100, ID_CALDIR);
+  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 621, 90, 28, ID_CALBROWSE);
+  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 662, 160);
+  Edit(X + C0, 658, 76, ID_BASE);
+  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 662, 330);
 
   // ---- page 1 : Capteurs
   g_buildPage = PG_SENSORS;
@@ -1576,14 +1591,6 @@ void CreateControls() {
   Button(L"Réinitialiser", L"Reset", X + COLX, 444, COLW, 34, ID_M_RESET);
   Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX, X + PAD, 502, CWd - 2 * PAD, 38, ID_MOUNTMSG);
 
-  CardBox(L"Calibration de la caméra", L"Camera calibration", X, 556, CWd, 138);
-  Label(L"Dossier", L"Folder", X + PAD, 604, 160);
-  Edit(X + C0, 600, CR - 100, ID_CALDIR);
-  Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 599, 90, 28, ID_CALBROWSE);
-  Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 642, 160);
-  Edit(X + C0, 638, 76, ID_BASE);
-  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 642, 330);
-
   // ---- page 2 : Unity
   g_buildPage = PG_UNITY;
   CardBox(L"Sorties vers Unity", L"Output to Unity", X, 62, CWd, 208);
@@ -1599,9 +1606,11 @@ void CreateControls() {
   CardBox(L"Suivi des yeux (eye tracking)", L"Eye tracking", X, 62, CWd, 216);
   Check(L"Activer avec 2 caméras d'œil", L"Enable with 2 eye cameras", X + PAD, 100, CWd - 2 * PAD, ID_EYE);
   Label(L"Œil gauche", L"Left eye", X + PAD, 148, 160);
-  Combo(X + C0, 144, CR, ID_EYEL);
+  Combo(X + C0, 144, CR - 90, ID_EYEL);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 143, 80, 28, ID_EYEL_REFRESH);
   Label(L"Œil droit", L"Right eye", X + PAD, 186, 160);
-  Combo(X + C0, 182, CR, ID_EYER);
+  Combo(X + C0, 182, CR - 90, ID_EYER);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 181, 80, 28, ID_EYER_REFRESH);
   Label(L"Cadence", L"Rate", X + PAD, 224, 160);
   Edit(X + C0, 220, 76, ID_EYEFPS, true);
   Label(L"Pilote", L"Driver", X + C0 + 100, 224, 60);
@@ -1627,7 +1636,8 @@ void CreateControls() {
   CardBox(L"Suivi de la bouche (mouth tracking)", L"Mouth tracking", X, 62, CWd, 170);
   Check(L"Activer avec une caméra de bouche", L"Enable with a mouth camera", X + PAD, 100, CWd - 2 * PAD, ID_MOUTH);
   Label(L"Caméra", L"Camera", X + PAD, 148, 160);
-  Combo(X + C0, 144, CR, ID_MOUTHCAM);
+  Combo(X + C0, 144, CR - 90, ID_MOUTHCAM);
+  Button(L"Actualiser", L"Refresh", X + C0 + CR - 80, 143, 80, 28, ID_MOUTH_REFRESH);
   Label(L"Cadence", L"Rate", X + PAD, 186, 160);
   Edit(X + C0, 182, 76, ID_MOUTHFPS, true);
   Label(L"Pilote", L"Driver", X + C0 + 100, 186, 60);
@@ -1676,6 +1686,11 @@ void CreateControls() {
   Label(L"Threads de calcul", L"Compute threads", X + PAD, 104, 160);
   Edit(X + C0, 100, 60, ID_THREADS, true);
   Check(L"Laisser tourner quand je ferme cette fenêtre", L"Keep running when I close this window", X + PAD, 144, CWd - 2 * PAD, ID_KEEP);
+
+  CardBox(L"Lecture de la caméra", L"Camera reading", X, 206, CWd, 128);
+  Label(L"Pilote caméra", L"Camera driver", X + PAD, 252, 160);
+  Combo(X + C0, 248, CR, ID_BACKEND);
+  Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", X + PAD, 288, CWd - 2 * PAD, ID_MFDIRECT);
 
   g_buildPage = -1;
 }
@@ -1749,7 +1764,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_CAM: case ID_CAMR:
           if (code == CBN_SELCHANGE && !g_loading) RebuildModes(true);
           break;
-        case ID_CAM_REFRESH:
+        case ID_CAM_REFRESH: case ID_CAMR_REFRESH: case ID_EYEL_REFRESH: case ID_EYER_REFRESH: case ID_MOUTH_REFRESH:
           if (code == BN_CLICKED) RefreshCameras();
           break;
         case ID_W: case ID_H: case ID_FPS:
@@ -1773,7 +1788,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_MC_NARROW: MouthCal("narrow"); break;
         case ID_MC_CLEAR: QueueUdp(9887, "MCAL_CLEAR\n", EnsureProbe()); break;
         case ID_PORT_REFRESH:
-          g_ports = ListComPorts();
+          ScanPorts();
           g_loading = true;
           FillPorts();
           g_loading = false;

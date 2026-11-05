@@ -208,7 +208,7 @@ namespace AR6DoF
             var shObject = Find<Shader>("Ar6dofObject");
             var model = Find<TextAsset>("camera_model");
             if (shComposite == null || shScreen == null) todo.Add("Les fichiers .shader d'AR6DoF sont introuvables : copie bien tout le dossier AR6DoF dans Assets.");
-            string probeDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64"));
+            string probeDir = Ar6dofAutoSetup.ProbeDir;
             if (model == null && !File.Exists(Path.Combine(probeDir, "camera_model.json")))
                 todo.Add("camera_model.json introuvable : place le dossier ar6dof_probe-win64 a cote du dossier Assets (le fichier y est lu tel quel, rien a glisser dans la scene) et lance ar6dof_probe une fois avec la calibration.");
 

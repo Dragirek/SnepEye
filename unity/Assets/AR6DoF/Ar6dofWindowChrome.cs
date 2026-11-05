@@ -148,16 +148,12 @@ namespace AR6DoF
                         }
                         case "reset":
                         {
-                            // fleche circulaire : revenir a la taille d'origine
-                            float rdx = fx - 32f, rdy = fy - 32f;
-                            float rr = Mathf.Sqrt(rdx * rdx + rdy * rdy);
-                            float ang = Mathf.Atan2(rdy, rdx) * Mathf.Rad2Deg;   // -180..180, 0 = droite
-                            bool gap = ang > 20f && ang < 70f;                     // ouverture en haut a droite, ou se pose la pointe
-                            if (!gap) a = Mathf.Clamp01(3.0f - Mathf.Abs(rr - 17f));
-                            // pointe de fleche au bout de l'arc (vers le haut a droite)
-                            float tx = 32f + 17f * Mathf.Cos(70f * Mathf.Deg2Rad), ty = 32f + 17f * Mathf.Sin(70f * Mathf.Deg2Rad);
-                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, tx, ty, tx + 11f, ty - 1f)));
-                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, tx, ty, tx + 1f, ty + 11f)));
+                            // « restaurer » : deux carres qui se chevauchent (comme le bouton de Windows), net a toute taille
+                            float fd = RRect(fx, fy, 26f, 38f, 16f, 16f, 3f);     // carre de devant (negatif a l'interieur)
+                            float bd2 = RRect(fx, fy, 38f, 26f, 16f, 16f, 3f);    // carre de derriere
+                            a = Mathf.Clamp01(2.8f - Mathf.Abs(fd));
+                            float back = Mathf.Clamp01(2.8f - Mathf.Abs(bd2));
+                            if (fd > 3.5f) a = Mathf.Max(a, back);                // le carre de derriere disparait derriere celui de devant
                             break;
                         }
                         case "plus":

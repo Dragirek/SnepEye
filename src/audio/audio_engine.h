@@ -69,10 +69,33 @@ struct Sound {
   double seconds() const { return (double)frames() / kRate; }
 };
 
+// Une tranche de la table de mixage : fader, muet, solo, balance et egaliseur 3 bandes (graves / medium / aigus, en dB).
+// Ecrite par le thread des commandes, lue par le thread audio : de simples atomiques, sans verrou.
 struct Channel {
   std::atomic<float> vol{1.0f};
-  std::atomic<bool> mute{false};
+  std::atomic<bool> mute{false}, solo{false};
+  std::atomic<float> pan{0.f};                        // -1 gauche ... +1 droite
+  std::atomic<float> eqLo{0.f}, eqMid{0.f}, eqHi{0.f};   // dB, -12 ... +12
   float Gain() const { return mute.load() ? 0.f : vol.load(); }
+};
+
+// Filtres d'une tranche (deux voies). Aucun calcul tant que l'egaliseur est a plat.
+struct StripState {
+  Biquad lo[2], mid[2], hi[2];
+  float aLo = 1e9f, aMid = 1e9f, aHi = 1e9f;   // dernieres valeurs appliquees (1e9 : jamais calcule)
+  bool eqOn = false;
+  static constexpr float kLoHz = 120.f, kMidHz = 1000.f, kHiHz = 6000.f, kMidQ = 0.9f;
+  void Update(const Channel& c) {
+    const float l = c.eqLo.load(), m = c.eqMid.load(), h = c.eqHi.load();
+    if (l == aLo && m == aMid && h == aHi) return;
+    aLo = l; aMid = m; aHi = h;
+    for (int i = 0; i < 2; i++) {
+      if (std::fabs(l) < 0.05f) lo[i].Off(); else lo[i].LowShelf(kLoHz, l);
+      if (std::fabs(m) < 0.05f) mid[i].Off(); else mid[i].Peak(kMidHz, kMidQ, m);
+      if (std::fabs(h) < 0.05f) hi[i].Off(); else hi[i].HighShelf(kHiHz, h);
+    }
+    eqOn = std::fabs(l) >= 0.05f || std::fabs(m) >= 0.05f || std::fabs(h) >= 0.05f;
+  }
 };
 
 // ------------------------------------------------------------------ reglages : « V cle valeur »
@@ -119,6 +142,7 @@ class Mixer {
   // niveaux (0..1+), decroissance rapide : lus par le thread qui envoie les niveaux
   std::atomic<float> peakIn{0}, peakVoice{0}, peakSfx{0}, peakMusic{0}, peakL{0}, peakR{0};
   std::atomic<bool> gateOpen{true};
+  std::atomic<bool> limiter{true};   // limiteur doux du maitre ; coupe : simple ecretage a +-1
   std::atomic<int> activeVoices{0};
 
   // musique
@@ -192,6 +216,14 @@ class Mixer {
     if (c == "V") { SetVoiceParamLine(w); return true; }
     if (c == "VOL" && w.size() >= 3) { const int i = ChanIndex(w[1]); if (i >= 0) ch[i].vol = Clampf(ToF(w[2], 1), 0, 4); return true; }
     if (c == "MUTE" && w.size() >= 3) { const int i = ChanIndex(w[1]); if (i >= 0) ch[i].mute = ToF(w[2]) > 0.5f; return true; }
+    if (c == "SOLO" && w.size() >= 3) { const int i = ChanIndex(w[1]); if (i >= 0 && i != kMaster) ch[i].solo = ToF(w[2]) > 0.5f; return true; }
+    if (c == "PAN" && w.size() >= 3) { const int i = ChanIndex(w[1]); if (i >= 0) ch[i].pan = Clampf(ToF(w[2]), -1.f, 1.f); return true; }
+    if (c == "EQ" && w.size() >= 5) {   // EQ <canal> <graves dB> <medium dB> <aigus dB>
+      const int i = ChanIndex(w[1]);
+      if (i >= 0) { ch[i].eqLo = Clampf(ToF(w[2]), -12.f, 12.f); ch[i].eqMid = Clampf(ToF(w[3]), -12.f, 12.f); ch[i].eqHi = Clampf(ToF(w[4]), -12.f, 12.f); }
+      return true;
+    }
+    if (c == "LIMIT" && w.size() >= 2) { limiter = ToF(w[1], 1) > 0.5f; return true; }
     if (c == "PLAY" && w.size() >= 2) {
       Play((int)ToF(w[1], -1), w.size() > 2 ? ToF(w[2], 1) : 1.f, w.size() > 3 ? ToF(w[3]) : 0.f, w.size() > 4 ? ToF(w[4], 1) : 1.f, w.size() > 5 && ToF(w[5]) > 0.5f);
       return true;
@@ -211,29 +243,32 @@ class Mixer {
   }
 
   // ---------------- rendu : appele par le thread de sortie ; out = stereo entrelace
+  // Chaque source (voix, soundboard, musique) est melangee a plat dans sa tranche, puis la tranche applique egaliseur, fader (muet / solo) et balance
+  // avant d'arriver au maitre, qui a la meme chaine puis le limiteur.
   void Render(float* out, int frames) {
-    mixL_.assign((size_t)frames, 0.f); mixR_.assign((size_t)frames, 0.f);
-    float pv = 0, ps = 0, pm = 0;
+    const size_t nf = (size_t)frames;
+    mixL_.assign(nf, 0.f); mixR_.assign(nf, 0.f);
+    for (int i = 0; i < 3; i++) { sl_[i].assign(nf, 0.f); sr_[i].assign(nf, 0.f); }
+    anySolo_ = ch[kVoice].solo.load() || ch[kSfx].solo.load() || ch[kMusic].solo.load();
 
     // voix
     {
-      const size_t need = (size_t)frames;
       size_t avail = voiceRing.Size();
-      if (!primed_ && avail >= need + 240) primed_ = true;
+      if (!primed_ && avail >= nf + 240) primed_ = true;
       if (primed_) {
         if (avail > kMaxFill) { voiceRing.Drop(avail - kKeepFill); avail = kKeepFill; }   // le micro et la sortie n'ont pas la meme horloge : on rattrape
-        vbuf_.assign(need, 0.f);
-        const size_t got = voiceRing.Read(vbuf_.data(), need);
-        if (got < need) primed_ = false;   // panne de donnees : on refait un tampon d'amorcage
-        const float g = ch[kVoice].Gain();
-        for (size_t i = 0; i < got; i++) { const float s = vbuf_[i] * g; mixL_[i] += s; mixR_[i] += s; pv = std::max(pv, std::fabs(s)); }
+        vbuf_.assign(nf, 0.f);
+        const size_t got = voiceRing.Read(vbuf_.data(), nf);
+        if (got < nf) primed_ = false;   // panne de donnees : on refait un tampon d'amorcage
+        for (size_t i = 0; i < got; i++) { sl_[kVoice][i] = vbuf_[i]; sr_[kVoice][i] = vbuf_[i]; }
       }
     }
     // soundboard
     {
       std::lock_guard<std::mutex> l(sm_);
       int active = 0;
-      const float g = ch[kSfx].Gain();
+      float* L = sl_[kSfx].data();
+      float* R = sr_[kSfx].data();
       for (auto& v : voices_) {
         if (!v.snd) continue;
         const float* d = v.snd->data.data();
@@ -247,11 +282,9 @@ class Mixer {
           size_t i1 = i0 + 1;
           if (i1 >= (size_t)n) i1 = v.loop ? 0 : i0;
           const float f = (float)(v.pos - (double)i0);
-          const float a = v.vol * v.env * g;
-          const float l2 = (d[2 * i0] * (1 - f) + d[2 * i1] * f) * a * v.gl;
-          const float r2 = (d[2 * i0 + 1] * (1 - f) + d[2 * i1 + 1] * f) * a * v.gr;
-          mixL_[(size_t)i] += l2; mixR_[(size_t)i] += r2;
-          ps = std::max(ps, std::max(std::fabs(l2), std::fabs(r2)));
+          const float a = v.vol * v.env;
+          L[i] += (d[2 * i0] * (1 - f) + d[2 * i1] * f) * a * v.gl;
+          R[i] += (d[2 * i0 + 1] * (1 - f) + d[2 * i1 + 1] * f) * a * v.gr;
           v.pos += v.rate;
         }
         if (done) v.snd.reset(); else active++;
@@ -260,30 +293,40 @@ class Mixer {
     }
     // musique
     if (!musicPaused.load()) {
-      mbuf_.assign((size_t)frames * 2, 0.f);
-      const size_t got = musicRing.Read(mbuf_.data(), (size_t)frames);
+      mbuf_.assign(nf * 2, 0.f);
+      const size_t got = musicRing.Read(mbuf_.data(), nf);
       musicConsumed += got;
-      const float g = ch[kMusic].Gain();
-      for (size_t i = 0; i < got; i++) {
-        const float l2 = mbuf_[2 * i] * g, r2 = mbuf_[2 * i + 1] * g;
-        mixL_[i] += l2; mixR_[i] += r2;
-        pm = std::max(pm, std::max(std::fabs(l2), std::fabs(r2)));
-      }
+      for (size_t i = 0; i < got; i++) { sl_[kMusic][i] = mbuf_[2 * i]; sr_[kMusic][i] = mbuf_[2 * i + 1]; }
     }
-    // maitre + limiteur doux
-    const float gm = ch[kMaster].Gain();
+    // tranches -> maitre
+    float pk[3] = {0, 0, 0};
+    for (int c = 0; c < 3; c++) {
+      pk[c] = Strip(c, sl_[c].data(), sr_[c].data(), frames);
+      for (size_t i = 0; i < nf; i++) { mixL_[i] += sl_[c][i]; mixR_[i] += sr_[c][i]; }
+    }
+    Strip(kMaster, mixL_.data(), mixR_.data(), frames);
+    const bool lim = limiter.load();
     float pl = 0, pr = 0;
     for (int i = 0; i < frames; i++) {
-      const float l2 = SoftLimit(mixL_[(size_t)i] * gm), r2 = SoftLimit(mixR_[(size_t)i] * gm);
+      const float l2 = lim ? SoftLimit(mixL_[(size_t)i]) : Clampf(mixL_[(size_t)i], -1.f, 1.f);
+      const float r2 = lim ? SoftLimit(mixR_[(size_t)i]) : Clampf(mixR_[(size_t)i], -1.f, 1.f);
       out[2 * i] = l2; out[2 * i + 1] = r2;
       pl = std::max(pl, std::fabs(l2)); pr = std::max(pr, std::fabs(r2));
       outScope.Push(0.5f * (l2 + r2));
     }
-    peakVoice = std::max(pv, peakVoice.load() * 0.85f);
-    peakSfx = std::max(ps, peakSfx.load() * 0.85f);
-    peakMusic = std::max(pm, peakMusic.load() * 0.85f);
+    peakVoice = std::max(pk[kVoice], peakVoice.load() * 0.85f);
+    peakSfx = std::max(pk[kSfx], peakSfx.load() * 0.85f);
+    peakMusic = std::max(pk[kMusic], peakMusic.load() * 0.85f);
     peakL = std::max(pl, peakL.load() * 0.85f);
     peakR = std::max(pr, peakR.load() * 0.85f);
+  }
+
+  // Gain reel d'une tranche : fader, muet, et solo (si une des trois sources est en solo, les autres se taisent ; le maitre n'est jamais concerne).
+  float EffectiveGain(int c) const {
+    const Channel& k = ch[c];
+    if (k.mute.load()) return 0.f;
+    if (c != kMaster && anySolo_ && !k.solo.load()) return 0.f;
+    return k.vol.load();
   }
 
   static float SoftLimit(float x) {
@@ -293,6 +336,26 @@ class Mixer {
     return x < 0 ? -y : y;
   }
   size_t VoiceBuffered() { return voiceRing.Size(); }
+
+  // Traite une tranche en place (egaliseur -> fader -> balance) ; renvoie le niveau de crete apres traitement.
+  float Strip(int c, float* L, float* R, int n) {
+    StripState& st = strip_[c];
+    st.Update(ch[c]);
+    const float g = EffectiveGain(c), pan = ch[c].pan.load();
+    const float gl = std::min(1.f, 1.f - pan) * g, gr = std::min(1.f, 1.f + pan) * g;
+    float pk = 0;
+    for (int i = 0; i < n; i++) {
+      float l = L[i], r = R[i];
+      if (st.eqOn) {
+        l = st.hi[0].Process(st.mid[0].Process(st.lo[0].Process(l)));
+        r = st.hi[1].Process(st.mid[1].Process(st.lo[1].Process(r)));
+      }
+      l *= gl; r *= gr;
+      L[i] = l; R[i] = r;
+      pk = std::max(pk, std::max(std::fabs(l), std::fabs(r)));
+    }
+    return pk;
+  }
 
  private:
   struct Voice {
@@ -313,6 +376,9 @@ class Mixer {
   std::atomic<bool> dirty_{true};
   bool primed_ = false;
   std::vector<float> proc_, mixL_, mixR_, vbuf_, mbuf_;
+  std::vector<float> sl_[3], sr_[3];
+  StripState strip_[kChannels];
+  bool anySolo_ = false;
 };
 
 }  // namespace ar6audio

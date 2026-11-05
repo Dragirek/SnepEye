@@ -138,7 +138,7 @@ namespace AR6DoF
                 try
                 {
                     string dir = launcher != null ? launcher.ExeDirectory() : "";
-                    if (string.IsNullOrEmpty(dir)) dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64"));
+                    if (string.IsNullOrEmpty(dir)) dir = Ar6dofProbePaths.Dir("");
                     string p = Path.Combine(dir, "camera_model.json");
                     if (File.Exists(p)) { json = File.ReadAllText(p); src = p; }
                 }

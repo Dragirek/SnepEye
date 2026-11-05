@@ -9,6 +9,8 @@ int main() {
   Vec3 aFlat{0.1, 0.1, -G}, aTilt{-G * std::sin(tilt) * 0.0 + 0.0, G * std::sin(tilt), -G * std::cos(tilt)};
   Vec3 still{0.01, 0.0, -0.01}, moving{0.9, 0.2, 0.0};
   MountAuto m; std::string msg; Mat3 R;
+  assert(m.countS == 3.0);   // defaut : 3 s de compte a rebours
+  m.countS = 6.0;            // les scenarios ci-dessous sont ecrits pour un decompte de 6 s
   m.Start(0, msg, false);   // pose 2 visiere vers le bas (aTilt)
   assert(m.Active());
   bool done = false; int beeps = 0;
@@ -32,6 +34,7 @@ int main() {
   {
     Vec3 aTiltUp{0.0, -G * std::sin(tilt), -G * std::cos(tilt)};
     MountAuto u; std::string m2; Mat3 R2; bool d3 = false;
+    u.countS = 6.0;
     u.Start(0, m2, true);
     for (double t2 = 0.0; t2 < 40.0 && !d3; t2 += 0.02) {
       Vec3 a = t2 < 8.0 ? aFlat : (t2 < 14.0 ? aFlat : aTiltUp), g = t2 < 8.0 ? moving : still;
@@ -42,6 +45,7 @@ int main() {
     assert(d3);
     Vec3 aTiltDown{0.0, G * std::sin(tilt), -G * std::cos(tilt)};
     MountAuto dn; std::string m3; Mat3 R3; bool d4 = false;
+    dn.countS = 6.0;
     dn.Start(0, m3, false);
     for (double t2 = 0.0; t2 < 40.0 && !d4; t2 += 0.02) {
       Vec3 a = t2 < 14.0 ? aFlat : aTiltDown, g = t2 < 8.0 ? moving : still;

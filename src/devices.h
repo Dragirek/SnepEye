@@ -3,14 +3,18 @@
 #pragma comment(lib, "mf.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "setupapi.lib")
 #include <windows.h>
+#include <setupapi.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfobjects.h>
 #include <mferror.h>
 #include <mfreadwrite.h>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -136,5 +140,69 @@ inline std::vector<std::string> ListComPorts() {
     }
   }
   RegCloseKey(k);
+  return out;
+}
+
+// Un port COM avec le nom que Windows lui donne (Gestionnaire de peripheriques), au lieu d'un simple « COM5 ».
+struct ComPortInfo {
+  std::string id;      // « COM5 » : ce qui est enregistre dans la configuration et donne a ar6dof_probe
+  std::string label;   // « ESP32 / USB natif (COM5) », « Silicon Labs CP210x USB to UART Bridge (COM3) »...
+};
+
+namespace devices_detail {
+inline std::string WideToUtf8(const wchar_t* w) {
+  const int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+  std::string s;
+  if (n > 1) { s.assign((size_t)n - 1, '\0'); WideCharToMultiByte(CP_UTF8, 0, w, -1, &s[0], n, nullptr, nullptr); }
+  return s;
+}
+// « USB Serial Device (COM5) » -> « COM5 » ; vide si le nom ne finit pas par (COMn)
+inline std::string PortFromName(const std::string& n) {
+  const size_t a = n.rfind("(COM");
+  if (a == std::string::npos) return "";
+  const size_t b = n.find(')', a);
+  return b == std::string::npos ? "" : n.substr(a + 1, b - a - 1);
+}
+}  // namespace devices_detail
+
+// Ports COM presents avec leur nom. Interroge Windows (SetupAPI) : a appeler seulement au demarrage et sur « Actualiser », jamais en boucle.
+// Les ports que SetupAPI ne decrit pas (rare) sont quand meme listes, avec leur seul numero.
+inline std::vector<ComPortInfo> ListComPortInfo() {
+  std::vector<ComPortInfo> out;
+  // classe « Ports (COM et LPT) »
+  static const GUID kPorts = {0x4D36E978, 0xE325, 0x11CE, {0xBF, 0xC1, 0x08, 0x00, 0x2B, 0xE1, 0x03, 0x18}};
+  HDEVINFO set = SetupDiGetClassDevsW(&kPorts, nullptr, nullptr, DIGCF_PRESENT);
+  if (set != INVALID_HANDLE_VALUE) {
+    SP_DEVINFO_DATA d;
+    d.cbSize = sizeof(d);
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &d); i++) {
+      wchar_t fn[256] = {}, hw[512] = {};
+      DWORD got = 0;
+      if (!SetupDiGetDeviceRegistryPropertyW(set, &d, SPDRP_FRIENDLYNAME, nullptr, (PBYTE)fn, sizeof(fn) - 2, &got)) continue;
+      std::string name = devices_detail::WideToUtf8(fn);
+      const std::string id = devices_detail::PortFromName(name);
+      if (id.empty()) continue;   // port sans numero COM (LPT...)
+      std::string label = name;
+      // L'USB natif d'un ESP32 (C3, S3...) s'appelle juste « USB Serial Device » ou « USB JTAG/serial debug unit » : son nom USB ne se change pas,
+      // mais son identifiant Espressif (VID 303A) permet de l'annoncer clairement.
+      if (SetupDiGetDeviceRegistryPropertyW(set, &d, SPDRP_HARDWAREID, nullptr, (PBYTE)hw, sizeof(hw) - 2, &got)) {
+        std::wstring h(hw);
+        for (auto& c : h) c = (wchar_t)std::towupper(c);
+        if (h.find(L"VID_303A") != std::wstring::npos) label = "ESP32 (USB natif) (" + id + ")";
+      }
+      out.push_back({id, label});
+    }
+    SetupDiDestroyDeviceInfoList(set);
+  }
+  // ports connus du registre mais absents de la liste ci-dessus
+  for (const auto& p : ListComPorts()) {
+    bool known = false;
+    for (const auto& o : out) if (o.id == p) known = true;
+    if (!known) out.push_back({p, p});
+  }
+  std::sort(out.begin(), out.end(), [](const ComPortInfo& a, const ComPortInfo& b) {
+    const int na = a.id.size() > 3 ? atoi(a.id.c_str() + 3) : 0, nb = b.id.size() > 3 ? atoi(b.id.c_str() + 3) : 0;
+    return na != nb ? na < nb : a.id < b.id;
+  });
   return out;
 }

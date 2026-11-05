@@ -53,19 +53,32 @@ namespace AR6DoF
     {
         RectTransform fill;
         float w;
+        bool vertical;
 
-        public static Ar6dofMeterBar Make(Transform parent, Vector2 pos, Vector2 size)
+        public static Ar6dofMeterBar Make(Transform parent, Vector2 pos, Vector2 size, bool vertical = false)
         {
-            var m = new Ar6dofMeterBar { w = size.x - 8f };
+            var m = new Ar6dofMeterBar { w = (vertical ? size.y : size.x) - 8f, vertical = vertical };
             var root = Ar6dofVrUi.Rect(parent, "Niveau", pos, size);
             var bg = root.gameObject.AddComponent<Image>();
             bg.raycastTarget = false;
             Ar6dofTheme.Attach(root.gameObject, Ar6dofRole.Track, 8);
-            var f = Ar6dofVrUi.Rect(root, "Remplissage", Vector2.zero, new Vector2(2f, -8f));
-            f.anchorMin = new Vector2(0f, 0f); f.anchorMax = new Vector2(0f, 1f);
-            f.pivot = new Vector2(0f, 0.5f);
-            f.anchoredPosition = new Vector2(4f, 0f);
-            f.sizeDelta = new Vector2(2f, -8f);
+            RectTransform f;
+            if (vertical)
+            {
+                f = Ar6dofVrUi.Rect(root, "Remplissage", Vector2.zero, new Vector2(-8f, 2f));
+                f.anchorMin = new Vector2(0f, 0f); f.anchorMax = new Vector2(1f, 0f);
+                f.pivot = new Vector2(0.5f, 0f);
+                f.anchoredPosition = new Vector2(0f, 4f);
+                f.sizeDelta = new Vector2(-8f, 2f);
+            }
+            else
+            {
+                f = Ar6dofVrUi.Rect(root, "Remplissage", Vector2.zero, new Vector2(2f, -8f));
+                f.anchorMin = new Vector2(0f, 0f); f.anchorMax = new Vector2(0f, 1f);
+                f.pivot = new Vector2(0f, 0.5f);
+                f.anchoredPosition = new Vector2(4f, 0f);
+                f.sizeDelta = new Vector2(2f, -8f);
+            }
             var im = f.gameObject.AddComponent<Image>();
             im.raycastTarget = false;
             Ar6dofTheme.Attach(f.gameObject, Ar6dofRole.Accent, 6);
@@ -73,11 +86,11 @@ namespace AR6DoF
             return m;
         }
 
-        /// <summary>Niveau de crête linéaire (0..1+) affiché en dB : -60 dB à gauche, 0 dB à droite.</summary>
+        /// <summary>Niveau de crête linéaire (0..1+) affiché en dB : -60 dB à gauche (en bas), 0 dB à droite (en haut).</summary>
         public void SetPeak(float peak)
         {
             float v = peak <= 0.0003f ? 0f : Mathf.Clamp01((20f * Mathf.Log10(peak) + 60f) / 60f);
-            fill.sizeDelta = new Vector2(Mathf.Max(2f, w * v), -8f);
+            fill.sizeDelta = vertical ? new Vector2(-8f, Mathf.Max(2f, w * v)) : new Vector2(Mathf.Max(2f, w * v), -8f);
         }
     }
 
@@ -95,7 +108,8 @@ namespace AR6DoF
         protected readonly Ar6dofDock dock;
         protected RectTransform content;
         protected float y;
-        protected readonly float W;
+        protected float W;
+        readonly float baseW;
         protected const float Gap = 8f;
         protected readonly List<Action> refreshers = new List<Action>();
         static readonly CultureInfo Ci = CultureInfo.InvariantCulture;
@@ -113,12 +127,23 @@ namespace AR6DoF
             this.glyph = glyph;
             description = desc;
             W = width;
+            baseW = width;
             canvas = Ar6dofVrUi.NewCanvas(name, new Vector2(width, 300f));
             ((RectTransform)canvas.transform).pivot = new Vector2(0.5f, 1f);
             canvas.gameObject.SetActive(false);
         }
 
         protected float IW { get { return W - 40f; } }
+
+        /// <summary>Largeur de la vue principale ; une fenêtre dont une page a besoin de plus de place la redéfinit (la liste de choix et le navigateur de fichiers gardent la largeur de base).</summary>
+        protected virtual float MainWidth() { return baseW; }
+
+        void SetWidth(float w)
+        {
+            if (Mathf.Abs(w - W) < 0.5f) return;
+            W = w;
+            if (canvas != null) { var rt = (RectTransform)canvas.transform; rt.sizeDelta = new Vector2(w, rt.sizeDelta.y); }
+        }
 
         // ------------------------------------------------------------------ Ar6dofDockApp
         public override Transform AnimRoot { get { return canvas != null ? canvas.transform : null; } }
@@ -160,6 +185,7 @@ namespace AR6DoF
             if (content != null) UnityEngine.Object.Destroy(content.gameObject);
             refreshers.Clear();
             OnRebuildStart();
+            SetWidth(view == View.Main ? MainWidth() : baseW);
             content = Ar6dofVrUi.NewContent(canvas);
             y = 14f;
             switch (view)

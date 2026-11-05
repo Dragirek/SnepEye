@@ -18,7 +18,15 @@ namespace AR6DoF
     {
         static Ar6dofAutoSetup() { EditorApplication.delayCall += () => EnsureDll(false); }
 
-        static string ProbeDir { get { return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ar6dof_probe-win64")); } }
+        /// <summary>Dossier d'ar6dof_probe : celui de Launcher > Exe Path (scene ouverte) s'il est renseigne, sinon ar6dof_probe-win64 a cote de Assets, sinon le dernier chemin retenu.</summary>
+        public static string ProbeDir
+        {
+            get
+            {
+                var l = Object.FindFirstObjectByType<Ar6dofLauncher>();
+                return Ar6dofProbePaths.Dir(l != null ? l.exePath : "");
+            }
+        }
 
         static bool DllInProject()
         {
@@ -54,18 +62,44 @@ namespace AR6DoF
         }
 
         [MenuItem("AR6DoF/Verifier l'installation")]
-        static void Check()
+        static void Check() { Check(0); }
+
+        static void Check(int depth)
         {
             bool dll = EnsureDll(true);
-            bool exe = File.Exists(Path.Combine(ProbeDir, "ar6dof_probe.exe"));
-            bool model = File.Exists(Path.Combine(ProbeDir, "camera_model.json"));
-            EditorUtility.DisplayDialog("AR6DoF",
-                "ar6dof_probe.exe : " + (exe ? "trouve" : "ABSENT dans " + ProbeDir + " (ou renseigne Launcher > Exe Path une fois : Unity s'en souvient)") + "\n" +
-                "camera_model.json : " + (model ? "trouve (lu directement dans ce dossier)" : "absent : lance ar6dof_probe une fois avec la calibration pour l'exporter") + "\n" +
+            var l = Object.FindFirstObjectByType<Ar6dofLauncher>();
+            string field = l != null ? l.exePath : null;
+            string pd = ProbeDir;
+            bool exe = File.Exists(Path.Combine(pd, "ar6dof_probe.exe"));
+            bool model = File.Exists(Path.Combine(pd, "camera_model.json"));
+            string src = l == null ? "aucun Launcher dans la scene ouverte (ouvre ta scene AR6DoF)" : "Launcher > Exe Path = \"" + field + "\"";
+            string msg =
+                "Dossier d'ar6dof_probe : " + pd + "\n" +
+                "(" + src + ")\n\n" +
+                "ar6dof_probe.exe : " + (exe ? "trouve" : "ABSENT") + "\n" +
+                "camera_model.json : " + (model ? "trouve (lu directement dans ce dossier)" : "absent de ce dossier : ar6dof_probe l'ecrit a cote de lui quand la calibration est chargee (lance le suivi une fois)") + "\n" +
                 "ar6dof_screen.dll : " + (dll ? "dans le projet" : "ABSENTE") + "\n" +
                 "Direct3D 11 : " + (UnityEditor.PlayerSettings.GetGraphicsAPIs(BuildTarget.StandaloneWindows64).Length == 1 &&
-                                     UnityEditor.PlayerSettings.GetGraphicsAPIs(BuildTarget.StandaloneWindows64)[0] == UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 ? "oui" : "NON : menu AR6DoF > Forcer Direct3D11"),
-                "OK");
+                                     UnityEditor.PlayerSettings.GetGraphicsAPIs(BuildTarget.StandaloneWindows64)[0] == UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 ? "oui" : "NON : menu AR6DoF > Forcer Direct3D11");
+            if (exe || depth > 0)
+            {
+                EditorUtility.DisplayDialog("AR6DoF", msg, "OK");
+                return;
+            }
+            // ar6dof_probe.exe introuvable : on propose de le designer, et Unity s'en souvient (aussi pour la DLL et camera_model.json)
+            if (!EditorUtility.DisplayDialog("AR6DoF", msg + "\n\nDesigner ar6dof_probe.exe maintenant ?", "Choisir ar6dof_probe.exe...", "Plus tard")) return;
+            string pick = EditorUtility.OpenFilePanel("Choisir ar6dof_probe.exe", string.IsNullOrEmpty(pd) ? "" : pd, "exe");
+            string found = Ar6dofProbePaths.Normalize(pick);
+            if (found.Length == 0) return;
+            Ar6dofProbePaths.Remember(found);
+            if (l != null)
+            {
+                Undo.RecordObject(l, "Exe Path AR6DoF");
+                l.exePath = found;
+                EditorUtility.SetDirty(l);
+            }
+            EnsureDll(true);
+            Check(1);
         }
     }
 }

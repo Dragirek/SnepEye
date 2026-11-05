@@ -438,13 +438,15 @@ static void MusicThread() {
 #pragma pack(push, 1)
 struct MeterPacket {
   unsigned magic = 0x31445541;   // 'AUD1'
-  unsigned short ver = 1, flags = 0;
+  unsigned short ver = 2, flags = 0;
   unsigned seq = 0;
   float peak[6];                 // micro, voix, soundboard, musique, gauche, droite
   float musicPos, musicDur;
   unsigned voices, reserved;
   float specIn[kBands], specOut[kBands];
+  float wave[128];               // forme d'onde de la sortie (les ~21 dernieres ms, 1 point sur 8) pour l'oscilloscope
 };
+static_assert(sizeof(MeterPacket) == 820, "MeterPacket : Unity lit 820 octets");
 #pragma pack(pop)
 
 static std::atomic<bool> g_inRunning{false}, g_outRunning{false};
@@ -464,6 +466,7 @@ static void MeterThread() {
     m.flags = (unsigned short)((g_mix.gateOpen ? 4 : 0) | (g_mix.musicActive ? 8 : 0) | (g_mix.musicPaused ? 16 : 0));
     g_mix.inScope.Snapshot(a);  Spectrum32(a, m.specIn);
     g_mix.outScope.Snapshot(a); Spectrum32(a, m.specOut);
+    for (int i = 0; i < 128; i++) m.wave[i] = a[i * 8 + 4];
     SendTo(kPortMeter, &m, (int)sizeof(m));
   }
 }
