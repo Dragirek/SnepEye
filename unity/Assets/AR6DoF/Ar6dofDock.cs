@@ -134,7 +134,9 @@ namespace AR6DoF
         Vector3 feetPos;
         bool feetInit, lastFeetMode;
         Vector3 lastFlat = Vector3.forward;
-        Text followLbl, seatLbl;
+        Text followLbl, seatLbl, viewLbl;
+        Ar6dofCameras camHub;
+        bool camBtnShown;
         bool seatApplied;
         Ar6dofFloatingMenu kbMenu;
 
@@ -160,6 +162,7 @@ namespace AR6DoF
             if (Instance == this) Instance = null;
             Ar6dofSettings.Changed -= OnStyleChanged;
             Ar6dofLoc.Changed -= OnLangChanged;
+            if (camHub != null) camHub.Changed -= OnCamerasChanged;
         }
 
         void Update()
@@ -207,7 +210,15 @@ namespace AR6DoF
 
             // inclinaison de la tête vers le bas (degrés) : le dock apparaît entre dockRevealStart et dockRevealFull
             float pitch = Mathf.Asin(Mathf.Clamp(-h.forward.y, -1f, 1f)) * Mathf.Rad2Deg;
-            float sub = d.seated ? 12f : 0f;   // assis, le dock est plus pres : il apparait en baissant moins la tete
+            // assis, le dock est plus pres et moins bas : il apparait en baissant moins la tete (on compare l'angle reel du dock a celui d'un dock au sol, environ 66 deg)
+            float sub = 0f;
+            if (d.seated)
+            {
+                Vector3 toDock = feetPos - h.position;
+                float hd = new Vector2(toDock.x, toDock.z).magnitude;
+                float dockAng = Mathf.Atan2(-toDock.y, Mathf.Max(0.05f, hd)) * Mathf.Rad2Deg;
+                sub = Mathf.Clamp(66f - dockAng, 0f, 30f);
+            }
             float rs = Mathf.Max(8f, d.dockRevealStart - sub);
             float a = Mathf.Clamp01(Mathf.InverseLerp(rs, Mathf.Max(rs + 1f, d.dockRevealFull - sub), pitch));
             a = a * a * (3f - 2f * a);
@@ -233,6 +244,16 @@ namespace AR6DoF
             canvas.enabled = reveal > 0.003f;
             if (followLbl != null && kbMenu != null) followLbl.text = Ar6dofLoc.T(kbMenu.follow ? "Suivi : OUI" : "Suivi : NON");
             if (seatLbl != null) seatLbl.text = Ar6dofLoc.T(Ar6dofSettings.Current.seated ? "Assis : OUI" : "Assis : NON");
+            if (viewLbl != null && camHub != null) viewLbl.text = camHub.ViewLabel();
+        }
+
+        /// <summary>Les caméras supplémentaires ont changé : le bouton « Vue » apparaît ou disparaît (il n'existe que s'il y a une caméra activée de vision nocturne ou thermique).</summary>
+        void OnCamerasChanged()
+        {
+            if (!built) return;
+            bool want = camHub != null && camHub.HasSwitchable;
+            if (want != camBtnShown) RebuildIcons();
+            else ApplyReveal();
         }
 
         /// <summary>Place le dock sur le sol devant tes pieds, orienté pile vers tes yeux (angle fort).</summary>
@@ -244,7 +265,7 @@ namespace AR6DoF
             Vector3 f = h.forward; f.y = 0f;
             if (f.sqrMagnitude > 1e-3f) lastFlat = f.normalized;
             // debout : sur le sol devant les pieds ; assis : a hauteur des mains (sous les yeux), plus pres
-            float ty = d.seated ? Mathf.Max(0.3f, h.position.y - 0.55f) : 0.12f;
+            float ty = d.seated ? Mathf.Max(0.2f, h.position.y - Mathf.Clamp(d.dockSeatedDrop, 0.3f, 1.4f)) : 0.12f;
             float dist = Mathf.Clamp(d.dockDistance, 0.3f, 1.5f);
             if (d.seated) dist = Mathf.Min(dist, 0.55f);
             Vector3 target = new Vector3(h.position.x, ty, h.position.z) + lastFlat * dist;
@@ -316,6 +337,9 @@ namespace AR6DoF
             mouthDisplay.tracker = mouth;
             if (eyeCal == null) eyeCal = GetComponent<Ar6dofEyeCalibration>();
             if (eyeCal == null) eyeCal = gameObject.AddComponent<Ar6dofEyeCalibration>();
+            camHub = GetComponent<Ar6dofCameras>();
+            if (camHub == null) camHub = gameObject.AddComponent<Ar6dofCameras>();   // ne fait rien tant qu'aucune caméra n'est configurée et utilisée
+            camHub.Changed += OnCamerasChanged;
             vrSettings = new Ar6dofVrSettings(this);
             settingsApp = new CanvasApp { canvas = vrSettings.canvas, title = "Reglages", icon = "", open = false };
             settingsApp.place = t => PlaceBeside(t, 35f);
@@ -489,7 +513,8 @@ namespace AR6DoF
             float appsX = sepX + 26f + size * 0.5f;                                // Apps : juste a gauche de la roue des reglages
             float gearX = appsX + size * 0.5f + 12f + gearSize * 0.5f;
             float total = gearX + gearSize * 0.5f;
-            float barW = Mathf.Max(720f, total + 60f);
+            camBtnShown = camHub != null && camHub.HasSwitchable;
+            float barW = Mathf.Max(camBtnShown ? 860f : 720f, total + 60f);
             var ds = Ar6dofSettings.Current;
             infoSig = Ar6dofDockInfo.Signature(ds);
             float extra = Ar6dofDockInfo.Wanted(ds) ? Ar6dofDockInfo.Height : 0f;   // le bandeau s'ajoute SOUS les icônes : la barre grandit, rien ne bouge dedans
@@ -537,10 +562,12 @@ namespace AR6DoF
         // ------------------------------------------------------------------ actions rapides (remplacent les touches R, M et F)
         void MakeQuickRow(float barW)
         {
-            const float bw = 134f, bh = 58f, gap = 6f, y = 62f;
-            float x = -(5 * bw + 4 * gap) * 0.5f + bw * 0.5f;
+            const float gap = 6f, bh = 58f, y = 62f;
+            int nb = camBtnShown ? 6 : 5;
+            float bw = Mathf.Min(134f, (barW - 40f - (nb - 1) * gap) / nb);
+            float x = -(nb * bw + (nb - 1) * gap) * 0.5f + bw * 0.5f;
             Text lbl;
-            followLbl = null; seatLbl = null;
+            followLbl = null; seatLbl = null; viewLbl = null;
             var b1 = Ar6dofVrUi.MakeButton(iconsRoot, "Recentrer", new Vector2(x, y), new Vector2(bw, bh), () => { if (rig != null) rig.Recenter(); FollowFeet(true); }, out lbl, 22);
             Tip(b1, "Recentrer la tete : ici devant moi = cap de depart");
             x += bw + gap;
@@ -561,6 +588,14 @@ namespace AR6DoF
             var b5 = Ar6dofVrUi.MakeButton(iconsRoot, "Assis : NON", new Vector2(x, y), new Vector2(bw, bh), ToggleSeated, out lbl, 22);
             seatLbl = lbl;
             Tip(b5, "Mode assis : dock a hauteur des mains, menus et ecrans a hauteur des yeux assis. Assieds-toi puis active.");
+            if (camBtnShown)
+            {
+                x += bw + gap;
+                var b6 = Ar6dofVrUi.MakeButton(iconsRoot, "Vue : Normale", new Vector2(x, y), new Vector2(bw, bh), () => { if (camHub != null) camHub.CycleView(); ApplyReveal(); }, out lbl, 20);
+                lbl.gameObject.AddComponent<Ar6dofFitText>().Init(lbl, 20);
+                viewLbl = lbl;
+                Tip(b6, "Change la vue : camera normale, puis vision nocturne et thermique (cameras activees dans Reglages > Image > Cameras)");
+            }
         }
 
         static void Tip(Button b, string text)
@@ -927,16 +962,116 @@ namespace AR6DoF
             if (fm != null) fm.Summon();
         }
 
-        /// <summary>Menus (réglages, menus perso) : à côté des écrans, à hauteur du regard.</summary>
+        /// <summary>Zone du champ de vision déjà prise par une fenêtre ou un écran, en degrés par rapport au regard (cap : droite positive ; hauteur).</summary>
+        struct Taken { public float y0, y1, p0, p1; }
+
+        static readonly Vector3[] cornerBuf = new Vector3[4];
+
+        static void AddTaken(List<Taken> list, Vector3 eye, Vector3 fwd, Vector3[] pts)
+        {
+            float y0 = 1e9f, y1 = -1e9f, p0 = 1e9f, p1 = -1e9f;
+            for (int i = 0; i < pts.Length; i++)
+            {
+                Vector3 v = pts[i] - eye;
+                Vector3 vf = new Vector3(v.x, 0f, v.z);
+                if (vf.sqrMagnitude < 1e-6f) return;
+                float yw = Vector3.SignedAngle(fwd, vf, Vector3.up);
+                float pt = Mathf.Atan2(v.y, vf.magnitude) * Mathf.Rad2Deg;
+                if (yw < y0) y0 = yw; if (yw > y1) y1 = yw;
+                if (pt < p0) p0 = pt; if (pt > p1) p1 = pt;
+            }
+            if (y1 - y0 > 200f) return;   // à cheval derrière toi : on ignore
+            list.Add(new Taken { y0 = y0, y1 = y1, p0 = p0, p1 = p1 });
+        }
+
+        void CollectTaken(List<Taken> list, Transform self, Vector3 eye, Vector3 fwd)
+        {
+            var pts = cornerBuf;
+            foreach (var a in ExtraApps())
+            {
+                Canvas c = null;
+                var aw = a as Ar6dofAppWindow; if (aw != null) c = aw.canvas;
+                var dm = a as DeviceMenu; if (dm != null) c = dm.canvas;
+                var ca = a as CanvasApp; if (ca != null) c = ca.canvas;
+                if (c == null || c.transform == self || !c.gameObject.activeInHierarchy) continue;
+                ((RectTransform)c.transform).GetWorldCorners(pts);
+                AddTaken(list, eye, fwd, pts);
+            }
+            var sc = Ar6dofScreens.Instance;
+            if (sc != null)
+            {
+                var four = new Vector3[4];
+                foreach (var p in sc.panels)
+                {
+                    if (p == null || !p.open || !p.gameObject.activeInHierarchy) continue;
+                    Transform pt = p.transform;
+                    Vector3 c0 = pt.position;
+                    Vector3 right = pt.right * (p.Width * 0.5f), up = pt.up * (p.Height * 0.5f);
+                    four[0] = c0 - right - up; four[1] = c0 - right + up; four[2] = c0 + right + up; four[3] = c0 + right - up;
+                    AddTaken(list, eye, fwd, four);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Place une fenêtre (application, réglages, menu d'appareil) dans un endroit LIBRE du champ de vision : on essaie d'abord devant toi, puis de plus en plus sur les côtés
+        /// (les coins), en évitant les écrans et les autres fenêtres ouvertes. Le côté préféré (signe de yawDeg) passe en premier ; derrière toi seulement s'il n'y a vraiment plus de place.
+        /// </summary>
         void PlaceBeside(Transform t, float yawDeg, float dy = 0f)
         {
             Transform h = Head;
             if (h == null) return;
             Vector3 f = h.forward; f.y = 0f;
             if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
-            Vector3 d = Quaternion.Euler(0f, yawDeg, 0f) * f.normalized;
-            Vector3 pos = h.position + d * 1.2f;
-            pos.y = h.position.y - 0.05f + dy;
+            f.Normalize();
+            Vector3 eye = h.position;
+
+            float pref = Mathf.Repeat(yawDeg + 180f, 360f) - 180f;
+            float side = pref >= 0f ? 1f : -1f;
+
+            // taille de la fenêtre à placer, en mètres (au moins 75 cm de haut : elle grandit vers le bas quand on la remplit)
+            float wm = 0.8f, hm = 0.8f, pivY = 1f;
+            var rt = t as RectTransform;
+            if (rt != null)
+            {
+                wm = Mathf.Max(0.2f, rt.sizeDelta.x * Mathf.Abs(rt.lossyScale.x));
+                hm = Mathf.Max(0.75f, rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y));
+                pivY = rt.pivot.y;
+            }
+
+            var taken = new List<Taken>();
+            CollectTaken(taken, t, eye, f);
+
+            float bestYaw = 0f, bestDist = 1.2f, bestCost = float.MaxValue;
+            float[] dists = { 1.2f, 1.6f };
+            for (int di = 0; di < dists.Length && bestCost > 0f; di++)
+            {
+                float D = dists[di];
+                float half = Mathf.Atan(wm * 0.5f / D) * Mathf.Rad2Deg;
+                float step = half * 2f + 4f;
+                float top = -0.05f + dy + (1f - pivY) * hm, bot = top - hm;
+                float p1 = Mathf.Atan2(top, D) * Mathf.Rad2Deg, p0 = Mathf.Atan2(bot, D) * Mathf.Rad2Deg;
+                int kmax = Mathf.Max(1, Mathf.FloorToInt(150f / step));
+                for (int k = 0; k <= kmax * 2 && bestCost > 0f; k++)
+                {
+                    int n = (k + 1) / 2;                        // 0, 1, 1, 2, 2...
+                    float yw = (k == 0 ? 0f : ((k % 2 == 1) ? side : -side) * n * step);
+                    float cost = Mathf.Abs(yw) * 0.002f + di * 0.5f;   // à égalité de place libre : plus près de l'avant, plus près de toi
+                    for (int i = 0; i < taken.Count; i++)
+                    {
+                        var o = taken[i];
+                        float oy = Mathf.Min(yw + half, o.y1 + 3f) - Mathf.Max(yw - half, o.y0 - 3f);
+                        float op = Mathf.Min(p1, o.p1 + 3f) - Mathf.Max(p0, o.p0 - 3f);
+                        if (oy > 0f && op > 0f) cost += 10f + oy * op;
+                    }
+                    if (cost < bestCost) { bestCost = cost; bestYaw = yw; bestDist = D; }
+                    if (cost < 1.2f) { bestCost = 0f; bestYaw = yw; bestDist = D; break; }   // libre
+                }
+            }
+
+            Vector3 d = Quaternion.Euler(0f, bestYaw, 0f) * f;
+            Vector3 pos = eye + d * bestDist;
+            pos.y = eye.y - 0.05f + dy;
             t.SetPositionAndRotation(pos, Quaternion.LookRotation(d));
         }
     }

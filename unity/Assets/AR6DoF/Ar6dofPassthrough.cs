@@ -93,6 +93,7 @@ namespace AR6DoF
         readonly Vector4[] U = new Vector4[20];
         float nextOpenTry, fpsTimer;
         double frameWriteQpc;
+        Ar6dofCamFeed altFeed;   // image affichée à la place de la caméra normale (null = caméra normale)
         static readonly double[] RCB = { 0, -1, 0, 0, 0, -1, 1, 0, 0 };   // casque (X avant, Y gauche, Z haut) -> caméra (x droite, y bas, z avant)
         int uploads, uploadsPerSec;
         bool showUi;
@@ -266,6 +267,8 @@ namespace AR6DoF
                 nextOpenTry = Time.unscaledTime + 0.5f;
                 reader.Open(sharedMemoryName);
             }
+            var hub = Ar6dofCameras.Instance;
+            altFeed = hub != null ? hub.ActiveFeed : null;   // vue vision nocturne / thermique / autre : l'image de la caméra normale n'est plus copiée (économie), le suivi continue dans ar6dof_probe
             if (reader.IsOpen)
             {
                 if (camTex == null)
@@ -275,7 +278,7 @@ namespace AR6DoF
                     camTex.filterMode = FilterMode.Bilinear;
                 }
                 double t0 = Ar6dofClock.Now();
-                if (reader.TryCopyLatest(camTex, out double age))
+                if (altFeed == null && reader.TryCopyLatest(camTex, out double age))
                 {
                     FrameAgeMs = age; HasFrames = true; uploads++; frameWriteQpc = reader.LastCaptureQpc;   // arrivée lissée de l'image (le délai est retiré plus bas)
                     UploadMs = UploadMs * 0.9 + (Ar6dofClock.Now() - t0) * 1000.0 * 0.1;   // copie + envoi à la carte graphique (moyenne)
@@ -394,9 +397,12 @@ namespace AR6DoF
             get
             {
                 int W = camTex != null ? camTex.width : 1600, H = camTex != null ? camTex.height : 600;
-                int ew = settings.layout == Ar6dofStereoLayout.SideBySide ? W / 2 : W;
-                int eh = settings.layout == Ar6dofStereoLayout.SideBySide ? H : H / 2;
-                if ((((settings.left.rotateQuarterTurns % 4) + 4) % 4) % 2 == 1) { int t = ew; ew = eh; eh = t; }
+                int lay = settings.layout == Ar6dofStereoLayout.SideBySide ? 1 : 2;
+                int quarters = settings.left.rotateQuarterTurns;
+                if (altFeed != null) { W = altFeed.Width; H = altFeed.Height; lay = altFeed.cfg.stereo; quarters = altFeed.cfg.rotate; }
+                int ew = lay == 1 ? W / 2 : W;
+                int eh = lay == 2 ? H / 2 : H;
+                if ((((quarters % 4) + 4) % 4) % 2 == 1) { int t = ew; ew = eh; eh = t; }
                 return new Vector2Int(Mathf.Clamp(ew, 64, 4096), Mathf.Clamp(eh, 64, 4096));
             }
         }
@@ -507,12 +513,21 @@ namespace AR6DoF
         {
             if (mat == null) return;
             int W = camTex != null ? camTex.width : 1600, H = camTex != null ? camTex.height : 600;
+            var alt = altFeed;
+            Ar6dofCamCfg ac = alt != null ? alt.cfg : null;
+            if (alt != null) { W = alt.Width; H = alt.Height; }
 
             // Reprojection de rotation : de combien la tête a-t-elle tourné depuis la prise de vue de l'image affichée ?
             // dR = R_cam * (R_casque(capture)^T * R_casque(maintenant)) * R_cam^T  (voir tests/passthrough_ref.py : delta_cam)
             double[] dR = null;
-            if (settings.reproject && HasFrames && receiver != null && headRig != null && headRig.RenderRotationG != null
-                && receiver.TryGetRotationG(frameWriteQpc - CurrentDelaySeconds(), out double[] Rcap))
+            double[] Rcap = null;
+            bool haveRot = false;
+            if (settings.reproject && (HasFrames || alt != null) && receiver != null && headRig != null && headRig.RenderRotationG != null)
+            {
+                double tFrame = alt != null ? alt.LastFrameQpc - ac.delayMs * 0.001 : frameWriteQpc - CurrentDelaySeconds();
+                haveRot = receiver.TryGetRotationG(tFrame, out Rcap);
+            }
+            if (haveRot)
             {
                 double[] delta = Ar6dofMath.Mul3(Ar6dofMath.Transpose3(Rcap), headRig.RenderRotationG);
                 dR = Ar6dofMath.Mul3(Ar6dofMath.Mul3(RCB, delta), Ar6dofMath.Transpose3(RCB));
@@ -523,8 +538,11 @@ namespace AR6DoF
 
             for (int disp = 0; disp < 2; disp++)
             {
-                int feed = settings.swapEyes ? 1 - disp : disp;     // quelle moitié du flux va sur quel oeil
-                Quaternion viewRot = FillEye(disp, feed, EyeSettingsFor(disp), W, H, dR);
+                int feed = (alt != null ? ac.swapEyes : settings.swapEyes) ? 1 - disp : disp;     // quelle moitié du flux va sur quel oeil
+                var es = EyeSettingsFor(disp);
+                if (alt != null)   // autre caméra : seules les lentilles de l'afficheur restent ; décalage, miroir et rotation sont ceux de cette caméra
+                    es = new Ar6dofEyeSettings { lensCenterX = es.lensCenterX, lensCenterY = es.lensCenterY, k1 = es.k1, k2 = es.k2, k3 = es.k3 };
+                Quaternion viewRot = FillEye(disp, feed, es, W, H, dR, ac, alt != null && alt.FlipY);
                 var cam = eyeCams[disp];
                 cam.fieldOfView = sceneFov;   // plus large que l'affichage (marge)
                 float offX = feed == 0 ? 0f : (model != null ? (float)model.right_offset_x_m : 0.063f);
@@ -533,7 +551,11 @@ namespace AR6DoF
             }
             mat.SetVectorArray("_U", U);
             mat.SetVector("_TexSize", new Vector4(W, H, 0f, 0f));
-            if (camTex != null) mat.SetTexture("_Cam", camTex);
+            if (alt != null) mat.SetTexture("_Cam", alt.Tex);
+            else if (camTex != null) mat.SetTexture("_Cam", camTex);
+            if (ac == null || ac.role == Ar6dofCamRole.Other) mat.SetVector("_Look", Vector4.zero);
+            else if (ac.role == Ar6dofCamRole.Night) mat.SetVector("_Look", new Vector4(1f, ac.gain, ac.bright, ac.tint));
+            else mat.SetVector("_Look", new Vector4(2f, ac.gain, ac.bright, ac.palette));
             mat.SetTexture("_SceneL", rtL);
             mat.SetTexture("_SceneR", rtR);
             mat.SetFloat("_Flip", settings.flipComposite ? -1f : 1f);
@@ -542,19 +564,24 @@ namespace AR6DoF
 
         // Assemble les paramètres d'un oeil pour le shader (même calcul que `assemble` dans tests/passthrough_ref.py).
         // Retourne l'orientation à donner à la caméra de scène pour qu'elle regarde comme le passthrough.
-        Quaternion FillEye(int disp, int feed, Ar6dofEyeSettings es, int W, int H, double[] dR)
+        // alt : réglages d'une autre caméra (vision nocturne...), null = la caméra normale. Une image seule (stereo = 0) sert aux deux yeux : faux stéréo.
+        Quaternion FillEye(int disp, int feed, Ar6dofEyeSettings es, int W, int H, double[] dR, Ar6dofCamCfg alt = null, bool altFlipY = false)
         {
             int Ws, Hs, x0 = 0, y0 = 0;
-            if (settings.layout == Ar6dofStereoLayout.SideBySide) { Ws = W / 2; Hs = H; x0 = feed * Ws; }
-            else { Ws = W; Hs = H / 2; y0 = feed * Hs; }
-            int quarter = ((es.rotateQuarterTurns % 4) + 4) % 4;
+            int lay = alt != null ? alt.stereo : (settings.layout == Ar6dofStereoLayout.SideBySide ? 1 : 2);   // 0 une image, 1 côte à côte, 2 haut / bas
+            if (lay == 1) { Ws = W / 2; Hs = H; x0 = feed * Ws; }
+            else if (lay == 2) { Ws = W; Hs = H / 2; y0 = feed * Hs; }
+            else { Ws = W; Hs = H; }
+            bool mirX = alt != null ? alt.mirrorX : es.mirrorX;
+            bool mirY = alt != null ? (alt.mirrorY ^ altFlipY) : es.mirrorY;
+            int quarter = (((alt != null ? alt.rotate : es.rotateQuarterTurns) % 4) + 4) % 4;
             int Wc = (quarter % 2 == 0) ? Ws : Hs;
             int Hc = (quarter % 2 == 0) ? Hs : Ws;
 
             double[] K, D, R;
             int calW, calH;
             double rectF, rectCx, rectCy;
-            EyeModelJson em = (model != null && settings.useCalibration) ? (feed == 0 ? model.left : model.right) : null;
+            EyeModelJson em = (alt == null && model != null && settings.useCalibration) ? (feed == 0 ? model.left : model.right) : null;
             if (em != null)
             {
                 K = em.K; D = em.D; R = em.R;
@@ -563,7 +590,7 @@ namespace AR6DoF
             }
             else
             {
-                double f = (Wc / 2.0) / Math.Tan(settings.fallbackHorizontalFovDeg * 0.5 * Math.PI / 180.0);
+                double f = (Wc / 2.0) / Math.Tan((alt != null ? alt.hfov : settings.fallbackHorizontalFovDeg) * 0.5 * Math.PI / 180.0);
                 K = new[] { f, 0, (Wc - 1) / 2.0, 0, f, (Hc - 1) / 2.0, 0, 0, 1 };
                 D = new double[8];
                 R = new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
@@ -583,10 +610,12 @@ namespace AR6DoF
             double[] RvT = dR != null ? Ar6dofMath.Mul3(dR, Rv) : Rv;
             double[] M = Ar6dofMath.Mul3(Ar6dofMath.Transpose3(R), RvT);
             double tanH = Math.Tan(settings.displayFovDeg * 0.5 * Math.PI / 180.0);
-            float panX = es.panX + (disp == 0 ? -settings.ipdShift : settings.ipdShift);
+            float ipd = settings.ipdShift + (alt != null ? alt.ipd : 0f);
+            float panX = es.panX + (disp == 0 ? -ipd : ipd);
+            float panY = es.panY + (alt != null ? alt.panY : 0f);
 
             int b = disp * 10;
-            U[b + 0] = new Vector4(panX, es.panY, es.lensCenterX, es.lensCenterY);
+            U[b + 0] = new Vector4(panX, panY, es.lensCenterX, es.lensCenterY);
             U[b + 1] = new Vector4(es.k1, es.k2, es.k3, (float)tanH);
             U[b + 2] = new Vector4((float)fx, (float)fy, (float)cx, (float)cy);
             U[b + 3] = new Vector4((float)D[0], (float)D[1], (float)D[2], (float)D[3]);
@@ -594,7 +623,7 @@ namespace AR6DoF
             U[b + 5] = new Vector4((float)M[0], (float)M[1], (float)M[2], 0f);
             U[b + 6] = new Vector4((float)M[3], (float)M[4], (float)M[5], 0f);
             U[b + 7] = new Vector4((float)M[6], (float)M[7], (float)M[8], 0f);
-            U[b + 8] = new Vector4(Wc, Hc, es.mirrorX ? 1f : 0f, es.mirrorY ? 1f : 0f);
+            U[b + 8] = new Vector4(Wc, Hc, mirX ? 1f : 0f, mirY ? 1f : 0f);
             U[b + 9] = new Vector4(quarter, x0, y0, 0f);
             // orientation de la caméra de scène : mêmes lacet et tangage que la vue du passthrough, SANS roulis
             // (y de la caméra pointe vers le bas, donc un a.y positif = regarder vers le bas = tangage Unity positif)

@@ -31,6 +31,7 @@ Shader "AR6DoF/Composite"
             float4 _TexSize;   // largeur, hauteur de l'image partagee
             float4 _Misc;      // x : marge de la scene (overscan), y : 1 = etirer les bords de l'image
             float4 _U[20];     // 10 vecteurs par oeil (voir Ar6dofPassthrough.cs)
+            float4 _Look;      // effet sur l'image de la camera : x 0 aucun, 1 vision nocturne, 2 thermique ; y gain / contraste ; z luminosite ; w teinte / palette
 
             struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
             struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -43,6 +44,34 @@ Shader "AR6DoF/Composite"
                 o.pos = float4(p, 0.0, 1.0);
                 o.uv = v.uv;
                 return o;
+            }
+
+            float3 HueRgb (float h)
+            {
+                return saturate(abs(frac(h + float3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0);
+            }
+
+            // vision nocturne (image amplifiee, teintee) ou thermique (luminance -> palette)
+            float3 ApplyLook (float3 c)
+            {
+                float l = dot(c, float3(0.299, 0.587, 0.114));
+                int opt = (int)(_Look.w + 0.5);
+                if (_Look.x < 1.5)
+                {
+                    float n = saturate(l * _Look.y + _Look.z);
+                    if (opt == 0) return n * float3(0.30, 1.0, 0.38);
+                    if (opt == 1) return float3(n, n, n);
+                    return saturate(c * _Look.y + _Look.z);
+                }
+                float t = saturate((l - 0.5) * _Look.y + 0.5 + _Look.z);
+                if (opt == 0) return float3(t, t, t);
+                if (opt == 1) return float3(1.0 - t, 1.0 - t, 1.0 - t);
+                if (opt == 2)
+                {
+                    float bl = saturate(t * 3.0 - 2.0) + saturate(t * 4.0) * (1.0 - saturate(t * 2.2)) * 0.8;
+                    return float3(saturate(t * 3.0), saturate(t * 3.0 - 1.0), saturate(bl));
+                }
+                return HueRgb((1.0 - t) * 0.68) * saturate(t * 6.0 + 0.15);
             }
 
             float4 frag (v2f i) : SV_Target
@@ -107,6 +136,7 @@ Shader "AR6DoF/Composite"
                         // Unity : l'origine d'une texture est en BAS a gauche, nos lignes sont comptees depuis le HAUT
                         float2 uvT = float2((S9.y + us + 0.5) / _TexSize.x, 1.0 - (S9.z + vs + 0.5) / _TexSize.y);
                         col = tex2Dlod(_Cam, float4(uvT, 0.0, 0.0)).rgb;   // texture BGRA32 : l'ordre des canaux est déjà correct
+                        if (_Look.x > 0.5) col = ApplyLook(col);
                     }
                 }
 

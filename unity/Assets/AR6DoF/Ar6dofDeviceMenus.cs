@@ -282,6 +282,40 @@ namespace AR6DoF
             else c.pending = true;
         }
 
+        // ------------------------------------------------------------------ pilotage par d'autres modules (ex. LED infrarouge d'une caméra)
+        /// <summary>Étiquettes des contrôles qu'une autre partie du programme peut piloter (interrupteur, curseur, bouton, choix).</summary>
+        public List<string> ControlLabels()
+        {
+            var l = new List<string>();
+            foreach (var c in def.controls)
+                if (c.type == "toggle" || c.type == "slider" || c.type == "choice" || c.type == "button") l.Add(c.label);
+            return l;
+        }
+
+        public bool IsConnectedNow { get { return Ar6dofBle.Instance != null && Ar6dofBle.Instance.IsConnected(def.address); } }
+
+        /// <summary>
+        /// Règle un contrôle par son étiquette, avec une fraction 0..1 de sa plage (interrupteur : 0 = éteint, sinon allumé ; curseur : de min à max).
+        /// Envoie tout de suite à l'appareil. Faux si le contrôle n'existe pas.
+        /// </summary>
+        public bool SetControlFraction(string label, float fraction01)
+        {
+            foreach (var c in def.controls)
+            {
+                if (!string.Equals(c.label, label, StringComparison.OrdinalIgnoreCase)) continue;
+                float f = Mathf.Clamp01(fraction01);
+                if (c.type == "toggle") c.value = f > 0.001f ? 1f : 0f;
+                else if (c.type == "slider") c.value = Mathf.Round(Mathf.Lerp(c.min, c.max, f));
+                else if (c.type == "button") c.value = 1f;
+                else if (c.type == "choice") c.value = f > 0.001f ? 1f : 0f;
+                else continue;
+                Send(c, false);
+                owner.MarkDirty();
+                return true;
+            }
+            return false;
+        }
+
         // ------------------------------------------------------------------ construction de la vue
         void Rebuild()
         {

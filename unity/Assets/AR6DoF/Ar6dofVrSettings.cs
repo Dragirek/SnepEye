@@ -28,16 +28,16 @@ namespace AR6DoF
         float nextLive;
 
         // 5 onglets (comme dans Style, chacun peut avoir des sous-pages en haut de sa page) :
-        //   Image      > Affichage, Optique
+        //   Image      > Affichage, Optique, Cameras
         //   Ecrans
         //   Appareils  > Tete, Telecommande, Yeux, Bouche
         //   Style      > Couleurs, Forme, Fenetres, Clavier (sous-pages propres a Style)
         //   Interface  > Dock, Langue, Performances
         // Chaque sous-page est une PAGE (défilement et textes vivants à elle) ; Enregistrer / Annuler / Par defaut ne touchent que la page affichée.
-        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PgMouth = 10, PageCount = 11;
+        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PgMouth = 10, PgCams = 11, PageCount = 12;
         static readonly string[] TabNames = { "Image", "Ecrans", "Appareils", "Style", "Interface" };
-        static readonly int[][] TabPages = { new[] { PgView, PgOptics }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes, PgMouth }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf } };
-        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances", "Bouche" };
+        static readonly int[][] TabPages = { new[] { PgView, PgOptics, PgCams }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes, PgMouth }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf } };
+        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances", "Bouche", "Cameras" };
         static int TabOf(int pg)
         {
             for (int t = 0; t < TabPages.Length; t++) foreach (int p in TabPages[t]) if (p == pg) return t;
@@ -194,6 +194,7 @@ namespace AR6DoF
             }
             BuildPassthrough(pages[PgView]);
             BuildOptics(pages[PgOptics]);
+            BuildCams(pages[PgCams]);
             BuildScreens(pages[PgScreens]);
             BuildHead(pages[PgHead]);
             BuildRemote(pages[PgRemote]);
@@ -594,7 +595,7 @@ namespace AR6DoF
         static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
         static readonly string[] HeadFields = { "moveScale" };
         static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
-        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
+        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
         static readonly string[] PerfFields = { "perfFps", "perfMsaa", "perfRenderScale" };
         static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite" };
@@ -2205,6 +2206,288 @@ namespace AR6DoF
             styleBottom = y + 18f;   // bas du dernier cadre
         }
 
+
+        // ================================================================== CAMERAS (onglet Image)
+        // Cameras supplementaires (vision nocturne, thermique, autre). Une camera est choisie en haut ; ses reglages sont rangés dans quatre sous-menus
+        // (Source, Image, Type, LED IR) pour ne pas tout mettre sur une seule page. Rien ne tourne ici : une camera ne demarre que quand on s'en sert.
+        // Cette page s'applique tout de suite et s'enregistre toute seule (ar6dof_cameras.json).
+        int camSel, camSub;
+        GameObject camBody;
+        readonly List<GameObject> camGroups = new List<GameObject>();
+        readonly List<string> usbNames = new List<string>();
+        bool usbListed, camTestLed;
+        float camDelArm;
+        static readonly string[] CamSubNames = { "Source", "Image", "Type", "LED IR" };
+        static readonly int[] CamResW = { 320, 640, 800, 1280, 1920 }, CamResH = { 240, 480, 600, 720, 1080 }, CamFps = { 15, 30, 60 };
+
+        static Ar6dofCameras Cams { get { return Ar6dofCameras.Instance; } }
+
+        Ar6dofCamCfg CamSel
+        {
+            get
+            {
+                var h = Cams;
+                if (h == null || h.cams.Count == 0) return null;
+                camSel = Mathf.Clamp(camSel, 0, h.cams.Count - 1);
+                return h.cams[camSel];
+            }
+        }
+
+        void CamSet(Action<Ar6dofCamCfg> a)
+        {
+            var sel = CamSel;
+            if (sel == null) return;
+            a(sel);
+            Cams.MarkChanged(sel);
+        }
+
+        T CamGet<T>(Func<Ar6dofCamCfg, T> f, T def)
+        {
+            var sel = CamSel;
+            return sel == null ? def : f(sel);
+        }
+
+        void ListUsb()
+        {
+            usbNames.Clear();
+            usbListed = true;
+            try { foreach (var d in WebCamTexture.devices) usbNames.Add(d.name); }
+            catch (Exception) { }
+        }
+
+        /// <summary>Choix dans une liste qui change (appareils USB, menus Bluetooth...) : [<] texte [>]. La premiere valeur est « aucun / automatique » (texte vide).</summary>
+        void DynCycle(RectTransform p, ref float c, string label, Func<List<string>> items, Func<string> get, Action<string> set, string none)
+        {
+            float y = Next(ref c, 48f, 12f);
+            Text lbl = Ar6dofVrUi.Label(p, "", new Vector2(0f, y), new Vector2(CW - 160f, 48f), 22, TextAnchor.MiddleCenter);
+            lbl.gameObject.AddComponent<Ar6dofFitText>().Init(lbl, 22);
+            Action upd = () =>
+            {
+                string g = get();
+                lbl.text = Ar6dofLoc.T(label) + " : " + (string.IsNullOrEmpty(g) ? Ar6dofLoc.T(none) : g);
+            };
+            Action<int> step = d =>
+            {
+                var all = new List<string> { "" };
+                all.AddRange(items());
+                int i = Mathf.Max(0, all.IndexOf(get()));
+                set(all[(i + d + all.Count) % all.Count]);
+                upd();
+            };
+            Text t;
+            Ar6dofVrUi.MakeButton(p, "<", new Vector2(-CW * 0.5f + 36f, y), new Vector2(72f, 48f), () => step(-1), out t, 26);
+            Ar6dofVrUi.MakeButton(p, ">", new Vector2(CW * 0.5f - 36f, y), new Vector2(72f, 48f), () => step(1), out t, 26);
+            refreshers.Add(upd);
+            upd();
+        }
+
+        List<string> BtMenuNames()
+        {
+            var l = new List<string>();
+            foreach (var m in dock.DeviceMenus) l.Add(m.DisplayName);
+            return l;
+        }
+
+        List<string> BtControlNames()
+        {
+            var sel = CamSel;
+            var l = new List<string>();
+            if (sel == null) return l;
+            foreach (var m in dock.DeviceMenus) if (m.DisplayName == sel.ledMenu) return m.ControlLabels();
+            return l;
+        }
+
+        void BuildCams(RectTransform page)
+        {
+            float c = BeginPage(page, PgCams);
+
+            // ---- choix de la camera
+            float top = OpenCard(page, ref c, "Cameras supplementaires");
+            Para(page, ref c, "La camera normale (celle du tracking) ne change jamais. Ajoute ici une camera de vision nocturne, thermique ou autre (derriere ta tete...). Rien ne tourne tant qu'une camera n'est pas utilisee ; le bouton Vue du dock n'apparait que s'il y en a une activee.", 112f, 18);
+            float y = Next(ref c, 48f, 12f);
+            Text selLbl = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(CW - 160f, 48f), 22, TextAnchor.MiddleCenter);
+            selLbl.gameObject.AddComponent<Ar6dofFitText>().Init(selLbl, 22);
+            Text t;
+            Ar6dofVrUi.MakeButton(page, "<", new Vector2(-CW * 0.5f + 36f, y), new Vector2(72f, 48f), () => { var h = Cams; if (h != null && h.cams.Count > 0) { camSel = (camSel + h.cams.Count - 1) % h.cams.Count; RefreshAll(); } }, out t, 26);
+            Ar6dofVrUi.MakeButton(page, ">", new Vector2(CW * 0.5f - 36f, y), new Vector2(72f, 48f), () => { var h = Cams; if (h != null && h.cams.Count > 0) { camSel = (camSel + 1) % h.cams.Count; RefreshAll(); } }, out t, 26);
+            refreshers.Add(() =>
+            {
+                var h = Cams;
+                var sel = CamSel;
+                selLbl.text = h == null ? Ar6dofLoc.T("Cameras indisponibles")
+                    : sel == null ? Ar6dofLoc.T("Aucune camera : ajoutes-en une")
+                    : sel.name + "   (" + (camSel + 1) + " / " + h.cams.Count + ")";
+            });
+            y = Next(ref c, 48f, 14f);
+            Btn(page, -164f, y, 320f, "Ajouter une camera", () => { var h = Cams; if (h == null) return; h.Add(); camSel = h.cams.Count - 1; camSub = 0; usbListed = false; RefreshAll(); });
+            var delBtn = Btn(page, 164f, y, 320f, "Supprimer cette camera", () =>
+            {
+                var h = Cams; var sel = CamSel;
+                if (h == null || sel == null) return;
+                if (Time.unscaledTime > camDelArm) { camDelArm = Time.unscaledTime + 4f; RefreshAll(); return; }   // un deuxieme clic dans les 4 secondes confirme
+                camDelArm = 0f;
+                h.Remove(sel);
+                camSel = Mathf.Max(0, camSel - 1);
+                RefreshAll();
+            });
+            var delTxt = delBtn.GetComponentInChildren<Text>();
+            refreshers.Add(() => delTxt.text = Ar6dofLoc.T(Time.unscaledTime < camDelArm ? "Confirmer : supprimer" : "Supprimer cette camera"));
+            CloseCard(page, top, ref c);
+
+            // ---- tout ce qui concerne la camera choisie (cache s'il n'y en a pas)
+            var body = NewBox(page, "CameraChoisie");
+            camBody = body.gameObject;
+            refreshers.Add(() => body.gameObject.SetActive(CamSel != null));
+
+            top = OpenCard(body, ref c, "Cette camera");
+            float ny = Next(ref c, 50f, 12f);
+            var nameField = Ar6dofVrTextField.Make(body.transform, new Vector2(0f, ny), new Vector2(CW, 50f), "", "Nom", tx => { var sel = CamSel; if (sel != null) sel.name = tx; }, tx => CamSet(sl => sl.name = tx), 22);
+            nameField.maxLength = 32;
+            refreshers.Add(() => { var sel = CamSel; if (sel != null && Ar6dofVrTextField.Current != nameField && nameField.text != sel.name) nameField.SetText(sel.name); });
+            Toggle(body, 0f, Next(ref c, 48f, 12f), "Activee (bouton Vue du dock, application Miroir)", () => CamGet(sl => sl.enabled, false), v => CamSet(sl => sl.enabled = v), 640f);
+            Toggle(body, 0f, Next(ref c, 48f, 12f), "Voir cette camera dans le casque maintenant", () => Cams != null && CamSel != null && Cams.ViewCam == CamSel, v =>
+            {
+                var h = Cams; var sel = CamSel;
+                if (h == null || sel == null) return;
+                if (v && sel.enabled && sel.role != Ar6dofCamRole.Other) h.SetView(sel); else if (!v && h.ViewCam == sel) h.SetView(null);
+            }, 640f);
+            InfoLine(body, Next(ref c, 28f, 4f), PgCams, () => { var sel = CamSel; return sel == null || Cams == null ? "" : Cams.StatusOf(sel); }, 19);
+            InfoLine(body, Next(ref c, 28f, 12f), PgCams, () => { var sel = CamSel; return sel == null || Cams == null ? "" : Cams.LedStatusOf(sel); }, 19);
+            CloseCard(body, top, ref c);
+
+            // ---- sous-menus
+            float sy = Next(ref c, 46f, 14f);
+            var subBtns = new List<Button>();
+            for (int k = 0; k < CamSubNames.Length; k++)
+            {
+                int kk = k;
+                var b = Btn(body, Col4(k), sy, 156f, CamSubNames[k], () => { camSub = kk; RefreshAll(); }, 20, 46f);
+                subBtns.Add(b);
+            }
+            refreshers.Add(() => { for (int k = 0; k < subBtns.Count; k++) Ar6dofTheme.SetSelected(subBtns[k], k == camSub); });
+
+            float c0 = c, deepest = c;
+            camGroups.Clear();
+            for (int g = 0; g < 4; g++)
+            {
+                var gr = NewBox(body, "Sous-menu" + g);
+                camGroups.Add(gr.gameObject);
+                c = c0;
+                if (g == 0) BuildCamSource(gr, ref c);
+                else if (g == 1) BuildCamImage(gr, ref c);
+                else if (g == 2) BuildCamType(gr, ref c);
+                else BuildCamLed(gr, ref c);
+                deepest = Mathf.Min(deepest, c);
+            }
+            refreshers.Add(() => { for (int g = 0; g < camGroups.Count; g++) camGroups[g].SetActive(g == camSub); });
+            Finish(PgCams, deepest);
+        }
+
+        void BuildCamSource(RectTransform gr, ref float c)
+        {
+            float top = OpenCard(gr, ref c, "Source de l'image");
+            CycleRow(gr, ref c, "Source", 2, () => CamGet(sl => sl.source, 0), v => CamSet(sl => sl.source = v), i => Ar6dofLoc.T(i == 0 ? "Camera USB" : "Flux reseau (http)"));
+            float cs = c;
+
+            var usb = NewBox(gr, "USB");
+            float cu = cs;
+            DynCycle(usb, ref cu, "Camera USB", () => { if (!usbListed) ListUsb(); return usbNames; }, () => CamGet(sl => sl.device, ""), v => CamSet(sl => sl.device = v), "premiere camera");
+            Btn(usb, 0f, Next(ref cu, 48f, 12f), 640f, "Actualiser la liste des cameras USB", () => { ListUsb(); RefreshAll(); }, 21, 48f);
+            CycleRow(usb, ref cu, "Resolution", CamResW.Length, () =>
+            {
+                var sel = CamSel; int best = 1;
+                if (sel != null) for (int i = 0; i < CamResW.Length; i++) if (CamResW[i] == sel.width) best = i;
+                return best;
+            }, v => CamSet(sl => { sl.width = CamResW[v]; sl.height = CamResH[v]; }), i => CamResW[i] + " x " + CamResH[i]);
+            CycleRow(usb, ref cu, "Images par seconde", CamFps.Length, () =>
+            {
+                var sel = CamSel; int best = 1;
+                if (sel != null) for (int i = 0; i < CamFps.Length; i++) if (CamFps[i] == sel.fps) best = i;
+                return best;
+            }, v => CamSet(sl => sl.fps = CamFps[v]), i => CamFps[i].ToString());
+            Para(usb, ref cu, "Ne choisis pas la camera du tracking : elle est deja utilisee par ar6dof_probe.", 52f, 18);
+
+            var net = NewBox(gr, "Reseau");
+            float cn = cs;
+            Ar6dofVrUi.Label(net, "Adresse du flux d'images (MJPEG)", new Vector2(0f, Next(ref cn, 28f, 6f)), new Vector2(CW, 28f), 20, TextAnchor.MiddleLeft);
+            var urlField = Ar6dofVrTextField.Make(net.transform, new Vector2(0f, Next(ref cn, 50f, 12f)), new Vector2(CW, 50f), "", "http://192.168.1.50:81/stream", tx => { var sel = CamSel; if (sel != null) sel.url = tx; }, tx => CamSet(sl => sl.url = tx), 20);
+            urlField.maxLength = 200;
+            refreshers.Add(() => { var sel = CamSel; if (sel != null && Ar6dofVrTextField.Current != urlField && urlField.text != sel.url) urlField.SetText(sel.url); });
+            Para(net, ref cn, "Une camera Wi-Fi (ESP32-CAM, camera IP...) qui envoie du MJPEG. Un identifiant se met dans l'adresse : http://nom:mot@adresse/flux. Le RTSP n'est pas gere.", 100f, 18);
+
+            c = Mathf.Min(cu, cn);
+            refreshers.Add(() => { var sel = CamSel; bool u = sel == null || sel.source == 0; usb.gameObject.SetActive(u); net.gameObject.SetActive(!u); });
+
+            CycleRow(gr, ref c, "Contenu de l'image", 3, () => CamGet(sl => sl.stereo, 0), v => CamSet(sl => sl.stereo = v), i => Ar6dofLoc.T(Ar6dofCamRole.Layouts[i]));
+            Toggle(gr, 0f, Next(ref c, 48f, 12f), "Echanger gauche / droite (si deux images)", () => CamGet(sl => sl.swapEyes, false), v => CamSet(sl => sl.swapEyes = v), 640f);
+            CloseCard(gr, top, ref c);
+        }
+
+        void BuildCamImage(RectTransform gr, ref float c)
+        {
+            float top = OpenCard(gr, ref c, "Image et IPD");
+            Para(gr, ref c, "Une seule image sert aux deux yeux (faux stereo : pas de relief). L'IPD ecarte ou rapproche l'image dans chaque oeil, comme l'IPD logiciel de l'image normale (les deux s'ajoutent).", 84f, 18);
+            StepRow(gr, ref c, "Champ de la camera (deg)", 20f, 200f, 1f, 5f, 10f, () => Mathf.Round(CamGet(sl => sl.hfov, 90f)), v => CamSet(sl => sl.hfov = v), "0");
+            StepRow(gr, ref c, "IPD de cette camera (+ = ecarte)", -400f, 400f, 1f, 10f, 50f, () => Mathf.Round(CamGet(sl => sl.ipd, 0f) * 1000f), v => CamSet(sl => sl.ipd = v / 1000f), "0");
+            StepRow(gr, ref c, "Decalage vertical", -400f, 400f, 1f, 10f, 50f, () => Mathf.Round(CamGet(sl => sl.panY, 0f) * 1000f), v => CamSet(sl => sl.panY = v / 1000f), "0");
+            StepRow(gr, ref c, "Delai de l'image (ms)", 0f, 400f, 1f, 5f, 20f, () => Mathf.Round(CamGet(sl => sl.delayMs, 60f)), v => CamSet(sl => sl.delayMs = v), "0");
+            CycleRow(gr, ref c, "Rotation", 4, () => CamGet(sl => sl.rotate, 0), v => CamSet(sl => sl.rotate = v), i => (i * 90) + " deg");
+            float y = Next(ref c, 48f, 16f);
+            Toggle(gr, -164f, y, "Miroir horizontal", () => CamGet(sl => sl.mirrorX, false), v => CamSet(sl => sl.mirrorX = v));
+            Toggle(gr, 164f, y, "Miroir vertical", () => CamGet(sl => sl.mirrorY, false), v => CamSet(sl => sl.mirrorY = v));
+            CloseCard(gr, top, ref c);
+        }
+
+        void BuildCamType(RectTransform gr, ref float c)
+        {
+            float top = OpenCard(gr, ref c, "Type de camera");
+            CycleRow(gr, ref c, "Type", 3, () => CamGet(sl => sl.role, 0), v => CamSet(sl => sl.role = v), i => Ar6dofLoc.T(Ar6dofCamRole.Names[i]));
+            float cs = c;
+
+            var night = NewBox(gr, "Nuit");
+            float cn = cs;
+            CycleRow(night, ref cn, "Teinte", Ar6dofCamRole.Tints.Length, () => CamGet(sl => sl.tint, 0), v => CamSet(sl => sl.tint = v), i => Ar6dofLoc.T(Ar6dofCamRole.Tints[i]));
+            StepRow(night, ref cn, "Gain (%)", 20f, 800f, 5f, 25f, 100f, () => Mathf.Round(CamGet(sl => sl.gain, 1f) * 100f), v => CamSet(sl => sl.gain = v / 100f), "0");
+            StepRow(night, ref cn, "Luminosite (%)", -50f, 50f, 1f, 5f, 10f, () => Mathf.Round(CamGet(sl => sl.bright, 0f) * 100f), v => CamSet(sl => sl.bright = v / 100f), "0");
+
+            var therm = NewBox(gr, "Thermique");
+            float ct = cs;
+            CycleRow(therm, ref ct, "Palette", Ar6dofCamRole.Palettes.Length, () => CamGet(sl => sl.palette, 0), v => CamSet(sl => sl.palette = v), i => Ar6dofLoc.T(Ar6dofCamRole.Palettes[i]));
+            StepRow(therm, ref ct, "Contraste (%)", 20f, 800f, 5f, 25f, 100f, () => Mathf.Round(CamGet(sl => sl.gain, 1f) * 100f), v => CamSet(sl => sl.gain = v / 100f), "0");
+            StepRow(therm, ref ct, "Niveau (%)", -50f, 50f, 1f, 5f, 10f, () => Mathf.Round(CamGet(sl => sl.bright, 0f) * 100f), v => CamSet(sl => sl.bright = v / 100f), "0");
+
+            var other = NewBox(gr, "Autre");
+            float co = cs;
+            Para(other, ref co, "Image affichee telle quelle : pour une camera libre (derriere la tete...), ouvre l'application Miroir. Une camera 'Autre' n'apparait pas dans le bouton Vue du dock.", 100f, 18);
+
+            c = Mathf.Min(cn, Mathf.Min(ct, co));
+            refreshers.Add(() => { var sel = CamSel; int r = sel == null ? 0 : sel.role; night.gameObject.SetActive(r == 0); therm.gameObject.SetActive(r == 1); other.gameObject.SetActive(r == 2); });
+            Para(gr, ref c, "Le suivi de position reste toujours sur la camera normale. L'effet (vert, palette) est applique par la carte graphique, sans cout quand la camera est arretee.", 84f, 18);
+            CloseCard(gr, top, ref c);
+        }
+
+        void BuildCamLed(RectTransform gr, ref float c)
+        {
+            float top = OpenCard(gr, ref c, "LED infrarouge");
+            Para(gr, ref c, "Pour une camera de vision nocturne sans eclairage propre. Cree d'abord dans Apps > Nouvel appareil un menu Bluetooth pour ta LED, avec un curseur (puissance) ou un interrupteur, puis choisis-le ici. La LED s'allume seulement quand la camera tourne.", 112f, 18);
+            Toggle(gr, 0f, Next(ref c, 48f, 12f), "Allumer une LED infrarouge avec cette camera", () => CamGet(sl => sl.ledOn, false), v => CamSet(sl => sl.ledOn = v), 640f);
+            DynCycle(gr, ref c, "Menu Bluetooth", BtMenuNames, () => CamGet(sl => sl.ledMenu, ""), v => CamSet(sl => { sl.ledMenu = v; sl.ledControl = ""; }), "aucun");
+            DynCycle(gr, ref c, "Controle", BtControlNames, () => CamGet(sl => sl.ledControl, ""), v => CamSet(sl => sl.ledControl = v), "aucun");
+            StepRow(gr, ref c, "Puissance (%)", 0f, 100f, 1f, 5f, 10f, () => CamGet(sl => (float)sl.ledPower, 100f), v => CamSet(sl => sl.ledPower = Mathf.RoundToInt(v)), "0");
+            var tb = Btn(gr, 0f, Next(ref c, 48f, 12f), 640f, "Tester la LED", () =>
+            {
+                var sel = CamSel;
+                if (sel == null || Cams == null) return;
+                bool want = !camTestLed;
+                if (Cams.TestLed(sel, want)) camTestLed = want;
+                RefreshAll();
+            }, 22, 48f);
+            var tbt = tb.GetComponentInChildren<Text>();
+            refreshers.Add(() => tbt.text = Ar6dofLoc.T(camTestLed ? "Eteindre la LED (test)" : "Tester la LED"));
+            InfoLine(gr, Next(ref c, 28f, 12f), PgCams, () => { var sel = CamSel; return sel == null || Cams == null ? "" : Cams.LedStatusOf(sel); }, 19);
+            CloseCard(gr, top, ref c);
+        }
+
         // ================================================================== DOCK
         void BuildDock(RectTransform page)
         {
@@ -2212,6 +2495,7 @@ namespace AR6DoF
             float top = OpenCard(page, ref c, "Position");
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Dock aux pieds (cache, apparait en baissant la tete)", () => Ar6dofSettings.Current.dockAtFeet, v => { Ar6dofSettings.Current.dockAtFeet = v; Touch(); }, 600f);
             StepRow(page, ref c, "Distance devant les pieds (cm)", 30f, 140f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockDistance * 100f), v => { Ar6dofSettings.Current.dockDistance = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Assis : dock sous les yeux de (cm)", 30f, 140f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockSeatedDrop * 100f), v => { Ar6dofSettings.Current.dockSeatedDrop = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Debut d'apparition : tete baissee de (deg)", 5f, 70f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealStart), v => { Ar6dofSettings.Current.dockRevealStart = v; Touch(); }, "0");
             StepRow(page, ref c, "Pleinement visible a (deg)", 15f, 85f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealFull), v => { Ar6dofSettings.Current.dockRevealFull = v; Touch(); }, "0");
             CloseCard(page, top, ref c);

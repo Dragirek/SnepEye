@@ -80,6 +80,7 @@ namespace AR6DoF
         public float dockRevealFull = 55f; // angle où il est entièrement visible (deg)
         public float dockScale = 1f;
         public float dockTilt = 0f;        // inclinaison en plus (deg) ; 0 = face à tes yeux
+        public float dockSeatedDrop = 0.85f; // assis : le dock est sous tes yeux de cette hauteur (m) ; debout il est au sol
         public bool seated = false;        // mode assis : le dock se place a hauteur des mains et le sol suppose est ajuste a la hauteur des yeux assis
 
         // Informations dans le dock (heure, date, batterie du PC) ; le format de l'heure est aussi celui de l'application Horloge
@@ -178,6 +179,7 @@ namespace AR6DoF
             if (d.laser.style == null) d.laser.style = new Ar6dofStyle();
             if (d.customStyles == null) d.customStyles = new System.Collections.Generic.List<Ar6dofCustomStyle>();
             d.customStyles.RemoveAll(x => x == null || x.style == null);
+            d.dockSeatedDrop = Mathf.Clamp(d.dockSeatedDrop, 0.3f, 1.4f);
             d.dockClockStyle = Mathf.Clamp(d.dockClockStyle, 0, 2);
             d.dockBatteryStyle = Mathf.Clamp(d.dockBatteryStyle, 0, 2);
             d.dockFaceStyle = Mathf.Clamp(d.dockFaceStyle, 0, 5);

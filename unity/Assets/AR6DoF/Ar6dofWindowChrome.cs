@@ -134,6 +134,26 @@ namespace AR6DoF
                             a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 20f, 51f, 32f, 51f)));
                             break;
                         }
+                        case "mirror":
+                        {
+                            // miroir : cadre ovale, deux reflets en biais et un petit pied
+                            a = Mathf.Clamp01(2.8f - Mathf.Abs(RRect(fx, fy, 32f, 36f, 20f, 25f, 19f)));
+                            a = Mathf.Max(a, 0.9f * Mathf.Clamp01(2.4f - SegDist(fx, fy, 24f, 31f, 36f, 47f)));
+                            a = Mathf.Max(a, 0.9f * Mathf.Clamp01(2.4f - SegDist(fx, fy, 23f, 42f, 29f, 50f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 22f, 6f, 42f, 6f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 32f, 6f, 32f, 11f)));
+                            break;
+                        }
+                        case "vision":
+                        {
+                            // oeil avec un petit rayonnement : vision nocturne / thermique
+                            float de = Mathf.Abs(Mathf.Sqrt((fx - 32f) * (fx - 32f) + 2.2f * (fy - 30f) * (fy - 30f)) - 25f);
+                            a = Mathf.Clamp01(2.8f - de);
+                            float dp = Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 30f) * (fy - 30f));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dp - 9f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(dp < 4f ? 1f : 0f));
+                            break;
+                        }
                         case "cube":
                         {
                             // cube vu en perspective
