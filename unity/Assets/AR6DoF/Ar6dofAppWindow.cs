@@ -298,6 +298,33 @@ namespace AR6DoF
             return res;
         }
 
+        /// <summary>
+        /// Remplace le texte d'un bouton par un dessin (lecture, pause, stop...), teinté comme le texte du thème. 'tip' : nom affiché au survol (traduit).
+        /// Renvoie l'image : changer son 'sprite' (Ar6dofDock.Glyph("pause")) change le dessin sans rien reconstruire.
+        /// </summary>
+        protected static Image GlyphOn(Button b, string glyph, string tip = null, float frac = 0.58f)
+        {
+            var rt = (RectTransform)b.transform;
+            var lbl = b.GetComponentInChildren<Text>();
+            if (lbl != null) lbl.text = "";
+            var g = new GameObject("Glyphe", typeof(RectTransform));
+            g.transform.SetParent(rt, false);
+            var grt = (RectTransform)g.transform;
+            grt.anchoredPosition = Vector2.zero;
+            float s = Mathf.Min(rt.sizeDelta.x, rt.sizeDelta.y) * frac;
+            grt.sizeDelta = new Vector2(s, s);
+            var gi = g.AddComponent<Image>();
+            gi.sprite = Ar6dofDock.Glyph(glyph);
+            gi.raycastTarget = false;
+            Ar6dofTheme.Attach(g, Ar6dofRole.Text);
+            if (tip != null)
+            {
+                var tt = b.gameObject.AddComponent<Ar6dofVrTooltip>();
+                tt.text = () => Ar6dofLoc.T(tip);
+            }
+            return gi;
+        }
+
         /// <summary>Onglets : le bouton de l'onglet actif est teinté. Un clic change d'onglet et reconstruit la fenêtre.</summary>
         protected void Tabs(string[] names, int current, Action<int> choose)
         {

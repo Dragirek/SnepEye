@@ -39,6 +39,21 @@ namespace AR6DoF
             return Mathf.Sqrt(ox * ox + oy * oy) + Mathf.Min(Mathf.Max(qx, qy), 0f) - r;
         }
 
+
+        static float Fill(float signedDist) { return Mathf.Clamp01(0.5f - signedDist); }
+
+        /// <summary>Triangle plein (couverture 0..1, bords adoucis).</summary>
+        static float TriFill(float px, float py, float ax, float ay, float bx, float by, float cx, float cy)
+        {
+            float d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+            float d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+            float d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+            bool neg = d1 < 0f || d2 < 0f || d3 < 0f, pos = d1 > 0f || d2 > 0f || d3 > 0f;
+            bool inside = !(neg && pos);
+            float md = Mathf.Min(SegDist(px, py, ax, ay, bx, by), Mathf.Min(SegDist(px, py, bx, by, cx, cy), SegDist(px, py, cx, cy, ax, ay)));
+            return Fill(inside ? -md : md);
+        }
+
         static Texture2D Draw(string name)
         {
             const int N = 64;
@@ -222,6 +237,81 @@ namespace AR6DoF
                             float db2 = Mathf.Sqrt((fx - 51f) * (fx - 51f) + (fy - 51f) * (fy - 51f));
                             a = Mathf.Max(a, Mathf.Clamp01(2.8f - Mathf.Abs(db1 - 7f)));
                             a = Mathf.Max(a, Mathf.Clamp01(2.8f - Mathf.Abs(db2 - 7f)));
+                            break;
+                        }
+                        case "play":
+                            a = TriFill(fx, fy, 21f, 11f, 21f, 53f, 54f, 32f);
+                            break;
+                        case "pause":
+                            a = Mathf.Max(Fill(RRect(fx, fy, 21f, 32f, 7f, 20f, 2.5f)), Fill(RRect(fx, fy, 43f, 32f, 7f, 20f, 2.5f)));
+                            break;
+                        case "stop":
+                            a = Fill(RRect(fx, fy, 32f, 32f, 19f, 19f, 3.5f));
+                            break;
+                        case "prev":
+                            a = Mathf.Max(Fill(RRect(fx, fy, 14f, 32f, 3.5f, 19f, 1.5f)), TriFill(fx, fy, 52f, 11f, 52f, 53f, 22f, 32f));
+                            break;
+                        case "next":
+                            a = Mathf.Max(Fill(RRect(fx, fy, 50f, 32f, 3.5f, 19f, 1.5f)), TriFill(fx, fy, 12f, 11f, 12f, 53f, 42f, 32f));
+                            break;
+                        case "bell":
+                        {
+                            // cloche pleine : dome, evasement, bord, battant et petit anneau
+                            float dome = fy >= 34f ? Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 34f) * (fy - 34f)) - 15f : 99f;
+                            a = Fill(dome);
+                            a = Mathf.Max(a, TriFill(fx, fy, 17f, 34f, 47f, 34f, 54f, 17f));
+                            a = Mathf.Max(a, TriFill(fx, fy, 17f, 34f, 54f, 17f, 10f, 17f));
+                            a = Mathf.Max(a, Fill(RRect(fx, fy, 32f, 17f, 23f, 2.5f, 2.5f)));
+                            a = Mathf.Max(a, Fill(Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 9f) * (fy - 9f)) - 5f));
+                            a = Mathf.Max(a, Fill(Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 52f) * (fy - 52f)) - 3.5f));
+                            break;
+                        }
+                        case "calendar":
+                        {
+                            // calendrier : cadre, bandeau, deux anneaux et une grille de jours
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 29f, 24f, 22f, 4f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.6f - SegDist(fx, fy, 9f, 40f, 55f, 40f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, 21f, 47f, 21f, 57f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, 43f, 47f, 43f, 57f)));
+                            for (int gy = 0; gy < 2; gy++)
+                                for (int gx = 0; gx < 3; gx++)
+                                    a = Mathf.Max(a, Fill(RRect(fx, fy, 20f + gx * 12f, 28f - gy * 12f, 3.2f, 3.2f, 1f)));
+                            break;
+                        }
+                        case "scan":
+                        {
+                            // viseur : quatre coins et un trait au milieu
+                            float[] cxs = { 10f, 54f }, cys = { 10f, 54f };
+                            float md = 99f;
+                            for (int ix = 0; ix < 2; ix++)
+                                for (int iy = 0; iy < 2; iy++)
+                                {
+                                    float sx = ix == 0 ? 1f : -1f, sy = iy == 0 ? 1f : -1f;
+                                    md = Mathf.Min(md, SegDist(fx, fy, cxs[ix], cys[iy], cxs[ix] + sx * 16f, cys[iy]));
+                                    md = Mathf.Min(md, SegDist(fx, fy, cxs[ix], cys[iy], cxs[ix], cys[iy] + sy * 16f));
+                                }
+                            md = Mathf.Min(md, SegDist(fx, fy, 17f, 32f, 47f, 32f));
+                            a = Mathf.Clamp01(3.0f - md);
+                            break;
+                        }
+                        case "alert":
+                        {
+                            // triangle d'avertissement avec un point d'exclamation
+                            float[] tx = { 32f, 57f, 7f, 32f }, ty = { 56f, 10f, 10f, 56f };
+                            float md = 99f;
+                            for (int k = 0; k < 3; k++) md = Mathf.Min(md, SegDist(fx, fy, tx[k], ty[k], tx[k + 1], ty[k + 1]));
+                            a = Mathf.Clamp01(2.8f - md);
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, 32f, 26f, 32f, 40f)));
+                            a = Mathf.Max(a, Fill(Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 18f) * (fy - 18f)) - 3.2f));
+                            break;
+                        }
+                        case "note":
+                        {
+                            // note de musique : tete, hampe et crochet
+                            a = Fill(Mathf.Sqrt((fx - 24f) * (fx - 24f) + 1.4f * (fy - 15f) * (fy - 15f)) - 10f);
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, 33f, 17f, 33f, 52f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, 33f, 52f, 49f, 44f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(3.0f - SegDist(fx, fy, 49f, 44f, 49f, 36f)));
                             break;
                         }
                         case "plus":

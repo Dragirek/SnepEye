@@ -48,6 +48,9 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "clock", title = "Horloge", glyph = "clock", yaw = 179f,
                 desc = "Heure avec plein de cadrans, chronometre, minuteur et alarmes (a renommer, AM / PM). Les alarmes sonnent meme application fermee.",
                 make = d => new Ar6dofClockApp(d) },
+            new Ar6dofAppEntry { id = "calendar", title = "Calendrier", glyph = "calendar", yaw = 36f,
+                desc = "Evenements avec rappel avant leur debut. Scanne une affiche ou le programme d'une convention devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
+                make = d => new Ar6dofCalendarApp(d) },
         };
 
         public static Ar6dofAppEntry Find(string id)

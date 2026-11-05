@@ -157,6 +157,7 @@ namespace AR6DoF
     public class Ar6dofRingEvent
     {
         public bool isTimer;
+        public bool isEvent;      // rappel d'un evenement du calendrier : pas de « Repeter »
         public int alarmId;
         public string title = "", text = "";
         public int tone;
@@ -390,8 +391,13 @@ namespace AR6DoF
         // ------------------------------------------------------------------ sonnerie
         public bool Ringing { get { return current != null; } }
 
+        /// <summary>Fait sonner un rappel venu d'ailleurs (calendrier) : meme son, meme fenetre, et une ligne dans les notifications.</summary>
+        public void RingNow(Ar6dofRingEvent e) { Ring(e); }
+
         void Ring(Ar6dofRingEvent e)
         {
+            // trace dans les notifications, meme si la sonnerie est arretee tout de suite ou mise en attente
+            Ar6dofNotifyService.Post(e.isEvent ? Ar6dofNoteKind.Event : Ar6dofNoteKind.Alarm, e.title, e.isTimer ? Ar6dofLoc.T(e.text) : e.text, e.isEvent ? "calendar" : "clock");
             if (current != null) { pending.Enqueue(e); return; }
             current = e;
             ringStart = Time.unscaledTime;
@@ -540,8 +546,9 @@ namespace AR6DoF
             if (canvas == null) Build();
             title.text = e.title;
             body.text = e.isTimer ? Ar6dofLoc.T(e.text) : e.text;
-            snoozeBtn.gameObject.SetActive(!e.isTimer);
-            if (!e.isTimer) snoozeLbl.text = Ar6dofLoc.F("Repeter ({0} min)", e.snooze);
+            bool canSnooze = !e.isTimer && !e.isEvent;
+            snoozeBtn.gameObject.SetActive(canSnooze);
+            if (canSnooze) snoozeLbl.text = Ar6dofLoc.F("Repeter ({0} min)", e.snooze);
             var d = Ar6dofDock.Instance;
             Transform h = d != null ? d.HeadTransform : null;
             if (h != null)

@@ -330,9 +330,19 @@ namespace AR6DoF
                 if (!a.MusicActive) { if (a.data.playlist.Count > 0) a.PlayTrack(a.data.track >= 0 ? a.data.track : 0); }
                 else a.PauseMusic(!a.Meters.MusicPaused);
             };
-            var pb = BtnRow(56f, 22, "|<", (Action)(() => { a.PrevTrack(); }), "Lire", playAct, "Stop", (Action)(() => { a.StopMusic(); }), ">|", (Action)(() => { a.NextTrack(false); }));
-            var playTxt = pb[1].GetComponentInChildren<Text>();
-            refreshers.Add(() => playTxt.text = Ar6dofLoc.T(a.MusicActive && !a.Meters.MusicPaused ? "Pause" : "Lire"));
+            var pb = BtnRow(56f, 22, "", (Action)(() => { a.PrevTrack(); }), "", playAct, "", (Action)(() => { a.StopMusic(); }), "", (Action)(() => { a.NextTrack(false); }));
+            GlyphOn(pb[0], "prev", "Piste precedente");
+            var playImg = GlyphOn(pb[1], "play", "Lire / Pause");
+            GlyphOn(pb[2], "stop", "Stop");
+            GlyphOn(pb[3], "next", "Piste suivante");
+            bool shownPause = false;
+            refreshers.Add(() =>
+            {
+                bool wantPause = a.MusicActive && !a.Meters.MusicPaused;
+                if (wantPause == shownPause && playImg.sprite != null) return;
+                shownPause = wantPause;
+                playImg.sprite = Ar6dofDock.Glyph(wantPause ? "pause" : "play");
+            });
 
             var rb = BtnRow(48f, 20, "", (Action)(() => { a.SetRepeat((a.data.repeat + 1) % 3); Refresh(); }), "", (Action)(() => { a.data.shuffle = !a.data.shuffle; a.MarkDirty(); Refresh(); }));
             var repTxt = rb[0].GetComponentInChildren<Text>();

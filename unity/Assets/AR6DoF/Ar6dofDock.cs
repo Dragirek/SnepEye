@@ -125,6 +125,9 @@ namespace AR6DoF
         Ar6dofVrSettings vrSettings;
         readonly List<Ar6dofAppWindow> windows = new List<Ar6dofAppWindow>();     // toutes les applications du catalogue (Ar6dofCatalog) : dans la barre seulement quand elles sont ouvertes
         Ar6dofAppsApp appsApp;
+        Ar6dofNotifyApp notifApp;          // cloche + panneau des notifications : liee au dock, hors du catalogue
+        Ar6dofNotifyService notify;
+        Ar6dofCalendarService calendar;
         bool built;
         float waitStart = -1f;
         int lastSig = -1;
@@ -188,6 +191,7 @@ namespace AR6DoF
             if (vrSettings != null) vrSettings.Tick();
             for (int i = 0; i < windows.Count; i++) if (windows[i].open) windows[i].Tick();
             if (appsApp != null && appsApp.open) appsApp.Tick();
+            if (notifApp != null) notifApp.DockTick();
             if (info != null && canvas != null && canvas.enabled) info.Tick();
         }
 
@@ -357,10 +361,17 @@ namespace AR6DoF
             // moteur audio (inactif tant qu'il n'est pas active), hub Apps et toutes les applications (fermees : une icone dans Apps, rien d'autre)
             audioEngine = GetComponent<Ar6dofAudio>();
             if (audioEngine == null) audioEngine = gameObject.AddComponent<Ar6dofAudio>();
+            notify = GetComponent<Ar6dofNotifyService>();
+            if (notify == null) notify = gameObject.AddComponent<Ar6dofNotifyService>();   // notifications : une lecture de quelques variables par seconde
             clock = GetComponent<Ar6dofClockService>();
             if (clock == null) clock = gameObject.AddComponent<Ar6dofClockService>();   // alarmes / minuteur : ne fait rien tant qu'aucun n'est actif
+            calendar = GetComponent<Ar6dofCalendarService>();
+            if (calendar == null) calendar = gameObject.AddComponent<Ar6dofCalendarService>();   // rappels du calendrier : ne fait rien tant qu'aucun rappel n'est attendu
             appsApp = new Ar6dofAppsApp(this);
             AdoptWindow(appsApp, 0f);
+            notifApp = new Ar6dofNotifyApp(this);
+            AdoptWindow(notifApp, 0f);
+            notifApp.place = t => PlaceAboveDock(t);
             foreach (var e in Ar6dofCatalog.Entries)
             {
                 var w = e.make(this);
@@ -393,6 +404,7 @@ namespace AR6DoF
             foreach (var m in devMenus.menus) yield return m;
             foreach (var w in windows) yield return w;
             if (appsApp != null) yield return appsApp;
+            if (notifApp != null) yield return notifApp;
             yield return settingsApp;
         }
 
@@ -511,7 +523,8 @@ namespace AR6DoF
             float addX = (first ? size * 0.5f : cx + between);                     // place de la prochaine icone (plus de bouton + : les nouveaux appareils se creent dans Apps)
             float sepX = addX - size * 0.5f + 26f;                                 // le separateur isole le groupe de droite : Apps et reglages
             float appsX = sepX + 26f + size * 0.5f;                                // Apps : juste a gauche de la roue des reglages
-            float gearX = appsX + size * 0.5f + 12f + gearSize * 0.5f;
+            float bellX = appsX + size + 12f;                                      // la cloche des notifications, entre Apps et la roue
+            float gearX = bellX + size * 0.5f + 12f + gearSize * 0.5f;
             float total = gearX + gearSize * 0.5f;
             camBtnShown = camHub != null && camHub.HasSwitchable;
             float barW = Mathf.Max(camBtnShown ? 860f : 720f, total + 60f);
@@ -546,6 +559,12 @@ namespace AR6DoF
             xi = 0;
             foreach (var g in groups) foreach (var a in g) { MakeIcon(a, xs[xi] + shift, size, false); xi++; }
             if (appsApp != null) MakeIcon(appsApp, appsX + shift, size, false);
+            if (notifApp != null)
+            {
+                MakeIcon(notifApp, bellX + shift, size, false);
+                RectTransform bellRt;
+                if (iconOf.TryGetValue(notifApp, out bellRt)) notifApp.BuildBadge(bellRt, size);
+            }
 
             // séparateur + roue des réglages : plus grande, en couleur d'accent, à part
             var sep = new GameObject("Separateur", typeof(RectTransform));
@@ -866,6 +885,29 @@ namespace AR6DoF
             Vector3 pos = h.position + dir * distance;
             pos.y = Mathf.Clamp(lowest - 0.14f, 0.4f, h.position.y - 0.3f);
             canvas.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(dir) * Quaternion.Euler(20f, 0f, 0f));   // légèrement inclinée vers tes yeux
+        }
+
+        /// <summary>
+        /// Pose une fenetre juste au-dessus du dock, tournee vers toi, bas de la fenetre contre le haut du dock (elle grandit vers le haut). Le haut ne depasse
+        /// pas tes yeux de plus de 15 cm : si la fenetre est trop haute elle recouvre le dock plutot que de partir hors de vue. Utilise pour le panneau des notifications.
+        /// </summary>
+        void PlaceAboveDock(Transform t)
+        {
+            Transform h = Head;
+            if (h == null || canvas == null) return;
+            var rt = t as RectTransform;
+            float hm = rt != null ? Mathf.Max(0.2f, rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y)) : 0.5f;
+            Vector3 dp = canvas.transform.position;
+            Vector3 f = dp - h.position; f.y = 0f;
+            if (f.sqrMagnitude < 1e-4f) { f = h.forward; f.y = 0f; }
+            if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
+            f.Normalize();
+            float barH = barRt != null ? barRt.sizeDelta.y * Mathf.Abs(canvas.transform.lossyScale.y) : 0.2f;
+            float bottom = dp.y + barH * 0.5f + 0.03f;
+            float top = Mathf.Min(bottom + hm, Mathf.Max(h.position.y + 0.15f, bottom + 0.35f));
+            Vector3 pos = dp + f * 0.08f;   // un peu plus loin que le dock : il ne cache jamais ses icones
+            pos.y = top;
+            t.SetPositionAndRotation(pos, Quaternion.LookRotation(f));
         }
 
         // ------------------------------------------------------------------ Apps : toutes les applications
