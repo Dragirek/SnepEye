@@ -21,7 +21,7 @@ namespace AR6DoF
         /// <summary>0..1 : éclair en cours (la fenêtre éclaircit le ciel).</summary>
         public float Flash { get; private set; }
 
-        class Toon { public Material m; public Color c, shade; public float emit; public bool cloud; public float snowK; }   // snowK : 0 = ne blanchit jamais, 1 = tout blanc sous la neige
+        class Toon { public Material m; public Color c, shade; public float emit; public bool cloud, fog; public float snowK; }   // snowK : 0 = ne blanchit jamais, 1 = tout blanc sous la neige
         class Cloud { public Transform t; public float x, y, z, size, now, rate; }
         class Drop { public Transform t; public float x, y, z, v, ph; }
         class SnowCap { public Transform t; public Vector3 baseScale; }
@@ -34,15 +34,17 @@ namespace AR6DoF
         readonly Drop[] snow = new Drop[SnowN];
         readonly Transform[] stars = new Transform[StarN];
         readonly float[] starPh = new float[StarN];
-        readonly Transform[] mist = new Transform[6];
-        readonly float[] mistX = new float[6];
+        const int MistN = 10;
+        readonly Transform[] mist = new Transform[MistN];
+        readonly float[] mistX = new float[MistN], mistY = new float[MistN], mistZ = new float[MistN], mistSx = new float[MistN], mistSy = new float[MistN],
+                         mistAmp = new float[MistN], mistSp = new float[MistN], mistPh = new float[MistN];
         readonly List<SnowCap> caps = new List<SnowCap>();
         readonly Streak[] streaks = new Streak[StreakN];
         readonly Leaf[] leaves = new Leaf[LeafN];
-        Shader shader;
+        Shader shader, mistShader;
         Transform rig, world, island, sun, sunRays, moon, bolt, hub, treeA, treeB, canopyA, canopyB, blanket;
         Transform[] boltSeg = new Transform[4];
-        Toon tCloud, tLeaves, tRain, tSnow, tHail, tCap, tWind;
+        Toon tCloud, tCloud2, tMist, tLeaves, tRain, tSnow, tHail, tCap, tWind;
         bool snowMode;   // vrai : la flaque de flocons est de la grêle
 
         // état actuel (qui glisse vers la cible) et cible
@@ -137,6 +139,17 @@ namespace AR6DoF
             return t;
         }
 
+        /// <summary>Matériau du brouillard : translucide, bords doux, sans liseré (voir Ar6dofMist.shader).</summary>
+        Toon MistMat()
+        {
+            var t = new Toon { c = new Color(0.84f, 0.88f, 0.92f), shade = Color.white, fog = true };
+            t.m = new Material(mistShader != null ? mistShader : shader);
+            t.m.SetColor("_Color", t.c);
+            t.m.SetFloat("_Alpha", 0f);
+            toons.Add(t);
+            return t;
+        }
+
         Transform Part(Transform parent, Mesh mesh, Toon t, Vector3 pos, Vector3 scale)
         {
             var go = new GameObject("p");
@@ -179,10 +192,57 @@ namespace AR6DoF
             caps.Add(new SnowCap { t = tr, baseScale = scale });
         }
 
+        /// <summary>Remplit un nuage avec la forme n° 'k' (0 cumulus, 1 voile plat, 2 tour haute, 3 petit duo, 4 deux bosses, 5 traînée).</summary>
+        void BuildCloudShape(Transform g, int k)
+        {
+            switch (k)
+            {
+                case 1:   // voile plat et long
+                    Part(g, sphere, tCloud2, new Vector3(0f, 0f, 0f), new Vector3(1.50f, 0.34f, 0.60f));
+                    Part(g, sphere, tCloud2, new Vector3(-0.62f, -0.02f, 0.03f), new Vector3(0.95f, 0.30f, 0.50f));
+                    Part(g, sphere, tCloud2, new Vector3(0.66f, -0.02f, -0.02f), new Vector3(1.00f, 0.30f, 0.52f));
+                    Part(g, sphere, tCloud2, new Vector3(0.10f, 0.13f, 0f), new Vector3(0.85f, 0.26f, 0.45f));
+                    break;
+                case 2:   // tour haute (cumulus qui monte)
+                    Part(g, sphere, tCloud, new Vector3(0f, -0.10f, 0f), new Vector3(0.95f, 0.40f, 0.60f));
+                    Part(g, sphere, tCloud, new Vector3(-0.05f, 0.16f, 0f), new Vector3(0.62f, 0.56f, 0.52f));
+                    Part(g, sphere, tCloud, new Vector3(0.04f, 0.46f, 0f), new Vector3(0.50f, 0.50f, 0.46f));
+                    Part(g, sphere, tCloud, new Vector3(-0.03f, 0.70f, 0f), new Vector3(0.34f, 0.34f, 0.32f));
+                    Part(g, sphere, tCloud, new Vector3(0.30f, 0.10f, 0.02f), new Vector3(0.40f, 0.36f, 0.40f));
+                    break;
+                case 3:   // petit duo
+                    Part(g, sphere, tCloud, new Vector3(-0.22f, 0f, 0f), new Vector3(0.48f, 0.42f, 0.42f));
+                    Part(g, sphere, tCloud, new Vector3(0.24f, -0.03f, 0.02f), new Vector3(0.38f, 0.34f, 0.36f));
+                    Part(g, sphere, tCloud, new Vector3(0.0f, -0.11f, 0f), new Vector3(0.90f, 0.20f, 0.40f));
+                    break;
+                case 4:   // deux grosses bosses
+                    Part(g, sphere, tCloud, new Vector3(-0.38f, 0.10f, 0f), new Vector3(0.74f, 0.70f, 0.60f));
+                    Part(g, sphere, tCloud, new Vector3(0.40f, 0.02f, 0.02f), new Vector3(0.84f, 0.62f, 0.58f));
+                    Part(g, sphere, tCloud, new Vector3(0.02f, -0.06f, -0.03f), new Vector3(0.70f, 0.50f, 0.56f));
+                    Part(g, sphere, tCloud, new Vector3(0f, -0.20f, 0f), new Vector3(1.45f, 0.26f, 0.52f));
+                    break;
+                case 5:   // traînée de petites boules qui s'effilent
+                    Part(g, sphere, tCloud2, new Vector3(-0.70f, -0.04f, 0f), new Vector3(0.52f, 0.36f, 0.38f));
+                    Part(g, sphere, tCloud2, new Vector3(-0.30f, 0.02f, 0f), new Vector3(0.44f, 0.34f, 0.36f));
+                    Part(g, sphere, tCloud2, new Vector3(0.05f, 0.0f, 0f), new Vector3(0.34f, 0.26f, 0.30f));
+                    Part(g, sphere, tCloud2, new Vector3(0.34f, -0.02f, 0f), new Vector3(0.26f, 0.20f, 0.24f));
+                    Part(g, sphere, tCloud2, new Vector3(0.58f, -0.04f, 0f), new Vector3(0.18f, 0.14f, 0.16f));
+                    break;
+                default:  // cumulus classique
+                    Part(g, sphere, tCloud, new Vector3(0f, 0f, 0f), new Vector3(0.70f, 0.62f, 0.62f));
+                    Part(g, sphere, tCloud, new Vector3(-0.42f, -0.07f, 0.02f), new Vector3(0.52f, 0.46f, 0.50f));
+                    Part(g, sphere, tCloud, new Vector3(0.44f, -0.07f, 0f), new Vector3(0.56f, 0.48f, 0.52f));
+                    Part(g, sphere, tCloud, new Vector3(0.08f, 0.22f, 0f), new Vector3(0.52f, 0.48f, 0.50f));
+                    Part(g, sphere, tCloud, new Vector3(-0.08f, -0.15f, -0.05f), new Vector3(1.10f, 0.30f, 0.52f));   // dessous plus plat
+                    break;
+            }
+        }
+
         void Build()
         {
             shader = Resources.Load<Shader>("Ar6dofToon");
             if (shader == null) shader = Shader.Find("Sprites/Default");
+            mistShader = Resources.Load<Shader>("Ar6dofMist");
             if (sphere == null) sphere = Prim(PrimitiveType.Sphere);
             if (cylinder == null) cylinder = Prim(PrimitiveType.Cylinder);
             if (cube == null) cube = Prim(PrimitiveType.Cube);
@@ -274,30 +334,39 @@ namespace AR6DoF
                 starPh[i] = (float)rnd.NextDouble() * 6.28f;
             }
 
-            // --- nuages
+            // --- nuages : six formes différentes (cumulus, voile plat, tour haute, petit duo, deux bosses, traînée), toutes en vrais volumes 3D
             tCloud = Mat(new Color(0.98f, 0.98f, 1f), 0f, 0.22f); tCloud.cloud = true;
+            tCloud2 = Mat(new Color(0.93f, 0.95f, 0.99f), 0f, 0.22f); tCloud2.cloud = true;   // un peu plus grise, pour les voiles et les traînées
             float[] cx = { -1.6f, -0.85f, -0.1f, 0.65f, 1.45f, -0.45f };
             float[] cy = { 0.82f, 0.99f, 0.78f, 0.96f, 0.84f, 1.07f };
             float[] cz = { -0.30f, -0.55f, -0.05f, -0.35f, -0.10f, -0.65f };
-            float[] cs = { 1.0f, 0.85f, 1.1f, 0.9f, 1.0f, 0.75f };
+            float[] cs = { 1.0f, 0.85f, 1.0f, 0.95f, 1.0f, 0.8f };
+            float[] yaw = { 8f, -22f, 15f, -10f, 28f, -30f };      // tournés dans l'espace : on voit bien qu'ils ont du volume
+            float[] roll = { 0f, 0f, 0f, 3f, -2f, -7f };
             for (int i = 0; i < CloudN; i++)
             {
                 var g = Group(world, "Nuage", new Vector3(cx[i], cy[i], cz[i]));
-                Part(g, sphere, tCloud, new Vector3(0f, 0f, 0f), new Vector3(0.70f, 0.62f, 0.62f));
-                Part(g, sphere, tCloud, new Vector3(-0.42f, -0.07f, 0.02f), new Vector3(0.52f, 0.46f, 0.50f));
-                Part(g, sphere, tCloud, new Vector3(0.44f, -0.07f, 0f), new Vector3(0.56f, 0.48f, 0.52f));
-                Part(g, sphere, tCloud, new Vector3(0.08f, 0.22f, 0f), new Vector3(0.52f, 0.48f, 0.50f));
-                Part(g, sphere, tCloud, new Vector3(-0.08f, -0.15f, -0.05f), new Vector3(1.10f, 0.30f, 0.52f));   // dessous plus plat
+                BuildCloudShape(g, i);
+                g.localRotation = Quaternion.Euler(0f, yaw[i], roll[i]);
                 clouds[i] = new Cloud { t = g, x = cx[i], y = cy[i], z = cz[i], size = cs[i], now = 0f, rate = 0.85f + 0.12f * i };
                 g.localScale = Vector3.zero;
                 g.gameObject.SetActive(false);
             }
 
-            // --- bancs de brouillard
-            for (int i = 0; i < mist.Length; i++)
+            // --- brouillard : bancs translucides, bas, à plusieurs profondeurs (derrière, à travers et devant l'île), qui dérivent lentement
+            tMist = MistMat();
+            float[] mx = { -1.5f, 0.2f, 1.4f, -0.6f, 0.9f, -1.2f, 0.4f, -0.2f, 1.6f, -1.8f };
+            float[] my = { 0.30f, 0.16f, 0.36f, 0.04f, 0.10f, -0.12f, 0.42f, 0.22f, -0.04f, 0.12f };
+            float[] mz = { 0.80f, 0.70f, 0.55f, 0.15f, -0.05f, -0.15f, -0.35f, -0.60f, -0.75f, -0.95f };
+            float[] msx = { 2.4f, 2.8f, 2.2f, 2.6f, 2.4f, 2.0f, 2.2f, 2.8f, 2.4f, 2.0f };
+            float[] msy = { 0.34f, 0.30f, 0.38f, 0.26f, 0.30f, 0.24f, 0.34f, 0.30f, 0.26f, 0.30f };
+            for (int i = 0; i < MistN; i++)
             {
-                mist[i] = Part(world, sphere, tCloud, new Vector3(-1.2f + i * 0.5f, 0.12f + 0.05f * i, -0.55f - 0.1f * i), Vector3.zero);
-                mistX[i] = -1.2f + i * 0.5f;
+                mist[i] = Part(world, sphere, tMist, new Vector3(mx[i], my[i], mz[i]), Vector3.zero);
+                mistX[i] = mx[i]; mistY[i] = my[i]; mistZ[i] = mz[i]; mistSx[i] = msx[i]; mistSy[i] = msy[i];
+                mistAmp[i] = 0.35f + 0.08f * (i % 4);
+                mistSp[i] = 0.13f + 0.035f * (i % 5);
+                mistPh[i] = i * 1.9f;
                 mist[i].gameObject.SetActive(false);
             }
 
@@ -445,6 +514,15 @@ namespace AR6DoF
             for (int i = 0; i < toons.Count; i++)
             {
                 var t = toons[i];
+                if (t.fog)
+                {
+                    // brouillard : gris-bleu clair le jour, plus sombre la nuit et sous les nuages sombres ; l'opacité suit la quantité
+                    Color fc = Color.Lerp(new Color(0.78f, 0.82f, 0.88f), new Color(0.55f, 0.58f, 0.66f), dark * 0.6f);
+                    fc = Color.Lerp(fc, new Color(0.98f, 0.99f, 1f), snowMix * 0.5f);
+                    t.m.SetColor("_Color", new Color(fc.r * tint.r, fc.g * tint.g, fc.b * tint.b, 1f));
+                    t.m.SetFloat("_Alpha", 0.30f * Mathf.Clamp01(fogAmt));
+                    continue;
+                }
                 if (t.emit >= 0.5f) continue;
                 Color c = t.c, s = t.shade;
                 if (t.cloud) { c = Color.Lerp(c, cDark, dark); s = Color.Lerp(s, sDark, dark); }
@@ -590,15 +668,19 @@ namespace AR6DoF
                 c.t.localScale = Vector3.one * (c.size * Smooth(c.now / c.size));
             }
 
-            // brouillard : bancs bas et larges qui flottent devant l'île
-            for (int i = 0; i < mist.Length; i++)
+            // brouillard : bancs translucides à plusieurs profondeurs, qui dérivent lentement (plus vite avec le vent)
+            bool fogOn = fogAmt > 0.01f;
+            float fogK = 0.6f + Mathf.Clamp01(windKmh / 40f);
+            for (int i = 0; i < MistN; i++)
             {
-                bool on = fogAmt > 0.01f;
-                if (mist[i].gameObject.activeSelf != on) mist[i].gameObject.SetActive(on);
-                if (!on) continue;
-                float x = mistX[i] + Mathf.Sin(time * 0.25f + i * 2f) * 0.35f;
-                mist[i].localPosition = new Vector3(x, 0.14f + 0.07f * (i % 3), -0.55f - 0.10f * (i % 3));
-                mist[i].localScale = new Vector3(1.5f, 0.32f + 0.06f * (i % 2), 0.7f) * fogAmt;
+                if (mist[i].gameObject.activeSelf != fogOn) mist[i].gameObject.SetActive(fogOn);
+                if (!fogOn) continue;
+                float ph = time * mistSp[i] * fogK + mistPh[i];
+                float x = mistX[i] + Mathf.Sin(ph) * mistAmp[i] * 2f;
+                float y = mistY[i] + Mathf.Sin(ph * 0.7f + 1f) * 0.03f;
+                mist[i].localPosition = new Vector3(x, y, mistZ[i]);
+                float breathe = 1f + 0.06f * Mathf.Sin(ph * 1.3f);
+                mist[i].localScale = new Vector3(mistSx[i] * breathe, mistSy[i], 0.9f) * Smooth(fogAmt);
             }
 
             // pluie : traînées bleues inclinées par le vent

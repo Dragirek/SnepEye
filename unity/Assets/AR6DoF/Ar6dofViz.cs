@@ -8,18 +8,22 @@ namespace AR6DoF
     /// Visualisations du son de la table de mixage. Un seul composant graphique dessine tout dans UN maillage (aucun objet par barre) :
     /// il se reconstruit au plus 30 fois par seconde, et seulement tant que la fenêtre est ouverte (Feed n'est appelé que par elle).
     /// Les classiques de l'industrie (analyseur à barres avec retenue des crêtes, miroir, courbe lissée, oscilloscope, spectrogramme, aiguilles VU)
-    /// et des effets plus fous dans l'esprit du Lecteur Windows Media de XP (spectre circulaire, ondes psychédéliques).
+    /// et des effets plus fous dans l'esprit des visualisations du Lecteur Windows Media (spectre circulaire, ondes psychédéliques, alchimie, ambiance,
+    /// cubes, particules, tunnel, pics, feux d'artifice, couleurs musicales, toile). Ce sont des créations originales « dans l'esprit », pas des copies.
+    /// Un clic sur la zone (voir Make) l'agrandit au-dessus de la fenêtre.
     /// </summary>
     public class Ar6dofViz : Ar6dofRasterGfx
     {
         public const int Bands = 32, Hist = 48, WaveN = 128;
         public static readonly string[] Names =
         {
-            "Barres", "Miroir", "Courbe", "Oscilloscope", "Spectrogramme", "Circulaire", "Ondes psychedeliques", "Aiguilles VU"
+            "Barres", "Miroir", "Courbe", "Oscilloscope", "Spectrogramme", "Circulaire", "Ondes psychedeliques", "Aiguilles VU",
+            "Alchimie", "Ambiance", "Cubes", "Particules", "Tunnel", "Pics", "Feux d'artifice", "Couleurs musicales", "Toile"
         };
         public static int Count { get { return Names.Length; } }
 
-        protected override float Supersample { get { return 1.5f; } }
+        public float ss = 1.5f;   // 1 pour la grande version (agrandie au-dessus de la fenêtre) : moins de pixels à tracer
+        protected override float Supersample { get { return ss; } }
         public int mode;
         readonly float[] lvl = new float[Bands], hold = new float[Bands], holdT = new float[Bands];
         readonly float[] wave = new float[WaveN];
@@ -29,12 +33,29 @@ namespace AR6DoF
         float bass, mid, treble, phase, lastFeed = -1f, lastMesh = -1f;
         Color accent = new Color(0.3f, 0.7f, 1f), txt = Color.white;
 
+        // état des effets à particules (coordonnées 0..1 dans la zone) : mis à jour par Feed seulement quand l'effet est choisi
+        const int PartN = 72, BurstN = 5, BurstRays = 22;
+        readonly float[] px = new float[PartN], py = new float[PartN], pvx = new float[PartN], pvy = new float[PartN], pLife = new float[PartN], pMax = new float[PartN], pHue = new float[PartN];
+        readonly float[] bAge = new float[BurstN], bx = new float[BurstN], by = new float[BurstN], bHue = new float[BurstN], bPow = new float[BurstN];
+        float bassSlow, burstCool;
+        readonly Vector2[] webRing = new Vector2[Bands * 2 + 1];
+
         /// <summary>Crée la zone : un fond (rôle Track) et la trace par-dessus.</summary>
-        public static Ar6dofViz Make(Transform parent, Vector2 pos, Vector2 size)
+        public static Ar6dofViz Make(Transform parent, Vector2 pos, Vector2 size) { return Make(parent, pos, size, null); }
+
+        /// <summary>Comme Make ; avec 'onClick', toute la zone est cliquable (la table de mixage s'en sert pour agrandir le visuel).</summary>
+        public static Ar6dofViz Make(Transform parent, Vector2 pos, Vector2 size, Action onClick)
         {
             var root = Ar6dofVrUi.Rect(parent, "Visuel", pos, size);
             var bg = root.gameObject.AddComponent<Image>();
-            bg.raycastTarget = false;
+            bg.raycastTarget = onClick != null;
+            if (onClick != null)
+            {
+                var btn = root.gameObject.AddComponent<Button>();
+                btn.transition = Selectable.Transition.None;
+                btn.targetGraphic = bg;
+                btn.onClick.AddListener(() => onClick());
+            }
             Ar6dofTheme.Attach(root.gameObject, Ar6dofRole.Track, 10);
             var t = Ar6dofVrUi.Rect(root, "Trace", Vector2.zero, Vector2.zero);
             t.anchorMin = Vector2.zero; t.anchorMax = Vector2.one;
@@ -102,6 +123,10 @@ namespace AR6DoF
 
             bass = Avg(lvl, 0, 6); mid = Avg(lvl, 6, 18); treble = Avg(lvl, 18, Bands);
             phase += dt * (0.6f + bass * 2.2f);
+            float flux = bass - bassSlow;
+            bassSlow += (bass - bassSlow) * Mathf.Min(1f, dt * 2.5f);
+            if (mode == 11) StepParticles(dt);
+            else if (mode == 14) StepBursts(dt, flux);
 
             if (now - lastMesh >= 1f / 30f) { lastMesh = now; SetVerticesDirty(); }
         }
@@ -111,6 +136,8 @@ namespace AR6DoF
         {
             Array.Clear(lvl, 0, Bands); Array.Clear(hold, 0, Bands); Array.Clear(wave, 0, WaveN); Array.Clear(hist, 0, hist.Length);
             needleL = needleR = -20f;
+            Array.Clear(pLife, 0, PartN); Array.Clear(bAge, 0, BurstN);
+            bassSlow = 0f;
             SetVerticesDirty();
         }
 
@@ -130,7 +157,16 @@ namespace AR6DoF
                 case 4: Spectrogram(vh, r); break;
                 case 5: Circular(vh, r); break;
                 case 6: Psychedelic(vh, r); break;
-                default: Needles(vh, r); break;
+                case 7: Needles(vh, r); break;
+                case 8: Alchemy(vh, r); break;
+                case 9: Ambience(vh, r); break;
+                case 10: Cubes(vh, r); break;
+                case 11: Particles(vh, r); break;
+                case 12: Tunnel(vh, r); break;
+                case 13: Spikes(vh, r); break;
+                case 14: Fireworks(vh, r); break;
+                case 15: MusicalColors(vh, r); break;
+                default: Web(vh, r); break;
             }
         }
 
@@ -162,6 +198,26 @@ namespace AR6DoF
         }
 
         static Color A(Color c, float a) { c.a = a; return c; }
+
+        static Color Hue(float h, float sat, float val, float a)
+        {
+            Color c = Color.HSVToRGB(Mathf.Repeat(h, 1f), sat, val);
+            c.a = a;
+            return c;
+        }
+
+        // disque (éventail de triangles) : cœur 'centre', bord 'edge' -> un halo doux quand edge est transparent
+        static void Disc(VertexHelper vh, Vector2 c, float rad, Color centre, Color edge, int seg)
+        {
+            int i0 = vh.currentVertCount;
+            vh.AddVert(c, centre, Vector2.zero);
+            for (int k = 0; k < seg; k++)
+            {
+                float a = k * Mathf.PI * 2f / seg;
+                vh.AddVert(c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * rad, edge, Vector2.zero);
+            }
+            for (int k = 0; k < seg; k++) vh.AddTriangle(i0, i0 + 1 + k, i0 + 1 + (k + 1) % seg);
+        }
 
         // vert -> jaune -> rouge, comme un analyseur de studio
         static Color Ramp(float t)
@@ -336,6 +392,239 @@ namespace AR6DoF
                 float sz = 3f + (4f + 12f * treble) * (0.4f + 0.6f * Mathf.Abs(Mathf.Sin(phase + i)));
                 Color col = A(Color.HSVToRGB(Mathf.Repeat(i * 0.07f + phase * 0.04f, 1f), 0.5f, 1f), 0.75f * (1f - Mathf.Abs(u - 0.5f) * 1.6f));
                 Quad(vh, new Vector2(x - sz, y), new Vector2(x, y + sz), new Vector2(x + sz, y), new Vector2(x, y - sz), col, col, col, col);
+            }
+        }
+
+        // ------------------------------------------------------------------ effets « dans l'esprit du Lecteur Windows Media »
+        static Vector2 P(Rect r, float u, float v) { return new Vector2(r.xMin + u * r.width, r.yMin + v * r.height); }
+
+        // -- 9. alchimie : trois orbes (graves, médiums, aigus) qui dessinent des courbes et laissent une traînée lumineuse
+        void Alchemy(VertexHelper vh, Rect r)
+        {
+            const int trail = 20;
+            float[] en = { bass, mid, treble };
+            for (int o = 0; o < 3; o++)
+            {
+                float fa = 0.9f + o * 0.37f, fb = 1.3f + o * 0.29f;
+                for (int k = trail - 1; k >= 0; k--)
+                {
+                    float t = phase * (0.5f + o * 0.12f) - k * 0.075f;
+                    float u = 0.5f + 0.42f * Mathf.Sin(t * fa + o * 2.1f) * Mathf.Cos(t * 0.31f);
+                    float v = 0.5f + 0.40f * Mathf.Sin(t * fb + o);
+                    float f = 1f - k / (float)trail;
+                    float rad = r.height * (0.03f + 0.07f * Mathf.Clamp01(en[o] * 1.8f)) * (0.35f + 0.65f * f);
+                    Color c = Hue(o * 0.33f + phase * 0.04f + k * 0.006f, 0.75f, 1f, 0.75f * f * f);
+                    Disc(vh, P(r, u, v), rad * 2.2f, c, A(c, 0f), 12);
+                    if (k == 0) Disc(vh, P(r, u, v), rad * 0.9f, Color.white, A(c, 0.9f), 12);
+                }
+            }
+        }
+
+        // -- 10. ambiance : de grandes taches de couleur très douces qui dérivent et gonflent avec le son
+        void Ambience(VertexHelper vh, Rect r)
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                float e = i % 3 == 0 ? bass : i % 3 == 1 ? mid : treble;
+                float u = 0.5f + 0.45f * Mathf.Sin(phase * (0.12f + 0.03f * i) + i * 1.7f);
+                float v = 0.5f + 0.40f * Mathf.Sin(phase * (0.10f + 0.025f * i) + i * 2.3f + 1f);
+                float rad = r.height * (0.42f + 0.55f * Mathf.Clamp01(e * 1.5f)) * (0.8f + 0.1f * (i % 3));
+                Color c = Hue(i * 0.125f + phase * 0.02f, 0.65f, 0.95f, 0.30f + 0.25f * Mathf.Clamp01(e * 1.5f));
+                Disc(vh, P(r, u, v), rad, c, A(c, 0f), 16);
+            }
+        }
+
+        // -- 11. cubes : une grille de losanges qui gonflent avec la bande de leur colonne
+        void Cubes(VertexHelper vh, Rect r)
+        {
+            const int cols = 16, rows = 5;
+            float cw = r.width / cols, chh = r.height / rows;
+            float cell = Mathf.Min(cw, chh);
+            for (int c = 0; c < cols; c++)
+            {
+                float e = Mathf.Max(lvl[c * 2], lvl[c * 2 + 1]);
+                for (int rw = 0; rw < rows; rw++)
+                {
+                    float thr = rw / (float)rows;
+                    float f = Mathf.Clamp01((e - thr * 0.7f) * 2.2f);
+                    if (f < 0.04f) continue;
+                    float h = cell * 0.5f * (0.25f + 0.75f * f);
+                    Vector2 ctr = new Vector2(r.xMin + cw * (c + 0.5f), r.yMin + chh * (rw + 0.5f));
+                    Color top = Hue(c / (float)cols * 0.85f + phase * 0.02f, 0.7f, 1f, 0.95f);
+                    Color bot = Hue(c / (float)cols * 0.85f + phase * 0.02f + 0.06f, 0.9f, 0.55f, 0.95f);
+                    Quad(vh, ctr + new Vector2(-h, 0f), ctr + new Vector2(0f, h), ctr + new Vector2(h, 0f), ctr + new Vector2(0f, -h), bot, top, top, bot);
+                }
+            }
+        }
+
+        // -- 12. particules : des étincelles montent d'autant plus nombreuses et vives que le son est fort
+        void StepParticles(float dt)
+        {
+            float energy = Mathf.Clamp01(bass * 0.9f + mid * 0.7f + treble * 0.5f);
+            float spawn = (6f + 150f * energy) * dt;
+            for (int i = 0; i < PartN; i++)
+            {
+                if (pLife[i] > 0f)
+                {
+                    pLife[i] -= dt;
+                    px[i] += pvx[i] * dt; py[i] += pvy[i] * dt;
+                    pvx[i] += (UnityEngine.Random.value - 0.5f) * 0.6f * dt;
+                    continue;
+                }
+                if (spawn <= 0f) continue;
+                if (UnityEngine.Random.value > spawn) continue;
+                spawn -= 1f;
+                px[i] = UnityEngine.Random.value; py[i] = -0.02f;
+                pvx[i] = (UnityEngine.Random.value - 0.5f) * 0.12f;
+                pvy[i] = 0.18f + 0.55f * UnityEngine.Random.value + 0.5f * energy;
+                pMax[i] = pLife[i] = 1.2f + 1.6f * UnityEngine.Random.value;
+                pHue[i] = Mathf.Repeat(phase * 0.05f + UnityEngine.Random.value * 0.25f, 1f);
+            }
+        }
+
+        void Particles(VertexHelper vh, Rect r)
+        {
+            for (int i = 0; i < PartN; i++)
+            {
+                if (pLife[i] <= 0f) continue;
+                float f = pLife[i] / pMax[i];
+                float rad = r.height * (0.012f + 0.032f * f) * (1f + treble);
+                Color c = Hue(pHue[i], 0.55f, 1f, Mathf.Min(1f, f * 2f) * 0.9f);
+                Disc(vh, P(r, px[i], py[i]), rad * 2.4f, A(c, c.a * 0.7f), A(c, 0f), 8);
+            }
+        }
+
+        // -- 13. tunnel : des anneaux jaillissent du centre ; leur contour suit le spectre
+        void Tunnel(VertexHelper vh, Rect r)
+        {
+            const int rings = 9, seg = 32;
+            Vector2 c = r.center;
+            float rmaxX = r.width * 0.5f, rmaxY = r.height * 0.5f;
+            for (int k = 0; k < rings; k++)
+            {
+                float f = Mathf.Repeat(k / (float)rings + phase * 0.07f, 1f);
+                float grow = f * f;
+                Color col = Hue(f * 0.7f + phase * 0.03f, 0.7f, 1f, (1f - f) * 0.9f + 0.1f);
+                Vector2 prev = Vector2.zero;
+                for (int i = 0; i <= seg; i++)
+                {
+                    int bi = Mathf.Min(Bands - 1, (i < seg / 2 ? i : seg - i) * 2);
+                    float a = i * Mathf.PI * 2f / seg + phase * 0.1f;
+                    float mod = 1f + 0.35f * lvl[bi];
+                    var pt = c + new Vector2(Mathf.Cos(a) * rmaxX * grow * mod, Mathf.Sin(a) * rmaxY * grow * mod);
+                    if (i > 0) Line(vh, prev, pt, 1.5f + 5f * grow, col);
+                    prev = pt;
+                }
+            }
+        }
+
+        // -- 14. pics : un oursin dont chaque pointe suit une bande du spectre
+        void Spikes(VertexHelper vh, Rect r)
+        {
+            const int N = Bands * 2;
+            Vector2 c = r.center;
+            float rmax = Mathf.Min(r.width * 0.5f, r.height * 0.5f) * 0.96f, r0 = rmax * 0.18f;
+            float rot = phase * 0.3f, step = Mathf.PI * 2f / N;
+            for (int i = 0; i < N; i++)
+            {
+                int bi = i < Bands ? i : N - 1 - i;
+                float a = rot + i * step;
+                float len = r0 + (rmax - r0) * Mathf.Max(0.04f, lvl[bi]);
+                Vector2 d = new Vector2(Mathf.Cos(a), Mathf.Sin(a)), n = new Vector2(-d.y, d.x) * (r0 * step * 0.45f);
+                Color col = Hue(i / (float)N + phase * 0.03f, 0.7f, 1f, 0.95f);
+                Color tip = Color.Lerp(col, Color.white, 0.6f);
+                Quad(vh, c + d * r0 - n, c + d * len, c + d * len, c + d * r0 + n, A(col, 0.55f), tip, tip, A(col, 0.55f));
+            }
+            Disc(vh, c, r0 * (0.8f + 0.5f * bass), Color.white, A(accent, 0.2f), 20);
+        }
+
+        // -- 15. feux d'artifice : un coup de grave fait éclater une gerbe
+        void StepBursts(float dt, float flux)
+        {
+            burstCool -= dt;
+            for (int i = 0; i < BurstN; i++) if (bAge[i] > 0f) { bAge[i] += dt; if (bAge[i] > 1.6f) bAge[i] = 0f; }
+            if (flux > 0.10f && burstCool <= 0f)
+            {
+                for (int i = 0; i < BurstN; i++)
+                {
+                    if (bAge[i] > 0f) continue;
+                    bAge[i] = 0.001f;
+                    bx[i] = 0.12f + 0.76f * UnityEngine.Random.value;
+                    by[i] = 0.35f + 0.5f * UnityEngine.Random.value;
+                    bHue[i] = UnityEngine.Random.value;
+                    bPow[i] = 0.18f + 0.30f * Mathf.Clamp01(bass * 1.5f + mid);
+                    burstCool = 0.16f;
+                    break;
+                }
+            }
+        }
+
+        void Fireworks(VertexHelper vh, Rect r)
+        {
+            for (int i = 0; i < BurstN; i++)
+            {
+                if (bAge[i] <= 0f) continue;
+                float age = bAge[i], life = 1f - age / 1.6f;
+                float d = bPow[i] * (1f - Mathf.Exp(-3.2f * age)) * r.height * 1.6f, tail = Mathf.Max(0f, d - r.height * 0.07f);
+                float droop = 0.10f * age * age * r.height;
+                Vector2 c0 = P(r, bx[i], by[i]);
+                for (int k = 0; k < BurstRays; k++)
+                {
+                    float a = k * Mathf.PI * 2f / BurstRays + bHue[i] * 6f;
+                    Vector2 dir = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                    Vector2 down = new Vector2(0f, -droop);
+                    Color col = Hue(bHue[i] + k * 0.012f, 0.55f, 1f, life);
+                    Line(vh, c0 + dir * tail + down, c0 + dir * d + down, 2.5f, col);
+                    Disc(vh, c0 + dir * d + down, 3.5f, A(Color.white, life), A(col, 0f), 6);
+                }
+            }
+        }
+
+        // -- 16. couleurs musicales : un champ de couleurs qui défile, chaque bande a sa teinte
+        void MusicalColors(VertexHelper vh, Rect r)
+        {
+            float cw = r.width / Hist, ch = r.height / Bands;
+            for (int c = 0; c < Hist; c++)
+            {
+                int col = (histPos + 1 + c) % Hist;
+                float x = r.xMin + c * cw;
+                for (int b = 0; b < Bands; b++)
+                {
+                    float v = hist[col * Bands + b];
+                    if (v < 0.05f) continue;
+                    Color k = Hue(b / (float)Bands * 0.85f + phase * 0.02f, 0.85f - 0.35f * v, 0.35f + 0.65f * v, Mathf.Clamp01(v * 1.6f));
+                    float y = r.yMin + b * ch;
+                    Quad(vh, new Vector2(x, y), new Vector2(x, y + ch), new Vector2(x + cw + 0.5f, y + ch), new Vector2(x + cw + 0.5f, y), k, k, k, k);
+                }
+            }
+        }
+
+        // -- 17. toile : des polygones emboîtés dessinés avec le spectre d'il y a un instant, comme un tunnel d'araignée
+        void Web(VertexHelper vh, Rect r)
+        {
+            const int layers = 6, seg = Bands * 2;
+            Vector2 c = r.center;
+            float rmax = Mathf.Min(r.width * 0.5f, r.height * 0.5f) * 0.96f, rot = phase * 0.12f;
+            var ring = webRing;
+            for (int L = layers - 1; L >= 0; L--)
+            {
+                int col = ((histPos - L * 3) % Hist + Hist) % Hist;
+                float f = (L + 1f) / layers;
+                Color cc = Hue(0.55f + L * 0.07f + phase * 0.02f, 0.6f, 1f, 0.95f - 0.12f * L);
+                for (int i = 0; i <= seg; i++)
+                {
+                    int j = i % seg;
+                    int bi = j < Bands ? j : seg - 1 - j;
+                    float a = rot + j * Mathf.PI * 2f / seg;
+                    float rad = rmax * f * (0.30f + 0.70f * hist[col * Bands + bi]);
+                    ring[i] = c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * rad;
+                }
+                for (int i = 0; i < seg; i++) Line(vh, ring[i], ring[i + 1], 2.5f - 0.2f * L, cc);
+            }
+            for (int i = 0; i < seg; i += 4)
+            {
+                float a = rot + i * Mathf.PI * 2f / seg;
+                Line(vh, c, c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * rmax, 1f, A(txt, 0.12f));
             }
         }
 

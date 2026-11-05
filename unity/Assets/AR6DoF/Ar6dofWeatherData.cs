@@ -44,7 +44,7 @@ namespace AR6DoF
     // source : d'ou vient la position (affichee dans la fenetre) : "windows", "ip", "manual", "search"
     [Serializable] public class WxPlace { public string name = "", country = "", countryCode = "", source = ""; public double lat, lon; public bool valid; }
     // units : -1 selon le pays, 0 métrique, 1 impérial. off : masque de bits des elements caches (Ar6dofWeatherApp.Opt*)
-    [Serializable] public class WxPrefs { public WxPlace place = new WxPlace(); public int units = -1; public int off; }
+    [Serializable] public class WxPrefs { public WxPlace place = new WxPlace(); public int units = -1; public int off; public int plus; public int dropSel, frameSel; }   // plus : 1 = montrer la page « Plus » ; dropSel / frameSel : 0 = réglage par défaut, sinon niveau + 1
 
     [Serializable] class GeoItem { public string name = "", country = "", admin1 = "", country_code = ""; public double latitude, longitude; }
     [Serializable] class GeoResp { public GeoItem[] results; }
@@ -204,10 +204,18 @@ namespace AR6DoF
                 if (File.Exists(FilePath))
                 {
                     var p = JsonUtility.FromJson<WxPrefs>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (p != null && p.place != null) { prefs.place = p.place; prefs.units = p.units; prefs.off = p.off; }
+                    if (p != null && p.place != null) { prefs.place = p.place; prefs.units = p.units; prefs.off = p.off; prefs.plus = p.plus; prefs.dropSel = p.dropSel; prefs.frameSel = p.frameSel; Coarsen(prefs.place); }
                 }
             }
             catch (Exception) { }
+        }
+
+        /// <summary>Arrondit la position à ~1 km (0,01°) : assez pour la météo, trop peu précis pour retrouver une adresse.</summary>
+        static void Coarsen(WxPlace p)
+        {
+            if (p == null) return;
+            p.lat = Math.Round(p.lat, 2);
+            p.lon = Math.Round(p.lon, 2);
         }
 
         public void Save()
@@ -311,6 +319,7 @@ namespace AR6DoF
         void SetPlace(string name, string country, string cc, double lat, double lon, string source)
         {
             prefs.place = new WxPlace { name = name ?? "", country = country ?? "", countryCode = cc ?? "", source = source ?? "", lat = lat, lon = lon, valid = true };
+            Coarsen(prefs.place);
             Save();
         }
 
@@ -401,6 +410,7 @@ namespace AR6DoF
         /// <summary>Cherche le nom du lieu de ces coordonnées (géocodage inverse ; en cas d'échec on garde les chiffres), l'enregistre et charge la météo.</summary>
         void ResolveAndUse(double lat, double lon, string source)
         {
+            lat = Math.Round(lat, 2); lon = Math.Round(lon, 2);   // on n'envoie et ne garde jamais plus précis que ~1 km
             phase = Phase.Locating;
             string lang = Ar6dofLoc.Code;
             Get("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=" + N(lat) + "&longitude=" + N(lon) + "&localityLanguage=" + lang, text =>
@@ -412,13 +422,13 @@ namespace AR6DoF
                     if (g != null) { name = !string.IsNullOrEmpty(g.city) ? g.city : g.locality; country = g.countryName; cc = g.countryCode; }
                 }
                 catch (Exception) { }
-                if (string.IsNullOrEmpty(name)) name = lat.ToString("0.00", Inv) + ", " + lon.ToString("0.00", Inv);
+                if (string.IsNullOrEmpty(name)) name = "Ma position";   // jamais de chiffres a la place du nom
                 SetPlace(name, country, cc, lat, lon, source);
                 status = "";
                 Refresh();
             }, err =>
             {
-                SetPlace(lat.ToString("0.00", Inv) + ", " + lon.ToString("0.00", Inv), "", "", lat, lon, source);
+                SetPlace("Ma position", "", "", lat, lon, source);
                 status = "";
                 Refresh();
             });
@@ -484,6 +494,7 @@ namespace AR6DoF
         {
             if (p == null) return;
             prefs.place = new WxPlace { name = p.name, country = p.country, countryCode = p.countryCode, source = "search", lat = p.lat, lon = p.lon, valid = true };
+            Coarsen(prefs.place);
             Save();
             results.Clear();
             searched = false;

@@ -54,6 +54,38 @@ namespace AR6DoF
 
     public class AudioDevice { public string id = "", name = ""; public bool isDefault; }
 
+    /// <summary>Une platine DJ vue d'Unity : l'état (position, lecture, tempo...) vient du moteur ~20 fois par seconde, la forme d'onde arrive par morceaux après le chargement.
+    /// Les repères (cue, hot cues) ne sont gardés qu'ici et ne survivent pas au changement de piste ni à la fermeture.</summary>
+    public class DjDeck
+    {
+        public string path = "", name = "";
+        public int state;                  // 0 vide, 1 chargement, 2 prête, 3 illisible
+        public float dur, bpm, firstBeat;  // secondes, BPM (0 = inconnu), premier temps de la grille (secondes)
+        public byte[] peak = new byte[0], low = new byte[0];   // forme d'onde : 50 points par seconde (crête, part de graves)
+        public int waveGot, waveTotal, waveVersion;
+        public float pos, tempo = 1f, vu;
+        public bool playing, loop, loaded;
+        public float cue;                  // repère principal (secondes)
+        public readonly float[] hot = { -1f, -1f, -1f, -1f };
+        public float loopIn = -1f, loopOut = -1f;   // zone de boucle affichée (calculée comme le moteur, au temps le plus proche)
+        public readonly float[] eq = new float[3];  // graves, medium, aigus (dB)
+        public float filter, vol = 1f;
+        public int range = 0;              // plage du tempo : 0 = 8 %, 1 = 16 %, 2 = 50 %
+        public float loopLock;             // jusqu'à cet instant, l'état de boucle reçu du moteur est ignoré (la commande vient d'être envoyée)
+        public int cueVersion;             // change quand un repère ou la boucle change (les formes d'onde se redessinent)
+
+        public void Reset()
+        {
+            path = ""; name = ""; state = 0; dur = 0f; bpm = 0f; firstBeat = 0f;
+            peak = new byte[0]; low = new byte[0]; waveGot = waveTotal = 0; waveVersion++;
+            pos = 0f; tempo = 1f; vu = 0f; playing = false; loop = false; loaded = false; cue = 0f;
+            for (int i = 0; i < 4; i++) hot[i] = -1f;
+            loopIn = loopOut = -1f;
+            cueVersion++;   // l'égaliseur, le filtre et le volume restent comme réglés (le moteur les garde d'une piste à l'autre)
+        }
+        public float BeatLen { get { return bpm > 0f ? 60f / bpm : 0.5f; } }
+    }
+
     /// <summary>Niveaux reçus d'ar6dof_audio (micro, voix, soundboard, musique, gauche, droite), position de la musique et spectres (32 bandes de 60 Hz à 12 kHz).</summary>
     public class AudioMeters
     {
@@ -173,6 +205,106 @@ namespace AR6DoF
         bool applied;
 
         public AudioMeters Meters { get { return front; } }
+
+        // ---------------------------------------------------------------- platines DJ (le moteur fait tout le son ; ici seulement les commandes et l'état reçu)
+        public readonly DjDeck[] decks = { new DjDeck(), new DjDeck() };
+        public float xfade = 0.5f;       // 0 = platine A, 1 = platine B
+        public int xfCurve;              // 0 mix, 1 coupe
+        public int djVersion;            // change quand une piste est chargée / éjectée / illisible
+        float djWantedUntil, lastDjPoke;
+
+        /// <summary>À appeler à chaque image par la fenêtre qui affiche les platines : le moteur n'envoie leur état que tant que quelqu'un regarde.</summary>
+        public void WantDj() { djWantedUntil = Time.unscaledTime + 0.4f; }
+        static string DL(int d) { return d == 0 ? "A" : "B"; }
+
+        public void DjLoad(int d, string path)
+        {
+            if (d < 0 || d > 1 || string.IsNullOrEmpty(path)) return;
+            var k = decks[d];
+            k.Reset();
+            k.path = path; k.name = Path.GetFileNameWithoutExtension(path); k.state = 1;
+            djVersion++;
+            EnsureOutput();
+            WhenOnline(() => Send("DLOAD " + DL(d) + " " + path));
+        }
+        public void DjEject(int d) { Send("DEJECT " + DL(d)); decks[d].Reset(); djVersion++; }
+        public void DjPlay(int d, bool on) { decks[d].playing = on; Send("DPLAY " + DL(d) + " " + (on ? "1" : "0")); }
+        public void DjSeek(int d, float sec) { decks[d].pos = sec; Send("DSEEK " + DL(d) + " " + N(sec)); }
+        public void DjTempo(int d, float t) { decks[d].tempo = t; Send("DTEMPO " + DL(d) + " " + N(t)); }
+        public void DjBend(int d, float v) { Send("DBEND " + DL(d) + " " + N(v)); }
+        public void DjVol(int d, float v) { decks[d].vol = v; Send("DVOL " + DL(d) + " " + N(v)); }
+        public void DjEq(int d, int band, float db)
+        {
+            var k = decks[d];
+            k.eq[band] = db;
+            Send("DEQ " + DL(d) + " " + N(k.eq[0]) + " " + N(k.eq[1]) + " " + N(k.eq[2]));
+        }
+        public void DjFilter(int d, float v) { decks[d].filter = v; Send("DFILT " + DL(d) + " " + N(v)); }
+        public void DjLoop(int d, float beats) { Send("DLOOP " + DL(d) + " " + N(beats)); }
+        public void DjSync(int d) { Send("DSYNC " + DL(d)); }
+        public void DjXfade(float v) { xfade = v; Send("XFADE " + N(v)); }
+        public void DjCurve(int c) { xfCurve = c; Send("XFCURVE " + c); }
+
+        static float PF(string t) { float v; return float.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : 0f; }
+
+        // DST <pos> <lecture> <tempo> <vu> <boucle> <chargee>  x2 (A puis B)  <crossfader>
+        void ParseDjStatus(string s)
+        {
+            var p = s.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length < 14) return;
+            for (int d = 0; d < 2; d++)
+            {
+                int o = 1 + d * 6;
+                var k = decks[d];
+                k.pos = PF(p[o]); k.playing = p[o + 1] == "1"; k.tempo = PF(p[o + 2]); k.vu = PF(p[o + 3]);
+                bool lp = p[o + 4] == "1";
+                if (lp != k.loop && Time.unscaledTime > k.loopLock) { k.loop = lp; if (!lp) { k.loopIn = k.loopOut = -1f; } k.cueVersion++; }
+                k.loaded = p[o + 5] == "1";
+                if (!k.loaded && k.state == 2) { k.state = 0; djVersion++; }
+            }
+        }
+
+        // DECK <platine> loading | err | ok <durée ms> <bpm x100> <premier temps ms> <nombre de points>
+        void ParseDeck(string s)
+        {
+            var p = s.Split(' ');
+            int d;
+            if (p.Length < 3 || !int.TryParse(p[1], out d) || d < 0 || d > 1) return;
+            var k = decks[d];
+            if (p[2] == "loading") { k.state = 1; }
+            else if (p[2] == "err") { k.state = 3; k.loaded = false; }
+            else if (p[2] == "ok" && p.Length >= 7)
+            {
+                k.dur = PF(p[3]) / 1000f; k.bpm = PF(p[4]) / 100f; k.firstBeat = PF(p[5]) / 1000f;
+                int n; int.TryParse(p[6], out n);
+                n = Mathf.Clamp(n, 0, 200000);
+                k.peak = new byte[n]; k.low = new byte[n]; k.waveGot = 0; k.waveTotal = n; k.waveVersion++;
+                k.state = 2; k.loaded = true; k.pos = 0f; k.cue = 0f;
+                k.cueVersion++;
+            }
+            djVersion++;
+        }
+
+        static int Hx(char c) { return c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'f' ? c - 'a' + 10 : (c >= 'A' && c <= 'F' ? c - 'A' + 10 : 0)); }
+
+        // DWAVE <platine> <total> <début> <hex : (crête, graves) par point>
+        void ParseWave(string s)
+        {
+            var p = s.Split(' ');
+            int d, total, start;
+            if (p.Length < 5 || !int.TryParse(p[1], out d) || d < 0 || d > 1 || !int.TryParse(p[2], out total) || !int.TryParse(p[3], out start)) return;
+            var k = decks[d];
+            if (k.peak.Length != total) return;
+            string h = p[4];
+            int n = h.Length / 4;
+            for (int i = 0; i < n && start + i < total; i++)
+            {
+                k.peak[start + i] = (byte)(Hx(h[4 * i]) * 16 + Hx(h[4 * i + 1]));
+                k.low[start + i] = (byte)(Hx(h[4 * i + 2]) * 16 + Hx(h[4 * i + 3]));
+                k.waveGot++;
+            }
+            k.waveVersion++;
+        }
         public bool Online { get { return State == EngineState.Online; } }
         public bool Enabled { get { return data.enabled; } }
 
@@ -348,6 +480,7 @@ namespace AR6DoF
             {
                 meterUdp = Ar6dofSocket.NoInherit(new UdpClient(meterPort));
                 eventUdp = Ar6dofSocket.NoInherit(new UdpClient(eventPort));
+                try { eventUdp.Client.ReceiveBufferSize = 1 << 20; } catch (Exception) { }   // les formes d'onde des platines arrivent en rafale
             }
             catch (Exception e)
             {
@@ -408,7 +541,7 @@ namespace AR6DoF
                 catch (SocketException) { if (!running) break; continue; }
                 catch (ObjectDisposedException) { break; }
                 string s = Encoding.UTF8.GetString(d).TrimEnd('\r', '\n', ' ');
-                lock (lockObj) { if (events.Count < 512) events.Enqueue(s); }
+                lock (lockObj) { if (events.Count < 4096) events.Enqueue(s); }
             }
         }
 
@@ -690,6 +823,7 @@ namespace AR6DoF
                     try { if (proc == null || proc.HasExited) { proc = null; RelaunchProcess(); } } catch (Exception) { }
                 }
                 if (now < meterWantedUntil && now - lastMeterPoke > 0.5f) { Send("METER"); lastMeterPoke = now; }
+                if (now < djWantedUntil && now - lastDjPoke > 0.5f) { Send("DJWATCH"); lastDjPoke = now; }
             }
         }
 
@@ -726,6 +860,7 @@ namespace AR6DoF
             if (s.Length == 0) return;
             if (s == "READY" || s == "PONG")
             {
+                if (s == "READY") { for (int i = 0; i < 2; i++) { decks[i].Reset(); decks[i].eq[0] = decks[i].eq[1] = decks[i].eq[2] = 0f; decks[i].filter = 0f; decks[i].vol = 1f; decks[i].range = 0; } xfade = 0.5f; xfCurve = 0; djVersion++; }   // moteur (re)lance : platines vides
                 lastPong = Time.unscaledTime;
                 if (State != EngineState.Online) { State = EngineState.Online; Message = ""; }
                 if (!applied) ApplyAll();
@@ -764,6 +899,9 @@ namespace AR6DoF
                 }
                 return;
             }
+            if (s.StartsWith("DST ", StringComparison.Ordinal)) { ParseDjStatus(s); return; }
+            if (s.StartsWith("DECK ", StringComparison.Ordinal)) { ParseDeck(s); return; }
+            if (s.StartsWith("DWAVE ", StringComparison.Ordinal)) { ParseWave(s); return; }
             if (s.StartsWith("MUSIC", StringComparison.Ordinal))
             {
                 if (s == "MUSIC end") { MusicActive = false; musicVersion++; NextTrack(true); }

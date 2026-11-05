@@ -10,15 +10,20 @@ namespace AR6DoF
     /// Application « Météo » : la météo de ta position (ou d'une ville, ou de coordonnées exactes) avec un petit monde 3D animé en style dessin animé
     /// (soleil et lune qui suivent l'heure, nuages, pluie, neige qui recouvre tout, brouillard, orage, vent qui plie les arbres et fait tourner le moulin),
     /// les prévisions sur 7 jours et sur 24 heures, et un curseur pour avancer dans le temps d'heure en heure (le temps s'accélère un instant à chaque heure).
-    /// Onglet Test : tous les types de temps, l'heure, le vent et la température à la main. Roue « Options » : montrer / cacher les cases et les effets.
+    /// Page Plus (ex-onglet Test, cachée par défaut) : tous les types de temps, l'heure, le vent et la température à la main. Roue « Options » : montrer / cacher les cases et les effets.
     /// Données : Open-Meteo.com (gratuit, sans clé, tous les pays). Rien ne tourne et rien n'est téléchargé tant que la fenêtre n'est pas ouverte.
     /// </summary>
     public class Ar6dofWeatherApp : Ar6dofAppWindow
     {
-        static readonly string[] TabNames = { "Maintenant", "Jours", "Heures", "Lieu", "Test" };
+        static readonly string[] TabNamesBase = { "Maintenant", "Jours", "Heures", "Lieu" };
+        static readonly string[] TabNamesPlus = { "Maintenant", "Jours", "Heures", "Lieu", "Plus" };   // « Plus » (ex-Test) : cachée tant qu'on ne l'active pas dans Options
         const int TabNow = 0, TabDays = 1, TabHours = 2, TabPlace = 3, TabTest = 4, TabOptions = 5;   // Options : page de la roue, hors de la barre d'onglets
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-        const float StageH = 360f;
+        static readonly float[] FrameH = { 330f, 380f, 430f, 480f, 540f };        // hauteur du cadre de la scène, par niveau (le niveau 2 est celui par défaut)
+        static readonly float[] DropBy = { 0f, 0.06f, 0.12f, 0.20f, 0.30f };      // de combien l'île descend (en tailles de scène), par niveau
+        static readonly string[] DropNames = { "Comme avant", "Un peu plus bas", "Plus bas", "Bas", "Tres bas" };
+        int DropLevel { get { return wx.prefs.dropSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.dropSel - 1, 0, 4); } }
+        int FrameLevel { get { return wx.prefs.frameSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.frameSel - 1, 0, 4); } }
         const float PlayStep = 2.6f;     // secondes entre deux heures en lecture
         const float BurstTime = 0.9f;    // durée de l'accélération du temps entre deux heures
         const int TileCount = 10;
@@ -62,7 +67,7 @@ namespace AR6DoF
         float playTimer;
         Text timeLabel, playLabel;
 
-        // onglet Test
+        // page Plus
         int tType = 6;
         float tHour = 12f, tWind = 12f, tTemp0 = 14f;
         bool tAuto;
@@ -269,7 +274,7 @@ namespace AR6DoF
             // roue des options, à droite du titre
             Text gl;
             BtnAt(IW * 0.5f - 62f, -38f, 124f, 40f, "Options", () => { StopAuto(); tab = TabOptions; Rebuild(); }, out gl, 19);
-            Tabs(TabNames, tab, t => { tab = t; StopAuto(); });
+            Tabs(wx.prefs.plus != 0 ? TabNamesPlus : TabNamesBase, tab, t => { tab = t; StopAuto(); });
             Remember();
             if (tab != TabTest) PlaceLine();
             switch (tab)
@@ -300,12 +305,11 @@ namespace AR6DoF
             switch (p.source)
             {
                 case "windows": key = "Source : Windows (Wi-Fi / GPS)"; break;
-                case "ip": key = "Source : adresse IP (approximatif)"; break;
-                case "manual": key = "Source : coordonnees saisies"; break;
+                case "manual": key = "Source : position saisie"; break;
                 case "search": key = "Source : ville choisie"; break;
-                default: key = "Source : inconnue"; break;
+                default: key = "Ville estimee par internet (peut etre fausse)"; break;   // « ip » et les anciens enregistrements sans source
             }
-            return Ar6dofLoc.T(key) + "   " + p.lat.ToString("0.000", Inv) + ", " + p.lon.ToString("0.000", Inv);
+            return Ar6dofLoc.T(key);   // jamais de coordonnees affichees : un cadre d'ecran ou un stream ne doit pas reveler ou tu habites
         }
 
         void PlaceLine()
@@ -315,6 +319,8 @@ namespace AR6DoF
             var t = Lbl(nm, 34, 24);
             t.fontStyle = FontStyle.Bold;
             if (p.valid && (tab == TabNow || tab == TabPlace)) Lbl(SourceText(p), 24, 16);
+            if (p.valid && tab == TabNow && (p.source == "ip" || string.IsNullOrEmpty(p.source)))
+                Btn("Ce n'est pas ma ville ? Choisir ma ville", () => { tab = TabPlace; Rebuild(); }, 40, 18);
             if (wx.Busy)
             {
                 string s = !string.IsNullOrEmpty(wx.status) ? wx.status : (wx.phase == Ar6dofWeatherClient.Phase.Searching ? "Recherche..." : "Chargement de la meteo...");
@@ -333,7 +339,7 @@ namespace AR6DoF
         void NoData()
         {
             if (wx.Busy) return;
-            Para("Pas encore de meteo. Verifie ta connexion internet ou choisis ta ville dans l'onglet Lieu. Les effets 3D se voient quand meme dans l'onglet Test.", 76, 19);
+            Para("Pas encore de meteo. Verifie ta connexion internet ou choisis ta ville dans l'onglet Lieu.", 76, 19);
             Btn("Reessayer", () => { ForceRefresh(); Rebuild(); }, 52, 22);
         }
 
@@ -464,7 +470,7 @@ namespace AR6DoF
         /// <summary>Ciel + île 3D (tient dans le cadre : rien ne dépasse sur le reste de la fenêtre) + température et ressenti en bas à gauche, temps et vent en bas à droite.</summary>
         void BuildStage(Now n)
         {
-            const float sh = StageH;
+            float sh = FrameH[FrameLevel];
             float sy = RowY(sh);
             var stage = Ar6dofVrUi.Rect(content, "Scene", new Vector2(0f, sy), new Vector2(IW, sh));
             sky = stage.gameObject.AddComponent<Ar6dofSkyGraphic>();
@@ -472,8 +478,9 @@ namespace AR6DoF
             SkyColors(n.cond, n.day, out skyTop, out skyBot, n.temp);
             sky.SetColors(skyTop, skyBot, 26f);
             scene = Ar6dofWeatherScene.Create(stage);
-            float s = Mathf.Min(IW / 4.6f, sh / 3.1f);   // la scène occupe de -1,4 à +1,65 en hauteur
-            scene.transform.localPosition = new Vector3(0f, -0.09f * s, -0.75f * s);
+            float drop = DropBy[DropLevel];
+            float s = Mathf.Min(IW / 4.6f, sh / (2.98f + 2f * drop));   // la scène occupe de -1,4 à +1,65 en hauteur ; l'île descendue doit rester dans le cadre
+            scene.transform.localPosition = new Vector3(0f, -(0.09f + drop) * s, -0.75f * s);
             scene.transform.localScale = Vector3.one * s;
 
             // coins du bas : l'île est étroite en bas, il y a de la place (et rien ne passe devant)
@@ -774,12 +781,6 @@ namespace AR6DoF
         }
 
         // --- Lieu
-        string CoordString()
-        {
-            var p = wx.prefs.place;
-            return p.valid ? p.lat.ToString("0.0000", Inv) + ", " + p.lon.ToString("0.0000", Inv) : "";
-        }
-
         void UseCoordText()
         {
             double lat, lon;
@@ -799,22 +800,10 @@ namespace AR6DoF
 
         void BuildPlace()
         {
-            Section("Position");
-            Btn("Utiliser ma position (GPS / Wi-Fi de Windows)", () => { nextTry = Time.unscaledTime + 60f; coordEdited = false; hourOffset = 0; wx.UseWindowsLocation(); }, 52, 21);
-            Btn("Position approximative (par internet)", () => { nextTry = Time.unscaledTime + 60f; coordEdited = false; hourOffset = 0; wx.Cancel(); wx.UseIp(); }, 52, 21);
-            Para("Un PC fixe n'a pas de GPS : Windows et internet ne donnent que la zone de ton fournisseur d'acces, parfois a des dizaines de km (la source est affichee en haut). Pour une position exacte, entre tes coordonnees ci-dessous ou cherche ta ville.", 92, 17);
-
-            Section("Coordonnees exactes (latitude, longitude)");
-            if (!coordEdited) coordText = CoordString();
+            // la ville d'abord : c'est le moyen sur d'avoir la bonne (l'adresse IP donne souvent la ville de ton fournisseur, pas la tienne) ; elle est retenue
+            Section("Ma ville");
+            Para("Cherche ta ville, choisis-la dans la liste : elle est gardee, et plus jamais remplacee par une estimation. Aucune coordonnee n'est affichee.", 70, 17);
             float cy = RowY(50f);
-            Ar6dofVrTextField.Make(content, new Vector2(-95f, cy), new Vector2(IW - 190f, 50f), coordText, "47.39, 0.68", s => { coordText = s; coordEdited = true; }, s => { coordText = s; UseCoordText(); }, 24);
-            Text cb;
-            BtnAt(IW * 0.5f - 90f, cy, 180f, 50f, "Utiliser", UseCoordText, out cb, 21);
-            if (coordErr) Lbl("Coordonnees non valides. Exemple : 47.39, 0.68", 30, 18);
-            Para("Astuce : sur une carte en ligne, clic droit sur ton adresse, puis copie les deux nombres (latitude puis longitude).", 52, 17);
-
-            Section("Chercher une ville");
-            cy = RowY(50f);
             Ar6dofVrTextField.Make(content, new Vector2(-75f, cy), new Vector2(IW - 150f, 50f), query, "Nom de ville", s => query = s, s => { query = s; wx.Search(s); }, 24);
             Text lb;
             BtnAt(IW * 0.5f - 70f, cy, 140f, 50f, "Chercher", () => wx.Search(query), out lb, 21);
@@ -825,6 +814,19 @@ namespace AR6DoF
                 Btn(name, () => { tab = TabNow; hourOffset = 0; coordEdited = false; wx.Pick(p); }, 48, 20);
             }
             if (wx.searched && wx.results.Count == 0 && string.IsNullOrEmpty(wx.error)) Lbl("Aucun resultat", 30, 19);
+
+            Section("Position automatique");
+            Btn("Utiliser la position de Windows (Wi-Fi / GPS)", () => { nextTry = Time.unscaledTime + 60f; coordEdited = false; hourOffset = 0; wx.UseWindowsLocation(); }, 52, 21);
+            Btn("Estimer par internet", () => { nextTry = Time.unscaledTime + 60f; coordEdited = false; hourOffset = 0; wx.Cancel(); wx.UseIp(); }, 52, 21);
+            Para("Un PC fixe n'a pas de GPS : Windows et internet ne donnent que la zone de ton fournisseur d'acces, parfois a des dizaines de km. La position est arrondie a 1 km environ et jamais affichee.", 92, 17);
+
+            Section("Coordonnees (avance)");
+            if (!coordEdited) coordText = "";
+            cy = RowY(50f);
+            Ar6dofVrTextField.Make(content, new Vector2(-95f, cy), new Vector2(IW - 190f, 50f), coordText, "latitude, longitude", s => { coordText = s; coordEdited = true; }, s => { coordText = s; UseCoordText(); }, 24);
+            Text cb;
+            BtnAt(IW * 0.5f - 90f, cy, 180f, 50f, "Utiliser", UseCoordText, out cb, 21);
+            if (coordErr) Lbl("Coordonnees non valides. Exemple : 47.39, 0.68", 30, 18);
 
             Section("Unites");
             var bs = BtnRow(48f, 21,
@@ -948,8 +950,16 @@ namespace AR6DoF
             OptGrid(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
             Section("Ecran Maintenant");
             OptGrid(OptFeels, OptWindLine, OptScrub, OptWindFx);
-            Section("Tester");
-            Btn("Voir et tester tous les temps (onglet Test)", () => { tab = TabTest; Rebuild(); }, 52, 21);
+            Section("Scene 3D");
+            SliderRow("Hauteur de l'ile", 0f, 4f, () => DropLevel, v => { wx.prefs.dropSel = Mathf.RoundToInt(v) + 1; wx.Save(); }, v => Ar6dofLoc.T(DropNames[Mathf.Clamp(Mathf.RoundToInt(v), 0, 4)]), 50f, true);
+            SliderRow("Taille du cadre", 0f, 4f, () => FrameLevel, v => { wx.prefs.frameSel = Mathf.RoundToInt(v) + 1; wx.Save(); }, v => Mathf.RoundToInt(FrameH[Mathf.Clamp(Mathf.RoundToInt(v), 0, 4)]).ToString(Inv) + " px", 50f, true);
+            Section("Page Plus");
+            Text pl;
+            BtnT("", () => { wx.prefs.plus = wx.prefs.plus != 0 ? 0 : 1; wx.Save(); Refresh(); }, out pl, 52f, 21);
+            Text pll = pl;
+            refreshers.Add(() => pll.text = Ar6dofLoc.T("Page Plus (tester tous les temps)") + " : " + Ar6dofLoc.T(wx.prefs.plus != 0 ? "Oui" : "Non"));
+            Para("La page Plus permet de voir tous les types de temps a la main (heure, vent, temperature). Elle reste cachee tant que tu ne l'actives pas.", 52, 17);
+            if (wx.prefs.plus != 0) Btn("Ouvrir la page Plus", () => { tab = TabTest; Rebuild(); }, 52, 21);
         }
     }
 }

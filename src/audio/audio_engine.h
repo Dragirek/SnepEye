@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "audio_deck.h"
 #include "audio_dsp.h"
 
 namespace ar6audio {
@@ -139,6 +140,22 @@ class Mixer {
   Ring musicRing{2, kRate * 2};
   Scope inScope, outScope;
 
+  // platines DJ (A = 0, B = 1) : leur sortie est ajoutee a la tranche MUSIC, avant son egaliseur / fader et le maitre. Zero calcul tant qu'aucune piste n'est chargee.
+  Deck deck[2];
+  std::atomic<float> xfade{0.5f};   // 0 = tout sur A, 1 = tout sur B
+  std::atomic<int> xfCurve{0};      // 0 = mix (les deux a fond au centre), 1 = coupe (saut net pres des bords)
+  void CrossGains(float& ga, float& gb) const {
+    const float v = Clampf(xfade.load(), 0.f, 1.f);
+    if (xfCurve.load() == 1) { ga = Clampf((1.f - v) * 16.f, 0.f, 1.f); gb = Clampf(v * 16.f, 0.f, 1.f); }
+    else { ga = std::min(1.f, 2.f * (1.f - v)); gb = std::min(1.f, 2.f * v); }
+  }
+  static int DeckIdx(const std::string& n) {
+    const std::string u = Upper(n);
+    if (u == "0" || u == "A") return 0;
+    if (u == "1" || u == "B") return 1;
+    return -1;
+  }
+
   // niveaux (0..1+), decroissance rapide : lus par le thread qui envoie les niveaux
   std::atomic<float> peakIn{0}, peakVoice{0}, peakSfx{0}, peakMusic{0}, peakL{0}, peakR{0};
   std::atomic<bool> gateOpen{true};
@@ -231,6 +248,28 @@ class Mixer {
     if (c == "STOP" && w.size() >= 2) { Stop((int)ToF(w[1], -1)); return true; }
     if (c == "STOPALL") { StopAll(); return true; }
     if (c == "UNLOAD" && w.size() >= 2) { Unload((int)ToF(w[1], -1)); return true; }
+    // ---- platines : D<commande> <platine A|B|0|1> <valeurs>
+    if (c == "XFADE" && w.size() >= 2) { xfade = Clampf(ToF(w[1], 0.5f), 0.f, 1.f); return true; }
+    if (c == "XFCURVE" && w.size() >= 2) { xfCurve = ToF(w[1]) > 0.5f ? 1 : 0; return true; }
+    if (w.size() >= 2 && c.size() >= 2 && c[0] == 'D') {
+      const int d = DeckIdx(w[1]);
+      if (d >= 0) {
+        Deck& k = deck[d];
+        const std::string v2 = w.size() > 2 ? w[2] : std::string();
+        const float v = ToF(v2);
+        if (c == "DPLAY") { if (k.Loaded()) k.playing = v > 0.5f; return true; }
+        if (c == "DSEEK") { k.Seek((double)v); return true; }
+        if (c == "DTEMPO") { k.tempo = Clampf(ToF(v2, 1.f), 0.5f, 1.5f); return true; }
+        if (c == "DBEND") { k.bend = Clampf(v, -1.f, 1.f); return true; }
+        if (c == "DVOL") { k.vol = Clampf(ToF(v2, 1.f), 0.f, 1.5f); return true; }
+        if (c == "DTRIM") { k.trim = Clampf(ToF(v2, 1.f), 0.f, 2.f); return true; }
+        if (c == "DEQ" && w.size() >= 5) { k.eqLo = Clampf(ToF(w[2]), -30.f, 6.f); k.eqMid = Clampf(ToF(w[3]), -30.f, 6.f); k.eqHi = Clampf(ToF(w[4]), -30.f, 6.f); return true; }
+        if (c == "DFILT") { k.filt = Clampf(v, -1.f, 1.f); return true; }
+        if (c == "DLOOP") { k.SetLoop(v); return true; }
+        if (c == "DSYNC") { k.SyncTo(deck[1 - d]); return true; }
+        if (c == "DEJECT") { k.Eject(); return true; }
+      }
+    }
     return false;
   }
   static int ChanIndex(const std::string& n) {
@@ -297,6 +336,13 @@ class Mixer {
       const size_t got = musicRing.Read(mbuf_.data(), nf);
       musicConsumed += got;
       for (size_t i = 0; i < got; i++) { sl_[kMusic][i] = mbuf_[2 * i]; sr_[kMusic][i] = mbuf_[2 * i + 1]; }
+    }
+    // platines -> tranche MUSIC
+    {
+      float ga, gb;
+      CrossGains(ga, gb);
+      deck[0].Render(sl_[kMusic].data(), sr_[kMusic].data(), frames, ga);
+      deck[1].Render(sl_[kMusic].data(), sr_[kMusic].data(), frames, gb);
     }
     // tranches -> maitre
     float pk[3] = {0, 0, 0};

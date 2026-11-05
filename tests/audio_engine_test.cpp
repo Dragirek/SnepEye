@@ -175,6 +175,169 @@ int main() {
     m.Handle("LIMIT 1");
     CHECK(m.limiter);
   }
+  // ---------------------------------------------------------------- platines DJ
+  {
+    // piste « techno » synthetique : un coup de grosse caisse a chaque temps (bpm donne), le premier a 'offset' secondes, + un charleston sur les contretemps
+    auto Kick = [](float bpm, double offset, double sec) {
+      auto t = std::make_shared<DeckTrack>();
+      const size_t n = (size_t)(sec * kRate);
+      std::vector<float> st(n * 2, 0.f);
+      const double beat = 60.0 / bpm;
+      for (double b = offset; b < sec - 0.3; b += beat) {
+        const size_t i0 = (size_t)(b * kRate);
+        for (size_t i = 0; i < 9600 && i0 + i < n; i++) {
+          const float e = std::exp(-(float)i / 2400.f);
+          const float v = 0.8f * e * std::sin(2 * kPi * (55.f + 90.f * std::exp(-(float)i / 600.f)) * (float)i / kRate);
+          st[2 * (i0 + i)] += v; st[2 * (i0 + i) + 1] += v;
+        }
+        const size_t h0 = (size_t)((b + beat / 2) * kRate);
+        for (size_t i = 0; i < 1200 && h0 + i < n; i++) {
+          const float v = 0.15f * std::exp(-(float)i / 300.f) * (((i * 2654435761u) >> 9) % 2000 / 1000.f - 1.f);
+          st[2 * (h0 + i)] += v; st[2 * (h0 + i) + 1] += v;
+        }
+      }
+      t->Append(st.data(), n);
+      AnalyzeTrack(*t);
+      return t;
+    };
+    // forme d'onde : un point toutes les 20 ms
+    {
+      auto t = Kick(128.f, 0.2, 20.0);
+      CHECK(t->peak.size() == (size_t)(20 * kWaveRate));
+      CHECK(t->peak[10] > 100 || t->peak[11] > 100);   // 0,2 s : un coup de grosse caisse
+      CHECK(t->low[10] > 150 || t->low[11] > 150);     // c'est surtout des graves
+    }
+    // tempo et premier temps retrouves, a differentes vitesses
+    const float bpms[] = {90.f, 110.f, 128.f, 140.f, 174.f};
+    for (float bpm : bpms) {
+      auto t = Kick(bpm, 0.31, 60.0);
+      CHECK(std::fabs(t->bpm - bpm) < 0.15f);
+      const double beat = 60.0 / bpm;
+      double d = std::fmod(t->firstBeat - 0.31, beat);
+      if (d > beat / 2) d -= beat;
+      if (d < -beat / 2) d += beat;
+      CHECK(std::fabs(d) < 0.02);
+      if (std::fabs(t->bpm - bpm) >= 0.15f || std::fabs(d) >= 0.02) std::printf("  tempo %.1f -> %.3f, decalage %.4f s\n", bpm, t->bpm, d);
+    }
+    // du bruit ne donne pas de tempo precis mais ne plante pas
+    {
+      auto t = std::make_shared<DeckTrack>();
+      std::vector<float> st((size_t)kRate * 30 * 2);
+      unsigned x = 1;
+      for (auto& v : st) { x = x * 1664525u + 1013904223u; v = ((x >> 8) % 2000) / 10000.f - 0.1f; }
+      t->Append(st.data(), st.size() / 2);
+      AnalyzeTrack(*t);
+      CHECK(t->bpm >= 0.f);
+    }
+    // lecture : rien tant qu'aucune piste, puis la piste avance au tempo demande
+    {
+      Mixer m;
+      CHECK(RenderPeak(m, 5) == 0.f);
+      auto t = Kick(120.f, 0.0, 30.0);
+      m.deck[0].Load(t);
+      CHECK(m.Handle("DPLAY A 1"));
+      RenderPeak(m, 100);   // 1 s
+      CHECK(std::fabs(m.deck[0].Position() - 1.0) < 0.05);
+      CHECK(RenderPeak(m, 2) > 0.05f);
+      m.Handle("DTEMPO A 1.5");
+      RenderPeak(m, 100);
+      CHECK(std::fabs(m.deck[0].Position() - 2.5) < 0.1);
+      m.Handle("DPLAY A 0");
+      RenderPeak(m, 10);
+      const double p = m.deck[0].Position();
+      RenderPeak(m, 50);
+      CHECK(std::fabs(m.deck[0].Position() - p) < 1e-6);   // arrete : plus de mouvement
+      CHECK(RenderPeak(m, 3) == 0.f);
+      m.Handle("DSEEK A 10");
+      CHECK(std::fabs(m.deck[0].Position() - 10.0) < 0.001);
+      m.Handle("DSEEK A 9999");
+      CHECK(m.deck[0].Position() < 30.0);
+      m.Handle("DEJECT A");
+      CHECK(!m.deck[0].Loaded());
+      CHECK(RenderPeak(m, 3) == 0.f);
+    }
+    // fin de piste : la platine s'arrete d'elle-meme
+    {
+      Mixer m;
+      m.deck[1].Load(Kick(120.f, 0.0, 2.0));
+      m.Handle("DPLAY B 1");
+      RenderPeak(m, 300);
+      CHECK(!m.deck[1].playing);
+    }
+    // crossfader : courbe « mix » (les deux a fond au centre) et « coupe »
+    {
+      float a, b;
+      Mixer m;
+      m.Handle("XFADE 0"); m.CrossGains(a, b); CHECK(a == 1.f && b == 0.f);
+      m.Handle("XFADE 1"); m.CrossGains(a, b); CHECK(a == 0.f && b == 1.f);
+      m.Handle("XFADE 0.5"); m.CrossGains(a, b); CHECK(a == 1.f && b == 1.f);
+      m.Handle("XFADE 0.25"); m.CrossGains(a, b); CHECK(std::fabs(a - 1.f) < 1e-6f && std::fabs(b - 0.5f) < 1e-6f);
+      m.Handle("XFCURVE 1"); m.Handle("XFADE 0.45"); m.CrossGains(a, b); CHECK(a == 1.f && b == 1.f);
+      m.Handle("XFADE 0.98"); m.CrossGains(a, b); CHECK(a < 0.4f && b == 1.f);   // coupe : plein presque jusqu'au bord, puis chute nette
+      // la platine A, crossfader tout a droite, ne fait aucun bruit
+      Mixer n;
+      n.deck[0].Load(Kick(120.f, 0.0, 10.0));
+      n.Handle("DPLAY A 1"); n.Handle("XFADE 1");
+      RenderPeak(n, 10);
+      CHECK(RenderPeak(n, 10) == 0.f);
+      n.Handle("XFADE 0");
+      CHECK(RenderPeak(n, 10) > 0.05f);
+    }
+    // boucle : de 4 temps a 120 BPM = 2 s ; la lecture reste dans la boucle
+    {
+      Mixer m;
+      m.deck[0].Load(Kick(120.f, 0.0, 30.0));
+      m.Handle("DSEEK A 8.1"); m.Handle("DPLAY A 1");
+      RenderPeak(m, 5);
+      m.Handle("DLOOP A 4");
+      double lo = 1e9, hi = 0;
+      for (int i = 0; i < 600; i++) { RenderPeak(m, 1); const double p = m.deck[0].Position(); lo = std::min(lo, p); hi = std::max(hi, p); }
+      CHECK(hi - lo < 2.05 && hi - lo > 1.8);   // 2 s de boucle, jouee 6 s de suite
+      m.Handle("DLOOP A 0");
+      RenderPeak(m, 300);
+      CHECK(m.deck[0].Position() > hi + 1.0);   // boucle coupee : la lecture repart
+    }
+    // synchro : B (100 BPM) se cale sur A (128 BPM), la phase aussi
+    {
+      Mixer m;
+      m.deck[0].Load(Kick(128.f, 0.15, 40.0));
+      m.deck[1].Load(Kick(100.f, 0.40, 40.0));
+      m.Handle("DSEEK A 12.3"); m.Handle("DSEEK B 7.9");
+      m.Handle("DSYNC B");
+      CHECK(std::fabs(m.deck[1].tempo.load() - 1.28f) < 0.01f);
+      const double a = m.deck[0].Position(), b = m.deck[1].Position();
+      auto phase = [](double pos, double first, double bpm) { double x = (pos - first) / (60.0 / bpm); return x - std::floor(x); };
+      double pa = phase(a, m.deck[0].Bpm() > 0 ? 0.15 : 0, m.deck[0].Bpm()), pb = phase(b, 0.40, m.deck[1].Bpm());
+      double d = pa - pb; d -= std::floor(d + 0.5);
+      CHECK(std::fabs(d) < 0.08);
+      Mixer q;   // sans tempo connu : refus sans effet
+      q.deck[0].Load(std::make_shared<DeckTrack>());
+      q.Handle("DSYNC B");
+      CHECK(q.deck[1].tempo.load() == 1.f);
+    }
+    // egaliseur / filtre de platine : les graves coupes baissent un 60 Hz ; commandes mal formees sans effet
+    {
+      auto level = [](const char* cmd) {
+        Mixer m;
+        auto t = std::make_shared<DeckTrack>();
+        auto tone = Tone(60, 5.f, 0.4f);
+        t->Append(tone->data.data(), tone->frames());
+        m.deck[0].Load(t);
+        m.Handle("DPLAY A 1");
+        if (cmd) m.Handle(cmd);
+        RenderPeak(m, 20);
+        return RenderPeak(m, 10);
+      };
+      const float flat = level(nullptr), cut = level("DEQ A -30 0 0"), lpf = level("DFILT A 1");
+      CHECK(flat > 0.3f && flat < 0.5f);
+      CHECK(cut < flat * 0.2f);
+      CHECK(lpf < flat * 0.2f);   // filtre passe-haut a fond : le 60 Hz disparait
+      Mixer m;
+      CHECK(!m.Handle("DLOAD A x"));   // gere par le programme principal (chargement), pas par le melangeur
+      CHECK(m.Handle("DTEMPO A"));     // pas de valeur : sans effet, sans plantage
+      CHECK(m.Handle("DPLAY Z 1") == false);
+    }
+  }
   if (!fails) std::printf("audio_engine_test : OK\n");
   return fails;
 }

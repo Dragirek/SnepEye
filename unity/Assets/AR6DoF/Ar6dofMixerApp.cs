@@ -7,18 +7,20 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Table de mixage : volumes, muets et niveaux de la voix, du soundboard et de la musique, volume général, visualisation de la sortie (8 au choix),
-    /// une console avancée (faders, solo, balance, égaliseur 3 bandes, limiteur : tout visible d'un coup, sans défiler) et un lecteur de musique
+    /// Table de mixage : volumes, muets et niveaux de la voix, du soundboard et de la musique, volume général, visualisation de la sortie (17 au choix, un clic l'agrandit au-dessus de la fenêtre),
+    /// un onglet DJ à deux platines (formes d'onde, boucles, hot cues, tempo, synchro, crossfader), une console avancée (faders, solo, balance, égaliseur 3 bandes, limiteur : tout visible d'un coup, sans défiler) et un lecteur de musique
     /// avec liste de lecture (pour un fursuiter qui joue de la musique sur ses enceintes). Tout sort sur les enceintes choisies dans l'application Audio.
     /// </summary>
-    public class Ar6dofMixerApp : Ar6dofAppWindow
+    public partial class Ar6dofMixerApp : Ar6dofAppWindow
     {
         static readonly string[] AudioExt = { ".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac", ".mp4" };
         int tab;
         int plPage;
         readonly List<Ar6dofMeterBar> bars = new List<Ar6dofMeterBar>();
         readonly List<Func<AudioMeters, float>> barSel = new List<Func<AudioMeters, float>>();
-        Ar6dofViz viz;
+        Ar6dofViz viz, vizBig;
+        RectTransform bigRoot;
+        bool bigOn;     // le visuel agrandi au-dessus de la fenêtre (un clic sur le petit visuel l'affiche / le cache)
         Text vizName;
         const float ConsoleW = 1000f, NormalW = 720f;
         Slider seek;
@@ -29,20 +31,59 @@ namespace AR6DoF
 
         public Ar6dofMixerApp(Ar6dofDock d) : base(d, "mixer", "Table de mixage", "mixer", "Volumes, muets, niveaux, spectre et lecteur de musique", 720f) { }
 
-        public override void OnClosed() { var a = Ar6dofAudio.Instance; if (a != null) a.StopMusic(); }
+        public override void OnClosed()
+        {
+            var a = Ar6dofAudio.Instance;
+            if (a == null) return;
+            a.StopMusic();
+            for (int d = 0; d < 2; d++) if (a.decks[d].state != 0) a.DjEject(d);   // les pistes des platines (jusqu'a ~110 Mo chacune) sont liberees a la fermeture
+            djPage = 0;
+        }
 
         // la console avancée est large : la fenêtre s'élargit pour qu'on ne défile jamais
-        protected override float MainWidth() { return tab == 1 ? ConsoleW : NormalW; }
+        protected override float MainWidth() { return tab == 3 ? DjW : (tab == 1 ? ConsoleW : NormalW); }
 
-        protected override void OnRebuildStart() { bars.Clear(); barSel.Clear(); viz = null; vizName = null; seek = null; timeLbl = null; }
+        protected override void OnRebuildStart() { bars.Clear(); barSel.Clear(); viz = null; vizBig = null; bigRoot = null; vizName = null; seek = null; timeLbl = null; DjClear(); }
 
         protected override void BuildMain()
         {
             var a = Ar6dofAudio.Instance;
             if (a == null) { Lbl("Audio indisponible", 40, 22); return; }
-            Tabs(new[] { "Table", "Console", "Musique" }, tab, t => tab = t);
+            Tabs(new[] { "Table", "Console", "Musique", "DJ" }, tab, t => tab = t);
             if (!a.Enabled) EngineRow();   // le moteur se lance tout seul a l'usage ; l'interrupteur n'apparait que s'il est eteint
-            if (tab == 0) Table(a); else if (tab == 1) ConsoleTab(a); else Music(a);
+            if (tab == 0) Table(a); else if (tab == 1) ConsoleTab(a); else if (tab == 3) DjTab(a); else Music(a);
+            ApplyBig();
+        }
+
+        // ------------------------------------------------------------------ visuel : clic = agrandi au-dessus de la fenêtre
+        Ar6dofViz MakeViz(Vector2 pos, Vector2 size)
+        {
+            var v = Ar6dofViz.Make(content, pos, size, ToggleBig);
+            var root = (RectTransform)v.transform.parent;
+            var hint = Ar6dofVrUi.Label(root, "Clic : agrandir / reduire", new Vector2(size.x * 0.5f - 112f, -size.y * 0.5f + 14f), new Vector2(210f, 20f), 14, TextAnchor.MiddleRight);
+            hint.color = new Color(1f, 1f, 1f, 0.5f);
+            return v;
+        }
+
+        void ToggleBig() { bigOn = !bigOn; ApplyBig(); }
+
+        void ApplyBig()
+        {
+            if (!bigOn || viz == null)
+            {
+                if (bigRoot != null) bigRoot.gameObject.SetActive(false);
+                return;
+            }
+            if (bigRoot == null)
+            {
+                float bw = W - 20f, bh = bw * 0.42f;
+                vizBig = Ar6dofViz.Make(content, new Vector2(0f, 14f + bh * 0.5f), new Vector2(bw, bh));
+                vizBig.ss = 1f;
+                bigRoot = (RectTransform)vizBig.transform.parent;
+            }
+            bigRoot.gameObject.SetActive(true);
+            vizBig.mode = viz.mode;
+            vizBig.Clear();
         }
 
         // ------------------------------------------------------------------ table
@@ -78,7 +119,7 @@ namespace AR6DoF
             ChannelRow(a, "Musique", 2, m => m.peak[3]);
             ChannelRow(a, "Principal", 3, m => Mathf.Max(m.peak[4], m.peak[5]));
             Section("Visuel de la sortie");
-            viz = Ar6dofViz.Make(content, new Vector2(0f, RowY(150f)), new Vector2(IW, 150f));
+            viz = MakeViz(new Vector2(0f, RowY(150f)), new Vector2(IW, 150f));
             viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
             VizSelector(a, 0f, RowY(48f), IW);
             var info = Lbl("", 26, 18);
@@ -109,6 +150,7 @@ namespace AR6DoF
             int n = Ar6dofViz.Count;
             a.SetViz(((a.data.viz + dir) % n + n) % n);
             if (viz != null) { viz.mode = a.data.viz; viz.Clear(); }
+            if (vizBig != null) { vizBig.mode = a.data.viz; vizBig.Clear(); }
             if (vizName != null) vizName.text = VizLabel(a);
         }
 
@@ -137,7 +179,7 @@ namespace AR6DoF
             float px = x0 + 4f * (StripW + StripGap) + 6f;
             float pw = IW - (px - x0);
             float pc = px + pw * 0.5f;
-            viz = Ar6dofViz.Make(content, new Vector2(pc, -(top + 115f)), new Vector2(pw, 230f));
+            viz = MakeViz(new Vector2(pc, -(top + 115f)), new Vector2(pw, 230f));
             viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
             VizSelector(a, pc, -(top + 230f + 8f + 22f), pw);
 
@@ -354,6 +396,8 @@ namespace AR6DoF
             var m = a.Meters;
             for (int i = 0; i < bars.Count; i++) bars[i].SetPeak(barSel[i](m));
             if (viz != null) viz.Feed(m, Time.unscaledTime);
+            if (tab == 3) DjTick(a, false);
+            if (vizBig != null && bigRoot != null && bigRoot.gameObject.activeSelf) vizBig.Feed(m, Time.unscaledTime);
             if (seekPending && seek != null && Time.unscaledTime - lastUserSeek > 0.2f) { seekPending = false; a.SeekMusic(seek.value); }
         }
     }

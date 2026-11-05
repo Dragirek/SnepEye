@@ -39,7 +39,7 @@ static const int kPortCmd = 9890, kPortMeter = 9891, kPortEvent = 9892;
 static Mixer g_mix;
 static std::atomic<bool> g_quit{false};
 static SOCKET g_tx = INVALID_SOCKET;   // envoi (niveaux + evenements)
-static std::atomic<long long> g_meterUntil{0};
+static std::atomic<long long> g_meterUntil{0}, g_djUntil{0};
 
 static long long NowMs() { return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 static std::string Narrow(const wchar_t* w) {
@@ -352,10 +352,52 @@ class FileDecoder {
 };
 
 // ------------------------------------------------------------------ chargement des sons du soundboard (un seul thread, a la file)
-struct LoadJob { int slot; std::string path; };
+struct LoadJob { int slot; std::string path; int deck = -1; };   // deck >= 0 : piste pour une platine DJ (decodee en entier, analysee)
 static std::mutex g_loadMx;
 static std::condition_variable g_loadCv;
 static std::deque<LoadJob> g_loadQ;
+
+static std::string HexBytes(const uint8_t* p, size_t n) {
+  static const char* h = "0123456789abcdef";
+  std::string o(n * 2, '0');
+  for (size_t i = 0; i < n; i++) { o[2 * i] = h[p[i] >> 4]; o[2 * i + 1] = h[p[i] & 15]; }
+  return o;
+}
+
+// Platine : decode la piste entiere, l'analyse (forme d'onde, tempo, premier temps), la charge, puis envoie la forme d'onde a Unity par morceaux
+// (un octet de crete + un octet de part de graves par point, 50 points par seconde). Les petits envois espaces evitent de saturer le port local.
+static void LoadDeckTrack(const LoadJob& job) {
+  const std::string id = std::to_string(job.deck);
+  Emit("DECK " + id + " loading");
+  FileDecoder d;
+  auto tr = std::make_shared<DeckTrack>();
+  bool ok = d.Open(Widen(job.path));
+  if (ok) {
+    std::vector<float> chunk(8192 * 2);
+    while (!g_quit && !tr->Full()) {
+      const size_t n = d.Read(chunk.data(), 8192);
+      if (n == 0) break;
+      tr->Append(chunk.data(), n);
+    }
+    ok = tr->frames() > 4800;
+  }
+  if (!ok) { Emit("DECK " + id + " err"); return; }
+  AnalyzeTrack(*tr);
+  const std::vector<uint8_t> peak = tr->peak, low = tr->low;
+  const double sec = tr->seconds();
+  const int bpm100 = (int)std::lround(tr->bpm * 100.f), fb = (int)std::lround(tr->firstBeat * 1000.0);
+  g_mix.deck[job.deck].Load(tr);
+  tr.reset();
+  Emit("DECK " + id + " ok " + std::to_string((int)(sec * 1000)) + " " + std::to_string(bpm100) + " " + std::to_string(fb) + " " + std::to_string(peak.size()));
+  const size_t per = 100;
+  for (size_t st = 0; st < peak.size() && !g_quit; st += per) {
+    const size_t n = std::min(per, peak.size() - st);
+    std::vector<uint8_t> pr(n * 2);
+    for (size_t i = 0; i < n; i++) { pr[2 * i] = peak[st + i]; pr[2 * i + 1] = low[st + i]; }
+    Emit("DWAVE " + id + " " + std::to_string(peak.size()) + " " + std::to_string(st) + " " + HexBytes(pr.data(), pr.size()));
+    Sleep(2);
+  }
+}
 
 static void LoaderThread() {
   CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -367,6 +409,7 @@ static void LoaderThread() {
       if (g_loadQ.empty()) continue;
       job = g_loadQ.front(); g_loadQ.pop_front();
     }
+    if (job.deck >= 0) { LoadDeckTrack(job); continue; }
     FileDecoder d;
     auto snd = std::make_shared<Sound>();
     bool ok = d.Open(Widen(job.path));
@@ -451,11 +494,23 @@ static_assert(sizeof(MeterPacket) == 820, "MeterPacket : Unity lit 820 octets");
 
 static std::atomic<bool> g_inRunning{false}, g_outRunning{false};
 
+// etat des platines pour Unity (seulement quand il le demande, ~20 fois par seconde) :
+// DST <pos> <lecture> <tempo> <vu> <boucle> <chargee>  (platine A)  puis les memes pour B, puis le crossfader
+static void EmitDeckStatus() {
+  char b[320];
+  const Deck::Status a = g_mix.deck[0].Get(), c = g_mix.deck[1].Get();
+  std::snprintf(b, sizeof(b), "DST %.2f %d %.4f %.3f %d %d  %.2f %d %.4f %.3f %d %d  %.3f",
+                a.pos, a.playing ? 1 : 0, a.tempo, a.vu, a.loop ? 1 : 0, a.loaded ? 1 : 0,
+                c.pos, c.playing ? 1 : 0, c.tempo, c.vu, c.loop ? 1 : 0, c.loaded ? 1 : 0, g_mix.xfade.load());
+  Emit(b);
+}
+
 static void MeterThread() {
   unsigned seq = 0;
   float a[1024];
   while (!g_quit) {
     Sleep(50);
+    if (NowMs() <= g_djUntil) EmitDeckStatus();
     if (NowMs() > g_meterUntil) continue;
     MeterPacket m;
     m.seq = seq++;
@@ -489,6 +544,12 @@ static void HandleLine(const std::string& line) {
   else if (c == "OUT" && w.size() >= 2) SetDevice("out", w[1]);
   else if (c == "DEVLIST") ListDevices();
   else if (c == "METER") g_meterUntil = NowMs() + 3000;
+  else if (c == "DJWATCH") g_djUntil = NowMs() + 3000;
+  else if (c == "DLOAD") {
+    const auto p = SplitWords(line, 3);
+    const int dk = p.size() >= 3 ? Mixer::DeckIdx(p[1]) : -1;
+    if (dk >= 0) { std::lock_guard<std::mutex> l(g_loadMx); g_loadQ.push_back({-1, p[2], dk}); g_loadCv.notify_one(); }
+  }
   else if (c == "PING") Emit("PONG");
   else if (c == "QUIT") g_quit = true;
   else if (c == "LOAD") {
