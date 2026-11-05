@@ -25,7 +25,7 @@ namespace AR6DoF
         Ar6dofCalEvent ed, edOrig;     // ed : copie en cours de modification ; edOrig : l'evenement d'origine (null = nouveau ou ligne du scan)
         ScanItem edScan;
         Phase phase = Phase.Idle;
-        string status = "", scanMsg = "", agendaMsg = "";
+        string status = "", scanMsg = "", agendaMsg = "", scanInfo = "";
         readonly List<string> raw = new List<string>();
         readonly List<ScanItem> found = new List<ScanItem>();
         Ar6dofOcr.Job job;
@@ -210,7 +210,7 @@ namespace AR6DoF
             var pt = dock.passthrough;
             Ar6dofNotifyService.Resolve("scan");
             found.Clear(); raw.Clear();
-            showRaw = false; scanMsg = ""; page = 0; lastCount = -1;
+            showRaw = false; scanMsg = ""; scanInfo = ""; page = 0; lastCount = -1;
             if (pt == null || pt.PhotoBusy)
             {
                 Fail("Camera indisponible : le passthrough n'est pas pret");
@@ -219,7 +219,8 @@ namespace AR6DoF
             phase = Phase.Countdown;
             status = Ar6dofLoc.F("Scan dans {0} s...", Mathf.CeilToInt(ScanDelay));
             var es = pt.EyeSize;
-            var o = new Ar6dofPassthrough.PhotoOptions { withUi = false, eye = 0, width = es.x, height = es.y, folder = TempFolder };
+            // 8 images accumulees (bruit reduit, grille x2), en niveaux de gris, contraste etire et image sombre relevee : la lecture de texte en profite
+            var o = new Ar6dofPassthrough.PhotoOptions { withUi = false, eye = 0, width = es.x, height = es.y, folder = TempFolder, burst = 8, upscale = 2, forText = true };
             pt.TakePhoto(o, ScanDelay, OnCount, null, OnPhoto);
             Rebuild();
         }
@@ -251,8 +252,10 @@ namespace AR6DoF
                 return;
             }
             if (files == null || files.Count == 0) { Fail("Photo impossible : rien n'a ete enregistre"); return; }
+            var pt0 = dock.passthrough;
             phase = Phase.Reading;
             status = Ar6dofLoc.T("Lecture du texte...");
+            scanInfo = pt0 != null ? pt0.LastStackInfo : "";
             job = Ar6dofOcr.Start(files[0]);
             if (Open) Rebuild();
         }
@@ -272,6 +275,7 @@ namespace AR6DoF
             raw.Clear(); found.Clear();
             if (j.error.Length > 0) { Fail(j.error); return; }
             raw.AddRange(j.lines);
+            if (j.info.Length > 0) scanInfo = (scanInfo.Length > 0 ? scanInfo + " ; " : "") + "OCR " + j.info;
             DateTime now = DateTime.Now;
             foreach (var p in Ar6dofCalParser.Parse(raw, now))
             {
@@ -326,6 +330,7 @@ namespace AR6DoF
                             showRaw ? "Cacher le texte lu" : "Voir le texte lu", (Action)(() => { showRaw = !showRaw; Rebuild(); }));
             if (showRaw)
             {
+                if (scanInfo.Length > 0) Para(scanInfo, 28, 15);
                 if (raw.Count == 0) Para("Aucun texte lu.", 30, 18);
                 else
                 {

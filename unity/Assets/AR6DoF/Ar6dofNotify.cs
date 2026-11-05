@@ -273,6 +273,7 @@ namespace AR6DoF
             bool shownPause = true;
             refreshers.Add(() =>
             {
+                a.WantMeters();   // sans cette demande le moteur n'envoie plus l'etat (pause, position) quand la table de mixage est fermee
                 nameLbl.text = a.TrackName;
                 var m = a.Meters;
                 timeLbl.text = Mmss(m.musicPos) + " / " + Mmss(m.musicDur);
@@ -346,9 +347,16 @@ namespace AR6DoF
 
         void OnNote(Ar6dofNote n)
         {
+            // toucher une notification : elle disparait de la liste et l'application concernee s'ouvre (le panneau se range alors)
             var svc = Ar6dofNotifyService.Instance;
-            if (svc != null) svc.MarkRead(n);
-            if (!string.IsNullOrEmpty(n.app) && !dock.IsOpen(n.app)) dock.OpenApp(n.app);
+            string app = n.app;
+            if (svc != null) svc.Remove(n);
+            if (!string.IsNullOrEmpty(app))
+            {
+                dock.OpenApp(app);
+                dock.StowCanvas(canvas);
+                return;
+            }
             if (canvas != null && canvas.gameObject.activeSelf) Rebuild();
         }
 

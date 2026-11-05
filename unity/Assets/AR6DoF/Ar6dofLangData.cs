@@ -1185,6 +1185,15 @@ namespace AR6DoF
             "Effacer tous les evenements => Delete all events",
             "Delai depasse (la lecture du texte a pris plus de 45 s) => Timed out (reading the text took more than 45 s)",
             "Aucune langue avec reconnaissance de texte dans Windows (Parametres > Heure et langue > Langue : ajoute le francais) => No language with text recognition in Windows (Settings > Time & language > Language: add French)",
+            "Qualite : normale => Quality: normal",
+            "Qualite : 8 images accumulees => Quality: 8 frames stacked",
+            "Qualite : 8 images, grille x2 => Quality: 8 frames, x2 grid",
+            "Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s. => Stacking: stay still for a second; the computation takes 1 to 3 s.",
+            "Hauteur des nuages et effets => Cloud and effects height",
+            "Tres haut => Very high",
+            "Maillage ondulant => Wavy mesh",
+            "Filaments => Filaments",
+            "Barres et vagues => Bars and waves",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2360,6 +2369,15 @@ namespace AR6DoF
             "Effacer tous les evenements => Eliminar todos los eventos",
             "Delai depasse (la lecture du texte a pris plus de 45 s) => Tiempo agotado (la lectura del texto tardo mas de 45 s)",
             "Aucune langue avec reconnaissance de texte dans Windows (Parametres > Heure et langue > Langue : ajoute le francais) => Ningun idioma con reconocimiento de texto en Windows (Configuracion > Hora e idioma > Idioma: anade el frances)",
+            "Qualite : normale => Calidad: normal",
+            "Qualite : 8 images accumulees => Calidad: 8 imagenes acumuladas",
+            "Qualite : 8 images, grille x2 => Calidad: 8 imagenes, rejilla x2",
+            "Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s. => Acumulacion: quedate quieto un segundo; el calculo tarda de 1 a 3 s.",
+            "Hauteur des nuages et effets => Altura de nubes y efectos",
+            "Tres haut => Muy alto",
+            "Maillage ondulant => Malla ondulante",
+            "Filaments => Filamentos",
+            "Barres et vagues => Barras y ondas",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -3542,6 +3560,15 @@ namespace AR6DoF
             "Effacer tous les evenements => Alle Termine loeschen",
             "Delai depasse (la lecture du texte a pris plus de 45 s) => Zeitueberschreitung (das Lesen des Textes dauerte ueber 45 s)",
             "Aucune langue avec reconnaissance de texte dans Windows (Parametres > Heure et langue > Langue : ajoute le francais) => Keine Sprache mit Texterkennung in Windows (Einstellungen > Zeit und Sprache > Sprache: Franzoesisch hinzufuegen)",
+            "Qualite : normale => Qualitaet: normal",
+            "Qualite : 8 images accumulees => Qualitaet: 8 Bilder gestapelt",
+            "Qualite : 8 images, grille x2 => Qualitaet: 8 Bilder, Raster x2",
+            "Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s. => Stapeln: bleib eine Sekunde ruhig; die Berechnung dauert 1 bis 3 s.",
+            "Hauteur des nuages et effets => Hoehe von Wolken und Effekten",
+            "Tres haut => Sehr hoch",
+            "Maillage ondulant => Wellenmuster",
+            "Filaments => Filamente",
+            "Barres et vagues => Balken und Wellen",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -4724,6 +4751,15 @@ namespace AR6DoF
             "Effacer tous les evenements => Elimina tutti gli eventi",
             "Delai depasse (la lecture du texte a pris plus de 45 s) => Tempo scaduto (la lettura del testo ha richiesto oltre 45 s)",
             "Aucune langue avec reconnaissance de texte dans Windows (Parametres > Heure et langue > Langue : ajoute le francais) => Nessuna lingua con riconoscimento del testo in Windows (Impostazioni > Ora e lingua > Lingua: aggiungi il francese)",
+            "Qualite : normale => Qualita: normale",
+            "Qualite : 8 images accumulees => Qualita: 8 immagini accumulate",
+            "Qualite : 8 images, grille x2 => Qualita: 8 immagini, griglia x2",
+            "Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s. => Accumulo: stai fermo un secondo; il calcolo richiede da 1 a 3 s.",
+            "Hauteur des nuages et effets => Altezza di nuvole ed effetti",
+            "Tres haut => Molto alto",
+            "Maillage ondulant => Rete ondulata",
+            "Filaments => Filamenti",
+            "Barres et vagues => Barre e onde",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -5905,6 +5941,15 @@ namespace AR6DoF
             "Effacer tous les evenements => Excluir todos os eventos",
             "Delai depasse (la lecture du texte a pris plus de 45 s) => Tempo esgotado (a leitura do texto levou mais de 45 s)",
             "Aucune langue avec reconnaissance de texte dans Windows (Parametres > Heure et langue > Langue : ajoute le francais) => Nenhum idioma com reconhecimento de texto no Windows (Configuracoes > Hora e idioma > Idioma: adicione o frances)",
+            "Qualite : normale => Qualidade: normal",
+            "Qualite : 8 images accumulees => Qualidade: 8 imagens acumuladas",
+            "Qualite : 8 images, grille x2 => Qualidade: 8 imagens, grade x2",
+            "Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s. => Acumulacao: fique parado um segundo; o calculo leva de 1 a 3 s.",
+            "Hauteur des nuages et effets => Altura das nuvens e efeitos",
+            "Tres haut => Muito alto",
+            "Maillage ondulant => Malha ondulante",
+            "Filaments => Filamentos",
+            "Barres et vagues => Barras e ondas",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

@@ -19,6 +19,7 @@ namespace AR6DoF
         {
             public volatile bool done;
             public string error = "";
+            public string info = "";   // taille de l'image lue et langue de reconnaissance
             public List<string> lines = new List<string>();
         }
 
@@ -43,6 +44,7 @@ namespace AR6DoF
         {
             string p = path.Replace("'", "''");
             return
+                "$ProgressPreference = 'SilentlyContinue'\n" +
                 "$ErrorActionPreference = 'Stop'\n" +
                 "try {\n" +
                 "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n" +
@@ -79,6 +81,7 @@ namespace AR6DoF
                 "  } catch { $bmp = $null }\n" +
                 "}\n" +
                 "if ($bmp -eq $null) { $bmp = Await ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap]) }\n" +
+                "try { Write-Output ('I:' + $bmp.PixelWidth + 'x' + $bmp.PixelHeight + ' ' + $eng.RecognizerLanguage.DisplayName) } catch { }\n" +
                 "$res = Await ($eng.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])\n" +
                 "foreach ($l in $res.Lines) { Write-Output ('L:' + $l.Text) }\n" +
                 "} catch { Write-Output ('E:' + $_.Exception.Message) }\n";
@@ -87,12 +90,13 @@ namespace AR6DoF
         static void Run(string path, Job job)
         {
             string enc = Convert.ToBase64String(Encoding.Unicode.GetBytes(Script(path)));
-            var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + enc)
+            var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand " + enc)
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8, WindowStyle = ProcessWindowStyle.Hidden,
             };
             string output, err = "";
+            int p0Exit = 0;
             using (var p = Process.Start(psi))
             {
                 var errTask = p.StandardError.ReadToEndAsync();   // lu en parallele : sinon un long message d'erreur bloquerait le programme
@@ -105,12 +109,14 @@ namespace AR6DoF
                 }
                 output = outTask.Result;
                 err = errTask.Result;
+                p0Exit = p.ExitCode;
             }
             string msg = "";
             foreach (string raw in output.Split('\n'))
             {
                 string l = raw.TrimEnd('\r');
                 if (l.StartsWith("L:")) { string t = l.Substring(2).Trim(); if (t.Length > 0) job.lines.Add(t); }
+                else if (l.StartsWith("I:")) job.info = l.Substring(2).Trim();
                 else if (l.StartsWith("E:")) msg = l.Substring(2).Trim();
             }
             if (msg.Length > 0)
@@ -120,11 +126,10 @@ namespace AR6DoF
                     : "Lecture impossible : " + (msg.Length > 160 ? msg.Substring(0, 160) : msg);
                 return;
             }
-            if (job.lines.Count == 0 && err.Trim().Length > 0)
-            {
-                err = err.Trim();
+            // le flux d'erreurs de PowerShell contient souvent du bruit « #< CLIXML » (avancement) qui n'est pas une erreur : on ne le prend jamais pour un echec
+            err = err.Trim();
+            if (job.lines.Count == 0 && err.Length > 0 && !err.StartsWith("#< CLIXML") && p0Exit != 0)
                 job.error = "Lecture impossible : " + (err.Length > 160 ? err.Substring(0, 160) : err);
-            }
         }
     }
 }

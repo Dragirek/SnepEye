@@ -18,7 +18,8 @@ namespace AR6DoF
         public static readonly string[] Names =
         {
             "Barres", "Miroir", "Courbe", "Oscilloscope", "Spectrogramme", "Circulaire", "Ondes psychedeliques", "Aiguilles VU",
-            "Alchimie", "Ambiance", "Cubes", "Particules", "Tunnel", "Pics", "Feux d'artifice", "Couleurs musicales", "Toile"
+            "Alchimie", "Ambiance", "Cubes", "Particules", "Tunnel", "Pics", "Feux d'artifice", "Couleurs musicales", "Toile",
+            "Maillage ondulant", "Filaments", "Barres et vagues"
         };
         public static int Count { get { return Names.Length; } }
 
@@ -166,6 +167,9 @@ namespace AR6DoF
                 case 13: Spikes(vh, r); break;
                 case 14: Fireworks(vh, r); break;
                 case 15: MusicalColors(vh, r); break;
+                case 17: WaveMesh(vh, r); break;
+                case 18: Filaments(vh, r); break;
+                case 19: BarsWaves(vh, r); break;
                 default: Web(vh, r); break;
             }
         }
@@ -625,6 +629,125 @@ namespace AR6DoF
             {
                 float a = rot + i * Mathf.PI * 2f / seg;
                 Line(vh, c, c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * rmax, 1f, A(txt, 0.12f));
+            }
+        }
+
+        // ------------------------------------------------------------------ visuels plus proches des captures du Lecteur Windows Media (originaux, pas des copies)
+        // -- 18. maillage ondulant : un filet de lignes colorees qui ondule avec les graves, et des orbes orange lumineux qui glissent dessus
+        Vector2 MeshPt(Rect r, float u, float v, float amp, float amp2)
+        {
+            float x = r.xMin + u * r.width + Mathf.Sin(v * 5f + phase * 1.3f + u * 3f) * amp2 * 0.8f;
+            float y = r.yMin + v * r.height + Mathf.Sin(u * 7f + phase * 1.1f + v * 2f) * amp + Mathf.Sin(u * 13f - phase * 1.9f + v * 4f) * amp2;
+            return new Vector2(x, y);
+        }
+
+        void WaveMesh(VertexHelper vh, Rect r)
+        {
+            const int hl = 9, vl = 15, seg = 48;
+            float amp = r.height * (0.04f + 0.17f * Mathf.Clamp01(bass * 1.6f));
+            float amp2 = r.height * (0.015f + 0.07f * Mathf.Clamp01(mid * 2f));
+            // lignes verticales, fines et ternes (le filet), puis horizontales plus vives
+            for (int i = 0; i < vl; i++)
+            {
+                float u = 0.03f + 0.94f * i / (vl - 1f);
+                Color c = Hue(0.52f + 0.30f * u + phase * 0.02f, 0.55f, 1f, 0.35f);
+                Vector2 prev = MeshPt(r, u, 0.1f, amp, amp2);
+                for (int k = 1; k <= 20; k++)
+                {
+                    Vector2 q = MeshPt(r, u, 0.1f + 0.8f * k / 20f, amp, amp2);
+                    Line(vh, prev, q, 1.2f, c);
+                    prev = q;
+                }
+            }
+            for (int j = 0; j < hl; j++)
+            {
+                float v = 0.1f + 0.8f * j / (hl - 1f);
+                Color c = Hue(0.58f + 0.38f * j / (hl - 1f) + phase * 0.03f, 0.75f, 1f, 0.85f);
+                Vector2 prev = MeshPt(r, 0.02f, v, amp, amp2);
+                for (int k = 1; k <= seg; k++)
+                {
+                    Vector2 q = MeshPt(r, 0.02f + 0.96f * k / seg, v, amp, amp2);
+                    Line(vh, prev, q, 5f, A(c, 0.18f));   // halo
+                    Line(vh, prev, q, 1.8f, c);
+                    prev = q;
+                }
+            }
+            // orbes orange
+            for (int o = 0; o < 5; o++)
+            {
+                float u = 0.5f + 0.44f * Mathf.Sin(phase * (0.30f + 0.05f * o) + o * 1.3f);
+                float v = 0.5f + 0.34f * Mathf.Sin(phase * (0.26f + 0.04f * o) + o * 2.1f + 0.7f);
+                Vector2 p = MeshPt(r, u, v, amp, amp2);
+                float rad = r.height * (0.045f + 0.055f * Mathf.Clamp01(treble * 2f + bass));
+                Color halo = new Color(1f, 0.50f, 0.08f, 0.55f);
+                Disc(vh, p, rad * 2.6f, halo, A(halo, 0f), 16);
+                Disc(vh, p, rad, new Color(1f, 0.95f, 0.70f, 1f), new Color(1f, 0.55f, 0.10f, 0.85f), 16);
+            }
+        }
+
+        // -- 19. filaments : des brins translucides bleu-blanc qui tissent une forme vivante, avec des orbes roses qui la parcourent
+        static Vector2 FilPt(Rect r, float th, float ph, float ax, float ay, float ph2)
+        {
+            float x = Mathf.Sin(th * 2f + ph2 * 0.5f + ph) * ax * (0.80f + 0.20f * Mathf.Sin(th * 3f + ph2));
+            float y = Mathf.Sin(th * 3f + ph2 * 0.7f + ph * 1.3f) * ay * (0.85f + 0.15f * Mathf.Cos(th * 2f - ph2 * 0.6f));
+            return new Vector2(r.center.x + x, r.center.y + y);
+        }
+
+        void Filaments(VertexHelper vh, Rect r)
+        {
+            const int strands = 12, seg = 84;
+            float ax = r.width * 0.36f, ay = r.height * (0.34f + 0.10f * Mathf.Clamp01(bass * 1.5f));
+            for (int s = 0; s < strands; s++)
+            {
+                float k = s / (strands - 1f);
+                float ph = s * 0.16f;
+                float edge = 1f - Mathf.Abs(k - 0.5f) * 2f;   // les brins du milieu sont les plus clairs
+                Color c = Color.Lerp(new Color(0.35f, 0.58f, 1f), Color.white, 0.25f + 0.55f * edge);
+                c.a = 0.22f + 0.30f * edge;
+                Vector2 prev = Vector2.zero;
+                for (int i = 0; i <= seg; i++)
+                {
+                    float th = i * Mathf.PI * 2f / seg;
+                    float e = lvl[(i * Bands / seg) % Bands];
+                    Vector2 q = FilPt(r, th, ph, ax * (1f + 0.22f * e), ay * (1f + 0.30f * e), phase);
+                    if (i > 0) Line(vh, prev, q, 1.6f, c);
+                    prev = q;
+                }
+            }
+            for (int o = 0; o < 3; o++)
+            {
+                Vector2 p = FilPt(r, phase * 0.55f + o * 2.1f, 0.5f, ax, ay, phase);
+                float rad = r.height * (0.05f + 0.05f * Mathf.Clamp01(treble * 2f + mid));
+                Color halo = new Color(1f, 0.35f, 0.75f, 0.55f);
+                Disc(vh, p, rad * 2.6f, halo, A(halo, 0f), 16);
+                Disc(vh, p, rad, new Color(1f, 0.88f, 0.96f, 1f), new Color(1f, 0.40f, 0.78f, 0.85f), 16);
+            }
+        }
+
+        // -- 20. barres et vagues : le spectre en barres translucides bleues, et la forme d'onde qui ondule par-dessus
+        void BarsWaves(VertexHelper vh, Rect r)
+        {
+            float slot = r.width / Bands, bw = slot * 0.8f;
+            Color lo = new Color(0.10f, 0.25f, 0.85f, 0.85f), hi = new Color(0.45f, 0.85f, 1f, 0.45f);
+            for (int i = 0; i < Bands; i++)
+            {
+                float x = r.xMin + slot * (i + 0.5f) - bw * 0.5f;
+                float h = Mathf.Max(2f, lvl[i] * r.height * 0.8f);
+                Box(vh, x, r.yMin, x + bw, r.yMin + h, lo, hi);
+                float hy = r.yMin + Mathf.Max(3f, hold[i] * r.height * 0.8f);
+                Box(vh, x, hy - 1.5f, x + bw, hy + 1.5f, Color.white, Color.white);
+            }
+            Vector2 prev = Vector2.zero;
+            float amp = r.height * 0.34f, cy = r.center.y + r.height * 0.08f;
+            for (int i = 0; i < WaveN; i++)
+            {
+                var pt = new Vector2(r.xMin + r.width * i / (WaveN - 1f), cy + Mathf.Clamp(wave[i] * 1.8f, -1f, 1f) * amp);
+                if (i > 0)
+                {
+                    Line(vh, prev, pt, 10f, new Color(0.6f, 0.85f, 1f, 0.20f));
+                    Line(vh, prev, pt, 2.4f, new Color(0.95f, 0.98f, 1f, 0.95f));
+                }
+                prev = pt;
             }
         }
 

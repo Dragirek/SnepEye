@@ -119,15 +119,21 @@ namespace AR6DoF
             ChannelRow(a, "Musique", 2, m => m.peak[3]);
             ChannelRow(a, "Principal", 3, m => Mathf.Max(m.peak[4], m.peak[5]));
             Section("Visuel de la sortie");
-            viz = MakeViz(new Vector2(0f, RowY(150f)), new Vector2(IW, 150f));
-            viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
-            VizSelector(a, 0f, RowY(48f), IW);
+            VizBlock(a, 150f, IW);
             var info = Lbl("", 26, 18);
             refreshers.Add(() => info.text = Ar6dofLoc.F("Sons en cours : {0}", a.Meters.voices));
             Btn("Tout arreter (sons et musique)", () => { a.StopAllSounds(); a.StopMusic(); Refresh(); }, 48f, 22);
         }
 
         // ------------------------------------------------------------------ sélecteur de visuel
+        // la fenetre visuelle + son sélecteur, identiques dans les quatre onglets (un seul visuel actif a la fois : il est refait a chaque changement d'onglet)
+        void VizBlock(Ar6dofAudio a, float h, float w)
+        {
+            viz = MakeViz(new Vector2(0f, RowY(h)), new Vector2(w, h));
+            viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
+            VizSelector(a, 0f, RowY(48f), w);
+        }
+
         void VizSelector(Ar6dofAudio a, float cx, float cy, float w)
         {
             const float bw = 64f, h = 44f;
@@ -354,6 +360,8 @@ namespace AR6DoF
                 shTxt.text = Ar6dofLoc.T("Aleatoire : ") + Ar6dofLoc.T(a.data.shuffle ? "Oui" : "Non");
                 Ar6dofTheme.SetSelected(shBtn, a.data.shuffle);
             });
+
+            VizBlock(a, 130f, IW);
 
             BtnRow(48f, 20, "Ajouter des musiques", (Action)(() =>
             {

@@ -321,6 +321,9 @@ namespace AR6DoF
             public int eye;                // 0 = camera gauche, 1 = camera droite
             public int width = 1600, height = 1200;   // resolution d'un oeil de la camera
             public string folder = "";
+            public int burst = 1;          // nombre d'images camera accumulees (1 = une seule, comme avant) : moins de bruit, un peu plus de detail
+            public int upscale = 1;        // 2 = l'accumulation range les pixels sur une grille deux fois plus fine
+            public bool forText = false;   // pour la lecture de texte : niveaux de gris, contraste etire, image sombre relevee
         }
 
         /// <summary>Dossier des photos : Images\AR6DoF\Photos (un sous-dossier, pour ne pas les melanger aux images de fond des styles).</summary>
@@ -371,25 +374,89 @@ namespace AR6DoF
             var files = new List<string>();
             Texture2D thumb = null;
             string err = null;
-            try
+            string dir = string.IsNullOrEmpty(o.folder) ? PhotosFolder : o.folder;
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            bool fuse = o.burst > 1 || o.forText;
+            int w = Mathf.Clamp(o.width, 64, 4096), h = Mathf.Clamp(o.height, 64, 4096);
+            var frames = new List<Color32[]>();
+            if (!fuse)
             {
-                if (mat == null || compositeCam == null) throw new Exception("Passthrough pas pret");
-                string dir = string.IsNullOrEmpty(o.folder) ? PhotosFolder : o.folder;
-                Directory.CreateDirectory(dir);
-                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                Texture2D tex = Shoot(o.withUi, o);
-                string path = Path.Combine(dir, "ar6dof_" + stamp + ".png");
-                File.WriteAllBytes(path, tex.EncodeToPNG());
-                files.Add(path);
-                thumb = tex;
+                try
+                {
+                    if (mat == null || compositeCam == null) throw new Exception("Passthrough pas pret");
+                    Directory.CreateDirectory(dir);
+                    Texture2D tex = Shoot(o.withUi, o);
+                    string path = Path.Combine(dir, "ar6dof_" + stamp + ".png");
+                    File.WriteAllBytes(path, tex.EncodeToPNG());
+                    files.Add(path);
+                    thumb = tex;
+                }
+                catch (Exception e) { err = e.Message; }
             }
-            catch (Exception e) { err = e.Message; }
+            else
+            {
+                int n = Mathf.Clamp(o.burst, 1, 16);
+                double lastStamp = -1.0;
+                for (int i = 0; i < n && err == null; i++)
+                {
+                    // on attend une NOUVELLE image de la camera (sinon on additionnerait n fois la meme) ; au plus 0,3 s, pour ne jamais bloquer
+                    float until = Time.unscaledTime + 0.3f;
+                    while (i > 0 && FrameStamp() == lastStamp && Time.unscaledTime < until) yield return null;
+                    yield return new WaitForEndOfFrame();
+                    lastStamp = FrameStamp();
+                    try
+                    {
+                        if (mat == null || compositeCam == null) throw new Exception("Passthrough pas pret");
+                        Texture2D t = Shoot(o.withUi, o);
+                        frames.Add(t.GetPixels32());
+                        Destroy(t);
+                    }
+                    catch (Exception e) { err = e.Message; }
+                }
+                if (hideUi != null) hideUi(false);   // les fenetres reviennent pendant le calcul
+                PhotoShooting = false;
+                if (err == null && frames.Count > 0)
+                {
+                    Ar6dofStack.Result fr = null; Exception fex = null;
+                    var task = System.Threading.Tasks.Task.Run(() =>
+                    {
+                        try { fr = Ar6dofStack.Fuse(frames, w, h, Mathf.Clamp(o.upscale, 1, 2), o.forText); }
+                        catch (Exception e) { fex = e; }
+                    });
+                    while (!task.IsCompleted) yield return null;
+                    if (fex != null || fr == null || fr.pixels == null) err = fex != null ? fex.Message : "Accumulation impossible";
+                    else
+                    {
+                        try
+                        {
+                            Directory.CreateDirectory(dir);
+                            var tex = new Texture2D(fr.w, fr.h, TextureFormat.RGB24, false);
+                            tex.SetPixels32(fr.pixels);
+                            tex.Apply(false, false);
+                            string path = Path.Combine(dir, "ar6dof_" + stamp + ".png");
+                            File.WriteAllBytes(path, tex.EncodeToPNG());
+                            files.Add(path);
+                            thumb = tex;
+                            LastStackInfo = fr.used + "/" + fr.total + " images, " + fr.w + "x" + fr.h;
+                        }
+                        catch (Exception e) { err = e.Message; }
+                    }
+                }
+                PhotoBusy = false;
+                if (done != null) done(files, thumb, err);
+                else if (thumb != null) Destroy(thumb);
+                yield break;
+            }
             if (hideUi != null) hideUi(false);
             PhotoShooting = false;
             PhotoBusy = false;
             if (done != null) done(files, thumb, err);
             else if (thumb != null) Destroy(thumb);
         }
+
+        /// <summary>Derniere accumulation : « images gardees/images prises, taille » (pour l'afficher).</summary>
+        public string LastStackInfo = "";
+        double FrameStamp() { return altFeed != null ? altFeed.LastFrameQpc : frameWriteQpc; }
 
         /// <summary>Taille native d'un oeil sur la camera (pixels) : c'est la resolution reelle d'une photo, agrandir n'ajouterait aucun detail.</summary>
         public Vector2Int EyeSize
@@ -490,7 +557,7 @@ namespace AR6DoF
         Texture2D Shoot(bool withUi, PhotoOptions o)
         {
             int w = Mathf.Clamp(o.width, 64, 4096), h = Mathf.Clamp(o.height, 64, 4096);
-            var rt = RenderTexture.GetTemporary(2 * w, h, 0, RenderTextureFormat.ARGB32);
+            var rt = RenderTexture.GetTemporary(2 * w, h, 24, RenderTextureFormat.ARGB32);
             Texture2D res = null;
             var prevActive = RenderTexture.active;
             try

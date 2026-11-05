@@ -77,7 +77,10 @@ namespace AR6DoF
             float h1 = DjMixerColumn(a, xm, top, midW);
             y = top + Mathf.Max(h0, Mathf.Max(h1, h2)) + Gap;
 
+            // import visible directement sur les platines (avant, il fallait ouvrir « Charger... » pour trouver le bouton)
+            BtnRow(48f, 20, "Ajouter des musiques", (Action)(() => DjImport(a, false)));
             Para("Les pistes sortent par la tranche Musique (son general inclus). Le tempo change aussi la hauteur du son (comme un tourne-disque). Les reperes ne sont pas gardes.", 46, 15);
+            VizBlock(a, 130f, IW);
             DjTick(a, true);
         }
 
@@ -372,6 +375,24 @@ namespace AR6DoF
             return n + "   " + k.name + "     " + bpm + "     " + DjPercent(k.tempo) + "     " + Clock(k.pos) + " / -" + Clock(Mathf.Max(0f, k.dur - k.pos));
         }
 
+        // ajoute des fichiers a la liste de lecture ; depuis les platines on arrive ensuite dans la bibliotheque pour en charger un tout de suite
+        void DjImport(Ar6dofAudio a, bool fromLibrary)
+        {
+            Browse("Ajouter des musiques", AudioExt, true, files =>
+            {
+                int before = a.data.playlist.Count;
+                foreach (var f in files) if (!a.data.playlist.Contains(f)) a.data.playlist.Add(f);
+                if (a.data.track < 0 && a.data.playlist.Count > 0) a.data.track = 0;
+                a.MarkDirty();
+                if (!fromLibrary && a.data.playlist.Count > before)
+                {
+                    djPage = 1; djTarget = a.decks[0].state == 2 && a.decks[1].state != 2 ? 1 : 0;
+                    djLibPage = Mathf.Max(0, (a.data.playlist.Count - 1) / DjLibPerPage);
+                }
+                Rebuild();
+            }, Ar6dofLibrary.Music);
+        }
+
         // ------------------------------------------------------------------ bibliothèque (liste de lecture de l'onglet Musique)
         void DjLibrary(Ar6dofAudio a)
         {
@@ -388,16 +409,7 @@ namespace AR6DoF
             }
             if (pages > 1)
                 BtnRow(44f, 21, "<", (Action)(() => { djLibPage = (djLibPage + pages - 1) % pages; Rebuild(); }), Ar6dofLoc.F("Page {0}/{1}", djLibPage + 1, pages), (Action)(() => { }), ">", (Action)(() => { djLibPage = (djLibPage + 1) % pages; Rebuild(); }));
-            BtnRow(48f, 20, "Ajouter des musiques", (Action)(() =>
-            {
-                Browse("Ajouter des musiques", AudioExt, true, files =>
-                {
-                    foreach (var f in files) if (!a.data.playlist.Contains(f)) a.data.playlist.Add(f);
-                    if (a.data.track < 0 && a.data.playlist.Count > 0) a.data.track = 0;
-                    a.MarkDirty();
-                    Rebuild();
-                }, Ar6dofLibrary.Music);
-            }), "Retour aux platines", (Action)(() => { djPage = 0; Rebuild(); }));
+            BtnRow(48f, 20, "Ajouter des musiques", (Action)(() => DjImport(a, true)), "Retour aux platines", (Action)(() => { djPage = 0; Rebuild(); }));
             Para("Une piste est lue en entier (10 minutes au maximum). L'analyse du tempo prend quelques secondes.", 40, 16);
         }
     }

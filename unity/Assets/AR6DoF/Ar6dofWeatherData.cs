@@ -44,7 +44,7 @@ namespace AR6DoF
     // source : d'ou vient la position (affichee dans la fenetre) : "windows", "ip", "manual", "search"
     [Serializable] public class WxPlace { public string name = "", country = "", countryCode = "", source = ""; public double lat, lon; public bool valid; }
     // units : -1 selon le pays, 0 métrique, 1 impérial. off : masque de bits des elements caches (Ar6dofWeatherApp.Opt*)
-    [Serializable] public class WxPrefs { public WxPlace place = new WxPlace(); public int units = -1; public int off; public int plus; public int dropSel, frameSel; }   // plus : 1 = montrer la page « Plus » ; dropSel / frameSel : 0 = réglage par défaut, sinon niveau + 1
+    [Serializable] public class WxPrefs { public WxPlace place = new WxPlace(); public int units = -1; public int off; public int plus; public int dropSel, frameSel, cloudSel; }   // plus : 1 = montrer la page « Plus » ; dropSel / frameSel : 0 = réglage par défaut, sinon niveau + 1
 
     [Serializable] class GeoItem { public string name = "", country = "", admin1 = "", country_code = ""; public double latitude, longitude; }
     [Serializable] class GeoResp { public GeoItem[] results; }
@@ -204,7 +204,7 @@ namespace AR6DoF
                 if (File.Exists(FilePath))
                 {
                     var p = JsonUtility.FromJson<WxPrefs>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (p != null && p.place != null) { prefs.place = p.place; prefs.units = p.units; prefs.off = p.off; prefs.plus = p.plus; prefs.dropSel = p.dropSel; prefs.frameSel = p.frameSel; Coarsen(prefs.place); }
+                    if (p != null && p.place != null) { prefs.place = p.place; prefs.units = p.units; prefs.off = p.off; prefs.plus = p.plus; prefs.dropSel = p.dropSel; prefs.frameSel = p.frameSel; prefs.cloudSel = p.cloudSel; Coarsen(prefs.place); }
                 }
             }
             catch (Exception) { }

@@ -24,6 +24,7 @@ Shader "AR6DoF/Toon"
             #pragma target 3.0
             #include "UnityCG.cginc"
             float4 _Color, _Shade, _OutlineColor, _Light;
+            float4x4 _ClipM; float4 _ClipHalf;   // coupe au cadre : x, y dans le repere du cadre (z = 1 : actif) ; la profondeur reste libre
             float _Outline, _Emit;
             struct appdata { float4 vertex : POSITION; float3 normal : NORMAL; };
             struct v2f { float4 pos : SV_POSITION; float3 n : TEXCOORD0; float3 wpos : TEXCOORD1; };
@@ -37,6 +38,11 @@ Shader "AR6DoF/Toon"
             }
             float4 frag (v2f i) : SV_Target
             {
+                if (_ClipHalf.z > 0.5)
+                {
+                    float3 q = mul(_ClipM, float4(i.wpos, 1.0)).xyz;
+                    clip(float2(_ClipHalf.x - abs(q.x), _ClipHalf.y - abs(q.y)));
+                }
                 float3 n = normalize(i.n);
                 float3 v = normalize(_WorldSpaceCameraPos - i.wpos);
                 float3 l = normalize(_Light.xyz);

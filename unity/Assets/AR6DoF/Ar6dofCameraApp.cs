@@ -16,7 +16,7 @@ namespace AR6DoF
         static readonly int[] Timers = { 0, 3, 5, 10 };
         const int PreviewLayer = 30;   // la fenetre est sur cette couche : l'apercu en direct l'exclut (sinon il se filmerait lui-meme)
 
-        int ui, eye, timer;
+        int ui, eye, timer, quality;   // quality : 0 normale, 1 accumulee (8 images), 2 accumulee sur grille x2
         string status = "";
         Text shootLabel;
         Text countOverlay;
@@ -29,7 +29,7 @@ namespace AR6DoF
 
         public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct et photo du passthrough", 700f)
         {
-            ui = Get("ui", 1); eye = Get("eye", 0); timer = Get("timer", 1);
+            ui = Get("ui", 1); eye = Get("eye", 0); timer = Get("timer", 1); quality = Get("quality", 0);
         }
 
         static int Get(string k, int def) { try { return PlayerPrefs.GetInt("ar6dof_cam_" + k, def); } catch (Exception) { return def; } }
@@ -81,7 +81,7 @@ namespace AR6DoF
             if (preview != null && (preview.height != h || preview.width != 2 * w)) ReleasePreview();
             if (preview == null)
             {
-                preview = new RenderTexture(2 * w, h, 0, RenderTextureFormat.ARGB32);
+                preview = new RenderTexture(2 * w, h, 24, RenderTextureFormat.ARGB32);
                 preview.Create();
             }
         }
@@ -131,6 +131,10 @@ namespace AR6DoF
                 Ar6dofTheme.SetSelected(uiBtn, ui != 0);
             });
 
+            var qb = BtnRow(48f, 21, "", (Action)(() => { quality = (quality + 1) % 3; Put("quality", quality); Refresh(); }));
+            var qTxt = qb[0].GetComponentInChildren<Text>();
+            refreshers.Add(() => qTxt.text = Ar6dofLoc.T(quality == 0 ? "Qualite : normale" : (quality == 1 ? "Qualite : 8 images accumulees" : "Qualite : 8 images, grille x2")));
+
             Lbl("Minuteur", 30, 20).MakeAccent();
             var tn = new string[Timers.Length];
             for (int i = 0; i < tn.Length; i++) tn[i] = Timers[i] == 0 ? "Aucun" : Timers[i] + " s";
@@ -147,6 +151,7 @@ namespace AR6DoF
 
             BtnRow(48f, 21, "Ouvrir le dossier", (Action)(() => OpenFolder()));
             Para("Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera.", 28, 16);
+            Para("Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s.", 28, 16);
         }
 
         static void OpenFolder()
@@ -172,6 +177,8 @@ namespace AR6DoF
                 withUi = ui != 0,
                 eye = eye,
                 width = es.x, height = es.y,     // resolution reelle de la camera : agrandir n'ajouterait aucun detail
+                burst = quality == 0 ? 1 : 8,    // accumulation : plusieurs images alignees puis additionnees (moins de bruit, un peu plus de detail)
+                upscale = quality == 2 ? 2 : 1,
             };
             int delay = Timers[Mathf.Clamp(timer, 0, Timers.Length - 1)];
             status = delay > 0 ? "Minuteur lance..." : "";
@@ -230,7 +237,7 @@ namespace AR6DoF
             if (tex != null) UnityEngine.Object.Destroy(tex);
             if (!string.IsNullOrEmpty(err)) status = err == "Annule" ? "Photo annulee" : Ar6dofLoc.F("Echec : {0}", err);
             else if (files.Count == 0) status = "Rien a enregistrer";
-            else status = Ar6dofLoc.F("Photo enregistree : {0}", Path.GetFileName(files[0]));
+            else status = Ar6dofLoc.F("Photo enregistree : {0}", Path.GetFileName(files[0])) + (Pt != null && quality != 0 && Pt.LastStackInfo.Length > 0 ? " (" + Pt.LastStackInfo + ")" : "");
             if (canvas != null && canvas.gameObject.activeSelf) Refresh();
         }
     }

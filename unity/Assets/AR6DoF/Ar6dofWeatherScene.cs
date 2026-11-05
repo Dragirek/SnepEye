@@ -22,7 +22,7 @@ namespace AR6DoF
         public float Flash { get; private set; }
 
         class Toon { public Material m; public Color c, shade; public float emit; public bool cloud, fog; public float snowK; }   // snowK : 0 = ne blanchit jamais, 1 = tout blanc sous la neige
-        class Cloud { public Transform t; public float x, y, z, size, now, rate; }
+        class Cloud { public Transform t; public float x, y, z, size, now, rate, row; }   // row : de combien le nuage est sous le haut du cadre
         class Drop { public Transform t; public float x, y, z, v, ph; }
         class SnowCap { public Transform t; public Vector3 baseScale; }
         class Streak { public Transform t; public float p, y, z, speed; }
@@ -33,7 +33,7 @@ namespace AR6DoF
         readonly Drop[] rain = new Drop[RainN];
         readonly Drop[] snow = new Drop[SnowN];
         readonly Transform[] stars = new Transform[StarN];
-        readonly float[] starPh = new float[StarN];
+        readonly float[] starPh = new float[StarN], starY = new float[StarN];
         const int MistN = 10;
         readonly Transform[] mist = new Transform[MistN];
         readonly float[] mistX = new float[MistN], mistY = new float[MistN], mistZ = new float[MistN], mistSx = new float[MistN], mistSy = new float[MistN],
@@ -45,6 +45,11 @@ namespace AR6DoF
         Transform rig, world, island, sun, sunRays, moon, bolt, hub, treeA, treeB, canopyA, canopyB, blanket;
         Transform[] boltSeg = new Transform[4];
         Toon tCloud, tCloud2, tMist, tLeaves, tRain, tSnow, tHail, tCap, tWind;
+        // cadre : le haut du cadre (en unites de la scene) place les nuages, et tout ce qui sort du cadre en largeur / hauteur est coupe (la profondeur reste libre)
+        float topY = 1.93f, skyShift = 0.22f, cloudShift;
+        RectTransform clipRt;
+        Matrix4x4 clipLast;
+        float FxTop { get { return topY + cloudShift - 1.0f; } }   // d'ou tombent pluie, neige et eclairs : le dessous des nuages
         bool snowMode;   // vrai : la flaque de flocons est de la grêle
 
         // état actuel (qui glisse vers la cible) et cible
@@ -192,23 +197,21 @@ namespace AR6DoF
             caps.Add(new SnowCap { t = tr, baseScale = scale });
         }
 
-        /// <summary>Remplit un nuage avec la forme n° 'k' (0 cumulus, 1 voile plat, 2 tour haute, 3 petit duo, 4 deux bosses, 5 traînée).</summary>
+        /// <summary>Remplit un nuage avec la forme n° 'k' (0 cumulus, 1 gros rond, 2 petit rond, 3 petit duo, 4 deux bosses). Plus de voile long ni de tour haute.</summary>
         void BuildCloudShape(Transform g, int k)
         {
             switch (k)
             {
-                case 1:   // voile plat et long
-                    Part(g, sphere, tCloud2, new Vector3(0f, 0f, 0f), new Vector3(1.50f, 0.34f, 0.60f));
-                    Part(g, sphere, tCloud2, new Vector3(-0.62f, -0.02f, 0.03f), new Vector3(0.95f, 0.30f, 0.50f));
-                    Part(g, sphere, tCloud2, new Vector3(0.66f, -0.02f, -0.02f), new Vector3(1.00f, 0.30f, 0.52f));
-                    Part(g, sphere, tCloud2, new Vector3(0.10f, 0.13f, 0f), new Vector3(0.85f, 0.26f, 0.45f));
+                case 1:   // gros nuage rond et compact (ni long ni haut)
+                    Part(g, sphere, tCloud, new Vector3(-0.30f, 0f, 0f), new Vector3(0.62f, 0.56f, 0.56f));
+                    Part(g, sphere, tCloud, new Vector3(0.30f, -0.02f, 0.02f), new Vector3(0.58f, 0.52f, 0.54f));
+                    Part(g, sphere, tCloud, new Vector3(0f, 0.15f, 0f), new Vector3(0.60f, 0.54f, 0.54f));
+                    Part(g, sphere, tCloud, new Vector3(0f, -0.18f, 0f), new Vector3(1.00f, 0.26f, 0.50f));
                     break;
-                case 2:   // tour haute (cumulus qui monte)
-                    Part(g, sphere, tCloud, new Vector3(0f, -0.10f, 0f), new Vector3(0.95f, 0.40f, 0.60f));
-                    Part(g, sphere, tCloud, new Vector3(-0.05f, 0.16f, 0f), new Vector3(0.62f, 0.56f, 0.52f));
-                    Part(g, sphere, tCloud, new Vector3(0.04f, 0.46f, 0f), new Vector3(0.50f, 0.50f, 0.46f));
-                    Part(g, sphere, tCloud, new Vector3(-0.03f, 0.70f, 0f), new Vector3(0.34f, 0.34f, 0.32f));
-                    Part(g, sphere, tCloud, new Vector3(0.30f, 0.10f, 0.02f), new Vector3(0.40f, 0.36f, 0.40f));
+                case 2:   // petit nuage rond
+                    Part(g, sphere, tCloud, new Vector3(-0.18f, 0f, 0f), new Vector3(0.50f, 0.46f, 0.46f));
+                    Part(g, sphere, tCloud, new Vector3(0.20f, 0.04f, 0.02f), new Vector3(0.54f, 0.50f, 0.48f));
+                    Part(g, sphere, tCloud, new Vector3(0f, -0.14f, 0f), new Vector3(0.86f, 0.22f, 0.42f));
                     break;
                 case 3:   // petit duo
                     Part(g, sphere, tCloud, new Vector3(-0.22f, 0f, 0f), new Vector3(0.48f, 0.42f, 0.42f));
@@ -220,13 +223,6 @@ namespace AR6DoF
                     Part(g, sphere, tCloud, new Vector3(0.40f, 0.02f, 0.02f), new Vector3(0.84f, 0.62f, 0.58f));
                     Part(g, sphere, tCloud, new Vector3(0.02f, -0.06f, -0.03f), new Vector3(0.70f, 0.50f, 0.56f));
                     Part(g, sphere, tCloud, new Vector3(0f, -0.20f, 0f), new Vector3(1.45f, 0.26f, 0.52f));
-                    break;
-                case 5:   // traînée de petites boules qui s'effilent
-                    Part(g, sphere, tCloud2, new Vector3(-0.70f, -0.04f, 0f), new Vector3(0.52f, 0.36f, 0.38f));
-                    Part(g, sphere, tCloud2, new Vector3(-0.30f, 0.02f, 0f), new Vector3(0.44f, 0.34f, 0.36f));
-                    Part(g, sphere, tCloud2, new Vector3(0.05f, 0.0f, 0f), new Vector3(0.34f, 0.26f, 0.30f));
-                    Part(g, sphere, tCloud2, new Vector3(0.34f, -0.02f, 0f), new Vector3(0.26f, 0.20f, 0.24f));
-                    Part(g, sphere, tCloud2, new Vector3(0.58f, -0.04f, 0f), new Vector3(0.18f, 0.14f, 0.16f));
                     break;
                 default:  // cumulus classique
                     Part(g, sphere, tCloud, new Vector3(0f, 0f, 0f), new Vector3(0.70f, 0.62f, 0.62f));
@@ -330,7 +326,8 @@ namespace AR6DoF
             for (int i = 0; i < StarN; i++)
             {
                 float x = (float)(rnd.NextDouble() * 4.0 - 2.0), y = (float)(rnd.NextDouble() * 1.0 + 0.55);
-                stars[i] = Part(world, sphere, tStar, new Vector3(x, y, 1.1f), Vector3.one * 0.05f);
+                starY[i] = y;
+                stars[i] = Part(world, sphere, tStar, new Vector3(x, y + skyShift, 1.1f), Vector3.one * 0.05f);
                 starPh[i] = (float)rnd.NextDouble() * 6.28f;
             }
 
@@ -338,17 +335,19 @@ namespace AR6DoF
             tCloud = Mat(new Color(0.98f, 0.98f, 1f), 0f, 0.22f); tCloud.cloud = true;
             tCloud2 = Mat(new Color(0.93f, 0.95f, 0.99f), 0f, 0.22f); tCloud2.cloud = true;   // un peu plus grise, pour les voiles et les traînées
             float[] cx = { -1.6f, -0.85f, -0.1f, 0.65f, 1.45f, -0.45f };
-            float[] cy = { 0.82f, 0.99f, 0.78f, 0.96f, 0.84f, 1.07f };
+            float[] crow = { 0.50f, 0.70f, 0.58f, 0.78f, 0.52f, 0.86f };   // sous le haut du cadre : les nuages restent hauts, les arbres se voient
             float[] cz = { -0.30f, -0.55f, -0.05f, -0.35f, -0.10f, -0.65f };
-            float[] cs = { 1.0f, 0.85f, 1.0f, 0.95f, 1.0f, 0.8f };
-            float[] yaw = { 8f, -22f, 15f, -10f, 28f, -30f };      // tournés dans l'espace : on voit bien qu'ils ont du volume
-            float[] roll = { 0f, 0f, 0f, 3f, -2f, -7f };
+            float[] cs = { 1.0f, 0.85f, 0.95f, 0.95f, 1.0f, 0.85f };
+            int[] shape = { 0, 1, 4, 3, 2, 0 };
+            float[] yaw = { 8f, -22f, 15f, -10f, 28f, 190f };      // tournés dans l'espace : on voit bien qu'ils ont du volume
+            float[] roll = { 0f, 0f, 2f, 3f, -2f, 0f };
             for (int i = 0; i < CloudN; i++)
             {
-                var g = Group(world, "Nuage", new Vector3(cx[i], cy[i], cz[i]));
-                BuildCloudShape(g, i);
+                float cyy = topY - crow[i];
+                var g = Group(world, "Nuage", new Vector3(cx[i], cyy, cz[i]));
+                BuildCloudShape(g, shape[i]);
                 g.localRotation = Quaternion.Euler(0f, yaw[i], roll[i]);
-                clouds[i] = new Cloud { t = g, x = cx[i], y = cy[i], z = cz[i], size = cs[i], now = 0f, rate = 0.85f + 0.12f * i };
+                clouds[i] = new Cloud { t = g, x = cx[i], y = cyy, z = cz[i], size = cs[i], now = 0f, rate = 0.85f + 0.12f * i, row = crow[i] };
                 g.localScale = Vector3.zero;
                 g.gameObject.SetActive(false);
             }
@@ -419,6 +418,33 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ réglage selon le temps
+        /// <summary>
+        /// Dit a la scene ou est son cadre : 'stage' (centre = centre du cadre), sa taille en pixels, le haut du cadre en unites de la scene ('top', pour placer les nuages) et
+        /// de combien monter soleil, lune et etoiles ('skyLift') pour qu'ils restent a la meme hauteur dans le cadre quand l'ile descend. Tout ce qui sort du cadre est coupe.
+        /// </summary>
+        public void SetStage(RectTransform stage, Vector2 size, float top, float skyLift)
+        {
+            clipRt = stage; topY = top; skyShift = skyLift;
+            for (int i = 0; i < StarN; i++) if (stars[i] != null) stars[i].localPosition = new Vector3(stars[i].localPosition.x, starY[i] + skyShift, stars[i].localPosition.z);
+            for (int i = 0; i < toons.Count; i++) toons[i].m.SetVector("_ClipHalf", new Vector4(size.x * 0.5f, size.y * 0.5f, 1f, 0f));
+            UpdateClip(true);
+            dirty = true;
+        }
+
+        /// <summary>Monte (+) ou descend (-) les nuages et, avec eux, l'endroit d'ou tombent pluie, neige et eclairs (en unites de la scene).</summary>
+        public void SetCloudShift(float v) { cloudShift = v; }
+
+        void UpdateClip(bool force)
+        {
+            if (clipRt == null) return;
+            var m = clipRt.worldToLocalMatrix;
+            if (!force && m == clipLast) return;
+            clipLast = m;
+            for (int i = 0; i < toons.Count; i++) toons[i].m.SetMatrix("_ClipM", m);
+        }
+
+        void LateUpdate() { UpdateClip(false); }
+
         /// <summary>Choisit ce que la scène montre. 'snap' : sans transition (première image) ; les nuages, eux, poussent toujours en grandissant.</summary>
         public void Apply(WxCond cond, bool day, float cloudCover, float windSpeedKmh, float windFromDeg, float tempC, bool snap)
         {
@@ -558,7 +584,8 @@ namespace AR6DoF
         {
             d.x = Random.Range(-1.55f, 1.55f);
             d.z = Random.Range(-0.8f, 0.8f);
-            d.y = top ? Random.Range(0.78f, 0.92f) : Random.Range(0.05f, 0.9f);
+            float ft = Mathf.Max(0.4f, FxTop);
+            d.y = top ? Random.Range(ft - 0.14f, ft) : Random.Range(0.05f, ft);
             d.v = isSnow ? Random.Range(0.18f, 0.32f) : Random.Range(1.5f, 2.1f);
             d.ph = Random.Range(0f, 6.28f);
         }
@@ -638,8 +665,8 @@ namespace AR6DoF
             // soleil et lune suivent l'heure (glissent sur leur arc ; cachés, ils sautent directement à leur place)
             if (sunScale < 0.05f) sunCur = sunGoal; else sunCur = Vector2.MoveTowards(sunCur, sunGoal, 2.4f * fast * rdt);
             if (moonScale < 0.05f) moonCur = moonGoal; else moonCur = Vector2.MoveTowards(moonCur, moonGoal, 2.4f * fast * rdt);
-            sun.localPosition = new Vector3(sunCur.x, sunCur.y, 0.9f);
-            moon.localPosition = new Vector3(moonCur.x, moonCur.y, 0.9f);
+            sun.localPosition = new Vector3(sunCur.x, sunCur.y + skyShift, 0.9f);
+            moon.localPosition = new Vector3(moonCur.x, moonCur.y + skyShift, 0.9f);
             sun.localScale = Vector3.one * sunScale * 0.85f * (1f + 0.03f * Mathf.Sin(time * 2f));
             sun.gameObject.SetActive(sunScale > 0.01f);
             if (sunScale > 0.01f) sunRays.localRotation = Quaternion.Euler(0f, 0f, time * 18f);
@@ -664,7 +691,7 @@ namespace AR6DoF
                 if (!on) continue;
                 c.x += drift * dt;
                 if (c.x > 2.6f) c.x = -2.6f; else if (c.x < -2.6f) c.x = 2.6f;
-                c.t.localPosition = new Vector3(c.x, c.y + Mathf.Sin(time * 0.7f + i * 1.7f) * 0.03f, c.z);
+                c.t.localPosition = new Vector3(c.x, topY - c.row + cloudShift + Mathf.Sin(time * 0.7f + i * 1.7f) * 0.03f, c.z);
                 c.t.localScale = Vector3.one * (c.size * Smooth(c.now / c.size));
             }
 
@@ -806,11 +833,12 @@ namespace AR6DoF
         void PlaceBolt()
         {
             float x = Random.Range(-1.1f, 1.1f);
+            float f = Mathf.Max(0.5f, FxTop) / 0.80f;   // l'eclair part du dessous des nuages, ou qu'ils soient
             var p = new Vector2[5];
-            p[0] = new Vector2(x, 0.80f);
-            p[1] = new Vector2(x + 0.18f, 0.58f);
-            p[2] = new Vector2(x - 0.10f, 0.38f);
-            p[3] = new Vector2(x + 0.14f, 0.20f);
+            p[0] = new Vector2(x, 0.80f * f);
+            p[1] = new Vector2(x + 0.18f, 0.58f * f);
+            p[2] = new Vector2(x - 0.10f, 0.38f * f);
+            p[3] = new Vector2(x + 0.14f, 0.20f * f);
             p[4] = new Vector2(x - 0.02f, 0.04f);
             for (int i = 0; i < boltSeg.Length; i++)
             {

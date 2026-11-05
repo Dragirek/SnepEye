@@ -19,10 +19,13 @@ namespace AR6DoF
         static readonly string[] TabNamesPlus = { "Maintenant", "Jours", "Heures", "Lieu", "Plus" };   // « Plus » (ex-Test) : cachée tant qu'on ne l'active pas dans Options
         const int TabNow = 0, TabDays = 1, TabHours = 2, TabPlace = 3, TabTest = 4, TabOptions = 5;   // Options : page de la roue, hors de la barre d'onglets
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-        static readonly float[] FrameH = { 330f, 380f, 430f, 480f, 540f };        // hauteur du cadre de la scène, par niveau (le niveau 2 est celui par défaut)
-        static readonly float[] DropBy = { 0f, 0.06f, 0.12f, 0.20f, 0.30f };      // de combien l'île descend (en tailles de scène), par niveau
+        static readonly float[] FrameH = { 300f, 350f, 400f, 460f, 540f };        // hauteur du cadre de la scène, par niveau (le niveau 2, 400 px, est celui par défaut)
+        static readonly float[] DropBy = { 0.10f, 0.22f, 0.34f, 0.46f, 0.58f };   // de combien l'île descend (en tailles de scène), par niveau ; la scène ne rétrécit plus, la pointe peut sortir du cadre
+        static readonly float[] CloudBy = { -0.30f, -0.15f, 0f, 0.12f, 0.25f };  // de combien les nuages (et la pluie, la neige, les éclairs) montent, par niveau
+        static readonly string[] CloudNames = { "Tres bas", "Bas", "Normal", "Haut", "Tres haut" };
         static readonly string[] DropNames = { "Comme avant", "Un peu plus bas", "Plus bas", "Bas", "Tres bas" };
         int DropLevel { get { return wx.prefs.dropSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.dropSel - 1, 0, 4); } }
+        int CloudLevel { get { return wx.prefs.cloudSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.cloudSel - 1, 0, 4); } }
         int FrameLevel { get { return wx.prefs.frameSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.frameSel - 1, 0, 4); } }
         const float PlayStep = 2.6f;     // secondes entre deux heures en lecture
         const float BurstTime = 0.9f;    // durée de l'accélération du temps entre deux heures
@@ -479,17 +482,21 @@ namespace AR6DoF
             sky.SetColors(skyTop, skyBot, 26f);
             scene = Ar6dofWeatherScene.Create(stage);
             float drop = DropBy[DropLevel];
-            float s = Mathf.Min(IW / 4.6f, sh / (2.98f + 2f * drop));   // la scène occupe de -1,4 à +1,65 en hauteur ; l'île descendue doit rester dans le cadre
+            float s = Mathf.Min(IW / 4.6f, sh / 2.98f);   // la scène occupe de -1,4 à +1,65 en hauteur ; descendre l'île ne rétrécit plus la scène (la pointe peut sortir du cadre)
             scene.transform.localPosition = new Vector3(0f, -(0.09f + drop) * s, -0.75f * s);
             scene.transform.localScale = Vector3.one * s;
+            // haut du cadre en unites de la scene ; soleil, lune et etoiles gardent leur hauteur d'avant dans le cadre ; tout ce qui sort du cadre est coupe (relief 3D gardé dedans)
+            float top = sh * 0.5f / s + 0.09f + drop;
+            scene.SetStage(stage, new Vector2(IW, sh), top, drop - 0.12f);
+            scene.SetCloudShift(CloudBy[CloudLevel]);
 
             // coins du bas : l'île est étroite en bas, il y a de la place (et rien ne passe devant)
             float x0 = -IW * 0.5f + 16f, bot = -sh * 0.5f, colW = IW * 0.5f - 110f;
-            tFeels = StageText(stage, x0 + colW * 0.5f, bot + 26f, colW, 26f, 21, TextAnchor.MiddleLeft, false);
-            tTemp = StageText(stage, x0 + colW * 0.5f, bot + 72f, colW, 66f, 58, TextAnchor.MiddleLeft, true);
+            tFeels = StageText(stage, x0 + colW * 0.5f, bot + 18f, colW, 22f, 17, TextAnchor.MiddleLeft, false);
+            tTemp = StageText(stage, x0 + colW * 0.5f, bot + 54f, colW, 48f, 42, TextAnchor.MiddleLeft, true);
             float x1 = IW * 0.5f - 16f;
-            tWindT = StageText(stage, x1 - colW * 0.5f, bot + 26f, colW, 26f, 19, TextAnchor.MiddleRight, false);
-            tCond = StageText(stage, x1 - colW * 0.5f, bot + 58f, colW, 36f, 27, TextAnchor.MiddleRight, true);
+            tWindT = StageText(stage, x1 - colW * 0.5f, bot + 18f, colW, 22f, 16, TextAnchor.MiddleRight, false);
+            tCond = StageText(stage, x1 - colW * 0.5f, bot + 44f, colW, 30f, 22, TextAnchor.MiddleRight, true);
 
             ApplyScene(n, true);
         }
@@ -537,14 +544,14 @@ namespace AR6DoF
             int max = MaxHours();
             if (max < 1) return;
             hourOffset = Mathf.Clamp(hourOffset, 0, max);
-            Space(2f);
-            timeLabel = Lbl("", 32, 25, TextAnchor.MiddleCenter);
+            Space(1f);
+            timeLabel = Lbl("", 28, 22, TextAnchor.MiddleCenter);
             timeLabel.fontStyle = FontStyle.Bold;
             UpdateTimeLabel(true);
             SliderRow("Dans", 0f, max, () => hourOffset,
                 v => GoHour(Mathf.RoundToInt(v), true),
-                v => v < 0.5f ? Ar6dofLoc.T("Maintenant") : "+" + Mathf.RoundToInt(v).ToString(Inv) + " h", 50f, true);
-            var bs = BtnRow(48f, 20,
+                v => v < 0.5f ? Ar6dofLoc.T("Maintenant") : "+" + Mathf.RoundToInt(v).ToString(Inv) + " h", 44f, true);
+            var bs = BtnRow(42f, 19,
                 "-1 h", (Action)(() => GoHour(hourOffset - 1, true)),
                 "Maintenant", (Action)(() => GoHour(0, true)),
                 "+1 h", (Action)(() => GoHour(hourOffset + 1, true)),
@@ -652,20 +659,22 @@ namespace AR6DoF
             for (int i = 0; i < TileCount; i++) if (!Hidden(i)) vis.Add(i);
             if (vis.Count == 0) return;
             Space(4f);
-            const float ch = 66f;
-            float cw = (IW - 8f) * 0.5f;
-            for (int k = 0; k < vis.Count; k += 2)
+            const float ch = 54f;                       // cases compactes : trois par ligne
+            const int cols = 3;
+            float cw = (IW - 6f * (cols - 1)) / cols;
+            for (int k = 0; k < vis.Count; k += cols)
             {
                 float cy = RowY(ch);
-                for (int c = 0; c < 2 && k + c < vis.Count; c++)
+                for (int c = 0; c < cols && k + c < vis.Count; c++)
                 {
                     int i = vis[k + c];
-                    float x = -IW * 0.5f + cw * 0.5f + c * (cw + 8f);
-                    var cell = Box(content, new Vector2(x, cy), new Vector2(cw, ch), Ar6dofRole.Band, 18);
-                    tileTitle[i] = L(cell, TileNames[i], 0f, 17f, cw - 24f, 24f, 17, TextAnchor.MiddleLeft);
-                    var v = L(cell, TileValue(i, n), 0f, -13f, cw - 24f, 30f, 23, TextAnchor.MiddleLeft);
+                    float x = -IW * 0.5f + cw * 0.5f + c * (cw + 6f);
+                    var cell = Box(content, new Vector2(x, cy), new Vector2(cw, ch), Ar6dofRole.Band, 14);
+                    tileTitle[i] = L(cell, TileNames[i], 0f, 14f, cw - 16f, 20f, 14, TextAnchor.MiddleLeft);
+                    tileTitle[i].gameObject.AddComponent<Ar6dofFitText>().Init(tileTitle[i], 14);
+                    var v = L(cell, TileValue(i, n), 0f, -9f, cw - 16f, 26f, 20, TextAnchor.MiddleLeft);
                     v.fontStyle = FontStyle.Bold;
-                    v.gameObject.AddComponent<Ar6dofFitText>().Init(v, 23);
+                    v.gameObject.AddComponent<Ar6dofFitText>().Init(v, 20);
                     tileVal[i] = v;
                 }
             }
@@ -952,6 +961,7 @@ namespace AR6DoF
             OptGrid(OptFeels, OptWindLine, OptScrub, OptWindFx);
             Section("Scene 3D");
             SliderRow("Hauteur de l'ile", 0f, 4f, () => DropLevel, v => { wx.prefs.dropSel = Mathf.RoundToInt(v) + 1; wx.Save(); }, v => Ar6dofLoc.T(DropNames[Mathf.Clamp(Mathf.RoundToInt(v), 0, 4)]), 50f, true);
+            SliderRow("Hauteur des nuages et effets", 0f, 4f, () => CloudLevel, v => { wx.prefs.cloudSel = Mathf.RoundToInt(v) + 1; wx.Save(); }, v => Ar6dofLoc.T(CloudNames[Mathf.Clamp(Mathf.RoundToInt(v), 0, 4)]), 50f, true);
             SliderRow("Taille du cadre", 0f, 4f, () => FrameLevel, v => { wx.prefs.frameSel = Mathf.RoundToInt(v) + 1; wx.Save(); }, v => Mathf.RoundToInt(FrameH[Mathf.Clamp(Mathf.RoundToInt(v), 0, 4)]).ToString(Inv) + " px", 50f, true);
             Section("Page Plus");
             Text pl;
