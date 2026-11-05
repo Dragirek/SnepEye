@@ -21,9 +21,12 @@ namespace AR6DoF
     {
         public static readonly List<Ar6dofAppEntry> Entries = new List<Ar6dofAppEntry>
         {
-            new Ar6dofAppEntry { id = "voice", title = "Voix", glyph = "mic", yaw = -35f,
-                desc = "Micro, voix modifiee (hauteur, robot, echo, filtres...) et sortie sur des enceintes externes, avec la vision du son.",
+            new Ar6dofAppEntry { id = "voice", title = "Changeur de voix", glyph = "mic", yaw = -35f,
+                desc = "Voix modifiee (hauteur, robot, echo, filtres...) avec presets et vision du son.",
                 make = d => new Ar6dofVoiceApp(d) },
+            new Ar6dofAppEntry { id = "audio", title = "Audio", glyph = "speaker", yaw = -143f,
+                desc = "Moteur audio, micro et enceintes externes, pour toutes les applications de son.",
+                make = d => new Ar6dofAudioDevicesApp(d) },
             new Ar6dofAppEntry { id = "soundboard", title = "Soundboard", glyph = "pads", yaw = -71f,
                 desc = "Des boutons pour lancer des sons et des effets sur les enceintes, sans couper les precedents. Grille, liste, flux ou cercle.",
                 make = d => new Ar6dofSoundboardApp(d) },
@@ -36,6 +39,9 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "objects", title = "Objets 3D", glyph = "cube", yaw = 107f,
                 desc = "Pose des modeles 3D (.obj), des stickers et des formes dans le monde. Deplacement au laser, reglages, suppression.",
                 make = d => new Ar6dofObjectsApp(d) },
+            new Ar6dofAppEntry { id = "weather", title = "Meteo", glyph = "weather", yaw = 143f,
+                desc = "Meteo de ta position en 3D : soleil, nuages, pluie, neige, vent et previsions.",
+                make = d => new Ar6dofWeatherApp(d) },
         };
 
         public static Ar6dofAppEntry Find(string id)

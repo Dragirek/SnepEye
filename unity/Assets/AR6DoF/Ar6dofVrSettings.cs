@@ -1079,8 +1079,68 @@ namespace AR6DoF
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Lissage des bords (MSAA x2) : plus beau, plus lourd", () => Ar6dofSettings.Current.perfMsaa > 1, v => { Ar6dofSettings.Current.perfMsaa = v ? 2 : 1; Touch(); }, 640f);
             StepRow(page, ref c, "Resolution de l'interface (%, au prochain lancement)", 50f, 100f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.perfRenderScale * 100f), v => { Ar6dofSettings.Current.perfRenderScale = v / 100f; Touch(); }, "0");
             CloseCard(page, top, ref c);
+
+            // ---- mesures du PC : lues seulement tant que cette page est affichee (voir Ar6dofSysInfo)
+            top = OpenCard(page, ref c, "Systeme");
+            Live(PgPerf, () => { if (curTab == PgPerf) Ar6dofSysInfo.Touch(); });
+            if (!Ar6dofSysInfo.Supported)
+            {
+                Para(page, ref c, "Mesures disponibles sous Windows seulement.", 30, 19);
+            }
+            else
+            {
+                InfoLine(page, Next(ref c, 28f, 4f), PgPerf, () =>
+                {
+                    var m = Ar6dofSysInfo.Current;
+                    if (!m.valid) return Ar6dofLoc.T("Mesure en cours...");
+                    string t = float.IsNaN(m.cpuTemp) ? Ar6dofLoc.T("temperature indisponible") : Ar6dofLoc.F("{0} C (capteur ACPI)", Mathf.RoundToInt(m.cpuTemp));
+                    return Ar6dofLoc.F("Processeur : {0} %   -   {1}", Pct(m.cpuTotal), t);
+                });
+                float sy = Next(ref c, 64f, 4f);
+                var coreBars = Ar6dofSpectrum.Make(page, new Vector2(0f, sy), new Vector2(CW, 64f), Mathf.Max(1, Environment.ProcessorCount));
+                Live(PgPerf, () => { var m = Ar6dofSysInfo.Current; if (m.valid && m.cores.Length > 0) coreBars.Set(m.cores); });
+                Ar6dofVrUi.Label(page, Ar6dofLoc.T("Une barre = un coeur (thread) du processeur."), new Vector2(0f, Next(ref c, 24f, 10f)), new Vector2(CW, 24f), 16, TextAnchor.MiddleLeft);
+                InfoLine(page, Next(ref c, 28f, 4f), PgPerf, () =>
+                {
+                    var m = Ar6dofSysInfo.Current;
+                    if (!m.valid) return "";
+                    return Ar6dofLoc.F("Memoire : {0} %   ({1} / {2} Go)", Pct(m.ramPct), m.ramUsedGb.ToString("0.0", CultureInfo.InvariantCulture), m.ramTotalGb.ToString("0.0", CultureInfo.InvariantCulture));
+                });
+                InfoLine(page, Next(ref c, 28f, 4f), PgPerf, () =>
+                {
+                    var m = Ar6dofSysInfo.Current;
+                    if (!m.valid) return "";
+                    if (float.IsNaN(m.gpuLoad) && float.IsNaN(m.gpuTemp)) return Ar6dofLoc.T("Carte graphique : mesure indisponible");
+                    string name = string.IsNullOrEmpty(m.gpuName) ? Ar6dofLoc.T("Carte graphique") : m.gpuName;
+                    string load = float.IsNaN(m.gpuLoad) ? "-" : Pct(m.gpuLoad) + " %";
+                    string temp = float.IsNaN(m.gpuTemp) ? Ar6dofLoc.T("temperature indisponible") : Mathf.RoundToInt(m.gpuTemp) + " C";
+                    return name + " : " + load + "   -   " + temp;
+                });
+                InfoLine(page, Next(ref c, 28f, 4f), PgPerf, () =>
+                {
+                    var m = Ar6dofSysInfo.Current;
+                    if (!m.valid || float.IsNaN(m.vramTotalGb)) return "";
+                    return Ar6dofLoc.F("Memoire video : {0} / {1} Go", m.vramUsedGb.ToString("0.0", CultureInfo.InvariantCulture), m.vramTotalGb.ToString("0.0", CultureInfo.InvariantCulture));
+                });
+                InfoLine(page, Next(ref c, 28f, 12f), PgPerf, () =>
+                {
+                    var m = Ar6dofSysInfo.Current;
+                    if (!m.valid) return "";
+                    if (!m.hasBattery) return Ar6dofLoc.T("Batterie : aucune (alimentation secteur)");
+                    string pct = float.IsNaN(m.batteryPct) ? "?" : Pct(m.batteryPct);
+                    string state;
+                    if (m.charging) state = Ar6dofLoc.T("en charge");
+                    else if (m.onAc) state = Ar6dofLoc.T("sur secteur");
+                    else if (m.batterySeconds >= 0) state = Ar6dofLoc.F("{0} h {1} min restantes", m.batterySeconds / 3600, (m.batterySeconds % 3600) / 60);
+                    else state = Ar6dofLoc.T("temps restant inconnu");
+                    return Ar6dofLoc.F("Batterie : {0} %   -   {1}", pct, state);
+                });
+            }
+            CloseCard(page, top, ref c);
             Finish(PgPerf, c);
         }
+
+        static string Pct(float v) { return float.IsNaN(v) ? "?" : Mathf.RoundToInt(v * 100f).ToString(CultureInfo.InvariantCulture); }
 
         static string CamTxt(int state, float fps)
         {

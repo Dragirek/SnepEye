@@ -34,7 +34,7 @@ namespace AR6DoF
             editing = null;
 
             if (!a.Enabled) EngineRow();
-            else if (a.data.outDev == "off") Para("Choisis tes enceintes externes dans l'application Voix.", 30, 19);
+            else if (a.data.outDev == "off") Para("Choisis tes enceintes externes dans l'application Audio.", 30, 19);
 
             var bar = new List<object>();
             bar.Add("Edition"); bar.Add((Action)(() => { edit = !edit; Rebuild(); }));

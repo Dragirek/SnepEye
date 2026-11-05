@@ -171,8 +171,12 @@ namespace AR6DoF
                                  : Ar6dofScreenNative.MonitorRect(monitor, out rectL, out rectT, out rectR, out rectB);
         }
 
+        const float MaxHeight = 2.4f;   // un ecran epouse la forme de la fenetre capturee, mais ne depasse pas cette hauteur (fenetre en portrait...)
+
         void RecreateTexture(int w, int h)
         {
+            bool first = rt == null;
+            float oldAspect = aspect;
             Ar6dofScreenNative.SetTarget(slot, IntPtr.Zero);
             if (rt != null) { rt.Release(); Destroy(rt); }
             rt = new RenderTexture(w, h, 0, RenderTextureFormat.BGRA32, RenderTextureReadWrite.sRGB);
@@ -185,6 +189,11 @@ namespace AR6DoF
             screenMat.SetTexture("_MainTex", rt);
             Ar6dofScreenNative.SetTarget(slot, rt.GetNativeTexturePtr());
             aspect = (float)w / h;
+            // L'ecran epouse la forme de ce qu'il montre : si la fenetre change de proportions (ou est en portrait), on garde la meme surface apparente
+            // au lieu de garder la largeur (une fenetre etroite ferait un ecran immense). A la toute premiere image, on plafonne seulement la hauteur
+            // (la largeur enregistree correspond deja a la forme precedente).
+            if (!first && Mathf.Abs(aspect / oldAspect - 1f) > 0.02f) width = Mathf.Clamp(width * Mathf.Sqrt(aspect / oldAspect), 0.3f, 8f);
+            if (width / aspect > MaxHeight) width = Mathf.Max(0.3f, MaxHeight * aspect);
             Layout();
             owner.RelayoutAttached();
         }

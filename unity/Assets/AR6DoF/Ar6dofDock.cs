@@ -867,7 +867,7 @@ namespace AR6DoF
             AudioSync();
         }
 
-        static bool IsAudioApp(string id) { return id == "voice" || id == "soundboard" || id == "mixer"; }
+        static bool IsAudioApp(string id) { return id == "voice" || id == "audio" || id == "soundboard" || id == "mixer"; }
 
         /// <summary>Le moteur audio ne tourne que tant qu'une application audio est dans la barre (affichee ou reduite).</summary>
         void AudioSync()

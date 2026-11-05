@@ -156,6 +156,41 @@ namespace AR6DoF
                             if (fd > 3.5f) a = Mathf.Max(a, back);                // le carre de derriere disparait derriere celui de devant
                             break;
                         }
+                        case "speaker":
+                        {
+                            // enceinte : boitier, cone et deux ondes
+                            float[] sx = { 12f, 23f, 36f, 36f, 23f, 12f, 12f }, sy = { 25f, 25f, 15f, 49f, 39f, 39f, 25f };
+                            float sd = 99f;
+                            for (int k = 0; k < 6; k++) sd = Mathf.Min(sd, SegDist(fx, fy, sx[k], sy[k], sx[k + 1], sy[k + 1]));
+                            a = Mathf.Clamp01(2.6f - sd);
+                            float ang = Mathf.Atan2(fy - 32f, fx - 37f), dr = Mathf.Sqrt((fx - 37f) * (fx - 37f) + (fy - 32f) * (fy - 32f));
+                            if (Mathf.Abs(ang) < 0.75f)
+                            {
+                                a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dr - 10f)));
+                                a = Mathf.Max(a, Mathf.Clamp01(2.6f - Mathf.Abs(dr - 19f)));
+                            }
+                            break;
+                        }
+                        case "weather":
+                        {
+                            // nuage devant un soleil a rayons
+                            float c1 = Mathf.Sqrt((fx - 28f) * (fx - 28f) + (fy - 28f) * (fy - 28f)) - 11f;
+                            float c2 = Mathf.Sqrt((fx - 43f) * (fx - 43f) + (fy - 30f) * (fy - 30f)) - 9f;
+                            float cloud = Mathf.Min(Mathf.Min(c1, c2), RRect(fx, fy, 38f, 22f, 21f, 8f, 8f));
+                            a = Mathf.Clamp01(2.6f - Mathf.Abs(cloud));
+                            if (cloud > 3.5f)
+                            {
+                                float ds = Mathf.Sqrt((fx - 22f) * (fx - 22f) + (fy - 44f) * (fy - 44f));
+                                float sun = Mathf.Clamp01(2.6f - Mathf.Abs(ds - 8f));
+                                for (int k = 0; k < 8; k++)
+                                {
+                                    float ak = k * Mathf.PI / 4f;
+                                    sun = Mathf.Max(sun, Mathf.Clamp01(2.4f - SegDist(fx, fy, 22f + Mathf.Cos(ak) * 12f, 44f + Mathf.Sin(ak) * 12f, 22f + Mathf.Cos(ak) * 16f, 44f + Mathf.Sin(ak) * 16f)));
+                                }
+                                a = Mathf.Max(a, sun);
+                            }
+                            break;
+                        }
                         case "plus":
                         {
                             a = Mathf.Max(Mathf.Clamp01(3.2f - SegDist(fx, fy, 32f, 14f, 32f, 50f)), Mathf.Clamp01(3.2f - SegDist(fx, fy, 14f, 32f, 50f, 32f)));

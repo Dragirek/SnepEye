@@ -9,7 +9,7 @@ namespace AR6DoF
     /// <summary>
     /// Table de mixage : volumes, muets et niveaux de la voix, du soundboard et de la musique, volume général, visualisation de la sortie (8 au choix),
     /// une console avancée (faders, solo, balance, égaliseur 3 bandes, limiteur : tout visible d'un coup, sans défiler) et un lecteur de musique
-    /// avec liste de lecture (pour un fursuiter qui joue de la musique sur ses enceintes). Tout sort sur les enceintes choisies dans la fenêtre Voix.
+    /// avec liste de lecture (pour un fursuiter qui joue de la musique sur ses enceintes). Tout sort sur les enceintes choisies dans l'application Audio.
     /// </summary>
     public class Ar6dofMixerApp : Ar6dofAppWindow
     {
@@ -67,7 +67,7 @@ namespace AR6DoF
 
         void Table(Ar6dofAudio a)
         {
-            // micro : seulement un niveau (le gain se règle dans Voix > Base)
+            // micro : seulement un niveau (le gain se règle dans Changeur de voix > Base)
             float cy = RowY(44f);
             float x0 = -IW * 0.5f;
             Ar6dofVrUi.Label(content, "Micro", new Vector2(x0 + 60f, cy), new Vector2(120f, 44f), 22, TextAnchor.MiddleLeft);
