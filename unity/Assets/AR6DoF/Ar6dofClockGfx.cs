@@ -5,10 +5,12 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>Base des dessins de l'horloge : aucune texture, tout est calculé. Les couleurs suivent le style choisi (texte, accent, boutons).</summary>
-    public abstract class Ar6dofClockGfx : MaskableGraphic
+    public abstract class Ar6dofClockGfx : Ar6dofRasterGfx
     {
         protected Color cText = Color.white, cAccent = new Color(1f, 0.9f, 0f), cDim = new Color(1f, 1f, 1f, 0.25f), cFace = new Color(0.15f, 0.15f, 0.15f, 1f);
         Ar6dofElem elem = Ar6dofElem.Menus;
+
+        protected override Color ClearRgb { get { return cText; } }
 
         protected override void OnEnable()
         {
@@ -91,10 +93,8 @@ namespace AR6DoF
             SetVerticesDirty();
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect rc)
         {
-            vh.Clear();
-            Rect rc = GetPixelAdjustedRect();
             float R = Mathf.Min(rc.width, rc.height) * 0.5f - 1f;
             if (R < 6f) return;
             Vector2 c = rc.center;
@@ -216,10 +216,8 @@ namespace AR6DoF
             SetVerticesDirty();
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect rc)
         {
-            vh.Clear();
-            Rect rc = GetPixelAdjustedRect();
             float W = rc.width, H = rc.height, R = Mathf.Min(W, H) * 0.5f - 1f;
             if (R < 6f) return;
             Vector2 c = rc.center;
@@ -290,10 +288,8 @@ namespace AR6DoF
             SetVerticesDirty();
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect rc)
         {
-            vh.Clear();
-            Rect rc = GetPixelAdjustedRect();
             float R = Mathf.Min(rc.width, rc.height) * 0.5f - 1f;
             if (R < 6f) return;
             Vector2 c = rc.center;
@@ -344,10 +340,8 @@ namespace AR6DoF
             return new Color(0.32f, 0.85f, 0.45f);
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect rc)
         {
-            vh.Clear();
-            Rect rc = GetPixelAdjustedRect();
             if (rc.width < 8f || rc.height < 8f) return;
             Vector2 c = rc.center;
             float w = Mathf.Min(rc.width, rc.height * 1.9f), h = w / 1.9f;

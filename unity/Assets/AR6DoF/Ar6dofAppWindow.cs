@@ -48,49 +48,76 @@ namespace AR6DoF
         }
     }
 
-    /// <summary>Barre de niveau horizontale.</summary>
+    /// <summary>
+    /// Vumètre (horizontal ou vertical) comme sur une console : vert jusqu'à -12 dB, jaune jusqu'à -3 dB, orange jusqu'à 0 dB, trait de crête retenu 1,2 s,
+    /// et voyant rouge au bout qui s'allume quand le signal atteint 0 dB (retenu 2 s) : on voit quand ça sature.
+    /// </summary>
     public class Ar6dofMeterBar
     {
-        RectTransform fill;
-        float w;
+        static readonly Color Green = new Color(0.20f, 0.85f, 0.35f), Yellow = new Color(0.96f, 0.86f, 0.20f), Orange = new Color(1f, 0.55f, 0.12f);
+        static readonly Color ClipOn = new Color(0.95f, 0.18f, 0.16f), ClipOff = new Color(0.34f, 0.09f, 0.09f);
+        readonly RectTransform[] seg = new RectTransform[3];
+        RectTransform hold, led;
+        Image ledImg;
+        float len;
         bool vertical;
+        float holdV, holdT, clipT, lastT = -1f;
+
+        static RectTransform Seg(Transform parent, bool vertical, Color c, out Image img)
+        {
+            var rt = Ar6dofVrUi.Rect(parent, "Niveau", Vector2.zero, Vector2.zero);
+            if (vertical) { rt.anchorMin = new Vector2(0f, 0f); rt.anchorMax = new Vector2(1f, 0f); rt.pivot = new Vector2(0.5f, 0f); }
+            else { rt.anchorMin = new Vector2(0f, 0f); rt.anchorMax = new Vector2(0f, 1f); rt.pivot = new Vector2(0f, 0.5f); }
+            img = rt.gameObject.AddComponent<Image>();
+            img.raycastTarget = false;
+            img.color = c;
+            return rt;
+        }
 
         public static Ar6dofMeterBar Make(Transform parent, Vector2 pos, Vector2 size, bool vertical = false)
         {
-            var m = new Ar6dofMeterBar { w = (vertical ? size.y : size.x) - 8f, vertical = vertical };
+            var m = new Ar6dofMeterBar { vertical = vertical, len = (vertical ? size.y : size.x) - 8f - 12f };
             var root = Ar6dofVrUi.Rect(parent, "Niveau", pos, size);
             var bg = root.gameObject.AddComponent<Image>();
             bg.raycastTarget = false;
             Ar6dofTheme.Attach(root.gameObject, Ar6dofRole.Track, 8);
-            RectTransform f;
-            if (vertical)
-            {
-                f = Ar6dofVrUi.Rect(root, "Remplissage", Vector2.zero, new Vector2(-8f, 2f));
-                f.anchorMin = new Vector2(0f, 0f); f.anchorMax = new Vector2(1f, 0f);
-                f.pivot = new Vector2(0.5f, 0f);
-                f.anchoredPosition = new Vector2(0f, 4f);
-                f.sizeDelta = new Vector2(-8f, 2f);
-            }
-            else
-            {
-                f = Ar6dofVrUi.Rect(root, "Remplissage", Vector2.zero, new Vector2(2f, -8f));
-                f.anchorMin = new Vector2(0f, 0f); f.anchorMax = new Vector2(0f, 1f);
-                f.pivot = new Vector2(0f, 0.5f);
-                f.anchoredPosition = new Vector2(4f, 0f);
-                f.sizeDelta = new Vector2(2f, -8f);
-            }
-            var im = f.gameObject.AddComponent<Image>();
-            im.raycastTarget = false;
-            Ar6dofTheme.Attach(f.gameObject, Ar6dofRole.Accent, 6);
-            m.fill = f;
+            Image im;
+            m.seg[0] = Seg(root, vertical, Green, out im);
+            m.seg[1] = Seg(root, vertical, Yellow, out im);
+            m.seg[2] = Seg(root, vertical, Orange, out im);
+            m.hold = Seg(root, vertical, Color.white, out im);
+            m.led = Seg(root, vertical, ClipOff, out m.ledImg);
+            if (vertical) { m.led.anchoredPosition = new Vector2(0f, 4f + m.len + 2f); m.led.sizeDelta = new Vector2(-8f, 10f); }
+            else { m.led.anchoredPosition = new Vector2(4f + m.len + 2f, 0f); m.led.sizeDelta = new Vector2(10f, -8f); }
             return m;
         }
 
-        /// <summary>Niveau de crête linéaire (0..1+) affiché en dB : -60 dB à gauche (en bas), 0 dB à droite (en haut).</summary>
+        void Place(RectTransform rt, float from, float to)
+        {
+            float a = len * Mathf.Clamp01(from), b = len * Mathf.Clamp01(to);
+            bool on = b - a > 0.6f;
+            if (rt.gameObject.activeSelf != on) rt.gameObject.SetActive(on);
+            if (!on) return;
+            if (vertical) { rt.anchoredPosition = new Vector2(0f, 4f + a); rt.sizeDelta = new Vector2(-8f, b - a); }
+            else { rt.anchoredPosition = new Vector2(4f + a, 0f); rt.sizeDelta = new Vector2(b - a, -8f); }
+        }
+
+        /// <summary>Niveau de crête linéaire (0..1+) affiché en dB : -60 dB au début, 0 dB à la fin. Au-dessus de 1.0 : saturation (voyant rouge).</summary>
         public void SetPeak(float peak)
         {
+            float now = Time.unscaledTime;
+            float dt = lastT < 0f ? 0f : Mathf.Min(0.2f, now - lastT);
+            lastT = now;
             float v = peak <= 0.0003f ? 0f : Mathf.Clamp01((20f * Mathf.Log10(peak) + 60f) / 60f);
-            fill.sizeDelta = vertical ? new Vector2(-8f, Mathf.Max(2f, w * v)) : new Vector2(Mathf.Max(2f, w * v), -8f);
+            Place(seg[0], 0f, Mathf.Min(v, 0.8f));
+            Place(seg[1], 0.8f, Mathf.Min(v, 0.95f));
+            Place(seg[2], 0.95f, Mathf.Min(v, 1f));
+            if (v >= holdV) { holdV = v; holdT = 1.2f; }
+            else { holdT -= dt; if (holdT <= 0f) holdV = Mathf.Max(v, holdV - dt * 0.5f); }
+            float th = 2.5f / Mathf.Max(1f, len);
+            if (holdV > 0.03f) Place(hold, holdV - th, holdV + th); else Place(hold, 0f, 0f);
+            clipT = peak >= 0.99f ? 2f : Mathf.Max(0f, clipT - dt);
+            ledImg.color = clipT > 0f ? ClipOn : ClipOff;
         }
     }
 

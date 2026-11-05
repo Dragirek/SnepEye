@@ -7,35 +7,68 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Application « Météo » : la météo de ta position (ou d'une ville de ton choix) avec un petit monde 3D animé en style dessin animé
-    /// (soleil, lune, nuages, pluie, neige, brouillard, orage, vent qui fait tourner le moulin), les prévisions sur 7 jours et sur 24 heures.
+    /// Application « Météo » : la météo de ta position (ou d'une ville, ou de coordonnées exactes) avec un petit monde 3D animé en style dessin animé
+    /// (soleil et lune qui suivent l'heure, nuages, pluie, neige qui recouvre tout, brouillard, orage, vent qui plie les arbres et fait tourner le moulin),
+    /// les prévisions sur 7 jours et sur 24 heures, et un curseur pour avancer dans le temps d'heure en heure (le temps s'accélère un instant à chaque heure).
+    /// Onglet Test : tous les types de temps, l'heure, le vent et la température à la main. Roue « Options » : montrer / cacher les cases et les effets.
     /// Données : Open-Meteo.com (gratuit, sans clé, tous les pays). Rien ne tourne et rien n'est téléchargé tant que la fenêtre n'est pas ouverte.
     /// </summary>
     public class Ar6dofWeatherApp : Ar6dofAppWindow
     {
-        static readonly string[] TabNames = { "Maintenant", "Jours", "Heures", "Lieu" };
+        static readonly string[] TabNames = { "Maintenant", "Jours", "Heures", "Lieu", "Test" };
+        const int TabNow = 0, TabDays = 1, TabHours = 2, TabPlace = 3, TabTest = 4, TabOptions = 5;   // Options : page de la roue, hors de la barre d'onglets
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-        const int PreviewCount = 30;   // 15 conditions, de jour puis de nuit
+        const float StageH = 360f;
+        const float PlayStep = 2.6f;     // secondes entre deux heures en lecture
+        const float BurstTime = 0.9f;    // durée de l'accélération du temps entre deux heures
+        const int TileCount = 10;
+        static readonly string[] TileNames = { "Vent", "Rafales", "Humidite", "Pression", "Nuages", "Pluie maintenant", "Pluie aujourd'hui", "Indice UV", "Lever / coucher", "Min / max aujourd'hui" };
+        // masque « caché » (WxPrefs.off) : bits 0..9 = les cases ci-dessus, puis :
+        const int OptFeels = 10, OptScrub = 11, OptWindFx = 12, OptWindLine = 13;
 
         struct Now
         {
             public WxCond cond;
             public bool day;
             public float temp, feels, wind, windDir, gust, humidity, pressure, precip, cover;
+            public string time;        // « 2026-11-05T14:00 » ("" en mode test)
+            public int dayIdx;         // jour correspondant dans les prévisions quotidiennes
+            public float sunF, moonF;  // avancement du jour / de la nuit (0..1), -1 si inconnu
         }
 
         int tab;
-        int preview = -1;
         string query = "";
+        string coordText = "";
+        bool coordEdited, coordErr;
         bool loaded;
         float nextTry;
         readonly Ar6dofWeatherClient wx = new Ar6dofWeatherClient();
 
+        // scène et textes dans les coins de l'île
         Ar6dofWeatherScene scene;
         Ar6dofSkyGraphic sky;
         Color skyTop, skyBot;
         float lastFlash = -1f;
-        Text ageText;
+        Text ageText, tTemp, tFeels, tCond, tWindT;
+
+        // cases d'information
+        readonly Text[] tileVal = new Text[TileCount];
+        readonly Text[] tileTitle = new Text[TileCount];
+
+        // avancer dans le temps
+        int hourOffset;                  // 0 = maintenant, 1 = dans 1 h...
+        float animFrom, animTo, animT = 1f;
+        bool playing;
+        float playTimer;
+        Text timeLabel, playLabel;
+
+        // onglet Test
+        int tType = 6;
+        float tHour = 12f, tWind = 12f, tTemp0 = 14f;
+        bool tAuto;
+        float tAutoTimer;
+        readonly List<Button> typeBtns = new List<Button>();
+        float rowCy;
 
         // ce qui a été affiché : si la réalité change (réponse reçue, erreur...), la fenêtre est reconstruite
         float seenFetch = -2f;
@@ -45,18 +78,50 @@ namespace AR6DoF
 
         public Ar6dofWeatherApp(Ar6dofDock d) : base(d, "weather", "Meteo", "weather", "Meteo de ta position en 3D : soleil, nuages, pluie, neige, vent et previsions.", 660f) { }
 
-        protected override void OnRebuildStart() { scene = null; sky = null; ageText = null; lastFlash = -1f; }
+        protected override void OnRebuildStart()
+        {
+            scene = null; sky = null; ageText = null; lastFlash = -1f;
+            tTemp = tFeels = tCond = tWindT = null;
+            timeLabel = playLabel = null;
+            typeBtns.Clear();
+            Array.Clear(tileVal, 0, tileVal.Length);
+            Array.Clear(tileTitle, 0, tileTitle.Length);
+        }
+
+        // ------------------------------------------------------------------ options (cases cachées)
+        bool Hidden(int bit) { return (wx.prefs.off & (1 << bit)) != 0; }
+
+        void SetHidden(int bit, bool hide)
+        {
+            if (hide) wx.prefs.off |= 1 << bit; else wx.prefs.off &= ~(1 << bit);
+            wx.Save();
+        }
+
+        static string OptName(int bit)
+        {
+            if (bit < TileCount) return TileNames[bit];
+            switch (bit)
+            {
+                case OptFeels: return "Ressenti";
+                case OptScrub: return "Avancer dans le temps";
+                case OptWindFx: return "Effets de vent";
+                default: return "Vent dans le coin";
+            }
+        }
 
         // ------------------------------------------------------------------ vie de la fenêtre
         protected override void OnVisible(bool on)
         {
             if (!on) return;
+            playing = false;
             if (!loaded) { wx.Load(); loaded = true; Rebuild(); }
             nextTry = 0f;
             MaybeRefresh();
         }
 
-        public override void OnClosed() { wx.Cancel(); }
+        public override void OnClosed() { wx.Cancel(); StopAuto(); }
+
+        void StopAuto() { playing = false; tAuto = false; SetPlayLabel(); }
 
         void MaybeRefresh()
         {
@@ -86,12 +151,16 @@ namespace AR6DoF
         {
             wx.Poll();
             MaybeRefresh();
-            if (wx.fetchedAt != seenFetch || (int)wx.phase != seenPhase || wx.error != seenErr || wx.status != seenStatus || wx.hint != seenHint ||
-                wx.prefs.place.name != seenPlace || wx.results.Count != seenResults || wx.searched != seenSearched)
+            if (tab < TabTest &&
+                (wx.fetchedAt != seenFetch || (int)wx.phase != seenPhase || wx.error != seenErr || wx.status != seenStatus || wx.hint != seenHint ||
+                 wx.prefs.place.name != seenPlace || wx.results.Count != seenResults || wx.searched != seenSearched))
             {
                 Rebuild();
                 return;
             }
+            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
+            TickScrub(dt);
+            TickAuto(dt);
             // éclair : le ciel s'éclaircit un instant
             if (scene != null && sky != null)
             {
@@ -114,6 +183,7 @@ namespace AR6DoF
 
         static float At(float[] a, int i, float def) { return a != null && i >= 0 && i < a.Length ? a[i] : def; }
         static int AtI(int[] a, int i, int def) { return a != null && i >= 0 && i < a.Length ? a[i] : def; }
+        static float Smooth(float x) { x = Mathf.Clamp01(x); return x * x * (3f - 2f * x); }
 
         string AgeString()
         {
@@ -122,7 +192,7 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ couleurs du ciel
-        static void SkyColors(WxCond c, bool day, out Color top, out Color bot)
+        static void SkyColors(WxCond c, bool day, out Color top, out Color bot, float tempC = 15f)
         {
             float g, dk;
             switch (c)
@@ -158,6 +228,8 @@ namespace AR6DoF
             }
             top = Color.Lerp(ct, gt, g);
             bot = Color.Lerp(cb, gb, g);
+            // canicule : l'horizon vire à l'orange par grand soleil
+            if (day && tempC >= 28f && g < 0.4f) bot = Color.Lerp(bot, new Color(1f, 0.78f, 0.50f), Mathf.Clamp01((tempC - 28f) / 12f) * 0.65f);
         }
 
         // ------------------------------------------------------------------ petits éléments
@@ -193,15 +265,20 @@ namespace AR6DoF
         // ------------------------------------------------------------------ pages
         protected override void BuildMain()
         {
-            Tabs(TabNames, tab, t => tab = t);
+            if (tab == TabOptions) { BuildOptions(); return; }
+            // roue des options, à droite du titre
+            Text gl;
+            BtnAt(IW * 0.5f - 62f, -38f, 124f, 40f, "Options", () => { StopAuto(); tab = TabOptions; Rebuild(); }, out gl, 19);
+            Tabs(TabNames, tab, t => { tab = t; StopAuto(); });
             Remember();
-            PlaceLine();
+            if (tab != TabTest) PlaceLine();
             switch (tab)
             {
-                case 0: BuildNow(); break;
-                case 1: BuildDays(); break;
-                case 2: BuildHours(); break;
-                default: BuildPlace(); break;
+                case TabNow: BuildNow(); break;
+                case TabDays: BuildDays(); break;
+                case TabHours: BuildHours(); break;
+                case TabPlace: BuildPlace(); break;
+                default: BuildTest(); break;
             }
         }
 
@@ -217,57 +294,222 @@ namespace AR6DoF
             seenSearched = wx.searched;
         }
 
+        string SourceText(WxPlace p)
+        {
+            string key;
+            switch (p.source)
+            {
+                case "windows": key = "Source : Windows (Wi-Fi / GPS)"; break;
+                case "ip": key = "Source : adresse IP (approximatif)"; break;
+                case "manual": key = "Source : coordonnees saisies"; break;
+                case "search": key = "Source : ville choisie"; break;
+                default: key = "Source : inconnue"; break;
+            }
+            return Ar6dofLoc.T(key) + "   " + p.lat.ToString("0.000", Inv) + ", " + p.lon.ToString("0.000", Inv);
+        }
+
         void PlaceLine()
         {
             var p = wx.prefs.place;
             string nm = !p.valid ? "Position inconnue" : (string.IsNullOrEmpty(p.country) || p.country == p.name ? p.name : p.name + ", " + p.country);
             var t = Lbl(nm, 34, 24);
             t.fontStyle = FontStyle.Bold;
+            if (p.valid && (tab == TabNow || tab == TabPlace)) Lbl(SourceText(p), 24, 16);
             if (wx.Busy)
             {
                 string s = !string.IsNullOrEmpty(wx.status) ? wx.status : (wx.phase == Ar6dofWeatherClient.Phase.Searching ? "Recherche..." : "Chargement de la meteo...");
                 Lbl(s, 28, 19);
             }
             else if (!string.IsNullOrEmpty(wx.error)) Para(wx.error, 52, 18);
-            else if (wx.HasData && tab != 3)
+            else if (wx.HasData && tab != TabPlace)
             {
                 ageText = Lbl("", 26, 17);
                 var at = ageText;
                 refreshers.Add(() => { if (at != null) at.text = AgeString(); });
             }
-            if (tab == 3 && !wx.Busy && !string.IsNullOrEmpty(wx.hint)) Para(wx.hint, 52, 17);
+            if (tab == TabPlace && !wx.Busy && !string.IsNullOrEmpty(wx.hint)) Para(wx.hint, 52, 17);
         }
 
         void NoData()
         {
             if (wx.Busy) return;
-            Para("Pas encore de meteo. Verifie ta connexion internet ou choisis ta ville dans l'onglet Lieu.", 56, 19);
+            Para("Pas encore de meteo. Verifie ta connexion internet ou choisis ta ville dans l'onglet Lieu. Les effets 3D se voient quand meme dans l'onglet Test.", 76, 19);
             Btn("Reessayer", () => { ForceRefresh(); Rebuild(); }, 52, 22);
+        }
+
+        // ------------------------------------------------------------------ données « maintenant » / heure choisie / test
+        int HourBase()
+        {
+            if (!wx.HasData) return -1;
+            var h = wx.data.hourly;
+            if (h == null || h.time == null || h.time.Length == 0) return -1;
+            string cur = wx.data.current.time ?? "";
+            if (cur.Length >= 13)
+            {
+                string pre = cur.Substring(0, 13);
+                for (int i = 0; i < h.time.Length; i++) if (h.time[i].StartsWith(pre, StringComparison.Ordinal)) return i;
+            }
+            return 0;
+        }
+
+        int MaxHours()
+        {
+            int b = HourBase();
+            return b < 0 ? 0 : Mathf.Clamp(wx.data.hourly.time.Length - 1 - b, 0, 96);
+        }
+
+        static float Mins(string hm)
+        {
+            int h, m;
+            if (string.IsNullOrEmpty(hm) || hm.Length < 5) return -1f;
+            if (!int.TryParse(hm.Substring(0, 2), NumberStyles.Integer, Inv, out h) || !int.TryParse(hm.Substring(3, 2), NumberStyles.Integer, Inv, out m)) return -1f;
+            return h * 60f + m;
+        }
+
+        /// <summary>Avancement du jour (soleil) ou de la nuit (lune) à cette heure, d'après le lever / coucher du jour.</summary>
+        void Fracs(ref Now n)
+        {
+            n.sunF = n.moonF = -1f;
+            if (!wx.HasData || string.IsNullOrEmpty(n.time) || n.time.Length < 16) return;
+            var d = wx.data.daily;
+            int i = n.dayIdx;
+            if (d.sunrise == null || d.sunset == null || i >= d.sunrise.Length || i >= d.sunset.Length) return;
+            float rise = Mins(WxCodes.Clock(d.sunrise[i])), sunset = Mins(WxCodes.Clock(d.sunset[i])), t = Mins(WxCodes.Clock(n.time));
+            if (rise < 0f || sunset <= rise || t < 0f) return;
+            if (t >= rise && t < sunset) n.sunF = (t - rise) / (sunset - rise);
+            else
+            {
+                float night = rise + 1440f - sunset;
+                float tt = t >= sunset ? t - sunset : t + 1440f - sunset;
+                n.moonF = Mathf.Clamp01(tt / night);
+            }
+        }
+
+        int DayIndex(string iso)
+        {
+            if (!wx.HasData || string.IsNullOrEmpty(iso) || iso.Length < 10) return 0;
+            string date = iso.Substring(0, 10);
+            var d = wx.data.daily;
+            for (int i = 0; i < d.time.Length; i++) if (d.time[i] == date) return i;
+            return 0;
         }
 
         bool GetNow(out Now n)
         {
             n = new Now();
-            if (preview >= 0)
+            n.time = "";
+            if (tab == TabTest)
             {
-                n.cond = (WxCond)(preview % 15);
-                n.day = preview < 15;
-                n.temp = WxCodes.IsSnow(n.cond) ? -2f : (n.cond == WxCond.Fog ? 6f : (n.cond == WxCond.Clear ? 24f : 14f));
-                n.feels = n.temp - 2f;
-                n.wind = n.cond == WxCond.Thunder || n.cond == WxCond.Hail || n.cond == WxCond.HeavyRain ? 38f : 22f;
-                n.gust = n.wind * 1.4f;
-                n.windDir = 270f;
-                n.humidity = 70f; n.pressure = 1012f; n.precip = 0f; n.cover = 50f;
+                n.cond = (WxCond)Mathf.Clamp(tType, 0, 14);
+                n.day = tHour >= 7f && tHour < 20f;
+                n.temp = tTemp0;
+                n.feels = tTemp0 - Mathf.Min(8f, tWind * 0.06f);
+                n.wind = tWind; n.gust = tWind * 1.4f; n.windDir = 270f;
+                bool wet = WxCodes.IsRain(n.cond) || WxCodes.IsSnow(n.cond);
+                n.humidity = wet ? 90f : 55f; n.pressure = 1013f;
+                n.precip = wet ? 1.5f : 0f;
+                n.cover = n.cond == WxCond.Clear ? 5f : (n.cond == WxCond.MostlyClear ? 20f : (n.cond == WxCond.PartlyCloudy ? 45f : 90f));
+                n.sunF = n.moonF = -1f;
+                if (n.day) n.sunF = (tHour - 7f) / 13f;
+                else n.moonF = Mathf.Clamp01((tHour >= 20f ? tHour - 20f : tHour + 4f) / 11f);
                 return true;
             }
             if (!wx.HasData) return false;
             var c = wx.data.current;
-            n.cond = WxCodes.FromCode(c.weather_code);
-            n.day = c.is_day != 0;
-            n.temp = c.temperature_2m; n.feels = c.apparent_temperature;
-            n.wind = c.wind_speed_10m; n.windDir = c.wind_direction_10m; n.gust = c.wind_gusts_10m;
-            n.humidity = c.relative_humidity_2m; n.pressure = c.surface_pressure; n.precip = c.precipitation; n.cover = c.cloud_cover;
+            int max = MaxHours();
+            if (hourOffset > max) hourOffset = max;
+            int b = HourBase();
+            if (hourOffset <= 0 || b < 0)
+            {
+                n.time = c.time ?? "";
+                n.cond = WxCodes.FromCode(c.weather_code);
+                n.day = c.is_day != 0;
+                n.temp = c.temperature_2m; n.feels = c.apparent_temperature;
+                n.wind = c.wind_speed_10m; n.windDir = c.wind_direction_10m; n.gust = c.wind_gusts_10m;
+                n.humidity = c.relative_humidity_2m; n.pressure = c.surface_pressure; n.precip = c.precipitation; n.cover = c.cloud_cover;
+            }
+            else
+            {
+                var h = wx.data.hourly;
+                int j = b + hourOffset;
+                n.time = h.time[j];
+                n.cond = WxCodes.FromCode(AtI(h.weather_code, j, c.weather_code));
+                n.day = h.is_day != null && j < h.is_day.Length ? h.is_day[j] != 0 : IsDayAt(n.time);
+                n.temp = At(h.temperature_2m, j, c.temperature_2m);
+                n.feels = At(h.apparent_temperature, j, n.temp);
+                n.wind = At(h.wind_speed_10m, j, c.wind_speed_10m);
+                n.windDir = At(h.wind_direction_10m, j, c.wind_direction_10m);
+                n.gust = At(h.wind_gusts_10m, j, c.wind_gusts_10m);
+                n.humidity = At(h.relative_humidity_2m, j, c.relative_humidity_2m);
+                n.pressure = At(h.surface_pressure, j, c.surface_pressure);
+                n.precip = At(h.precipitation, j, c.precipitation);
+                n.cover = At(h.cloud_cover, j, c.cloud_cover);
+            }
+            n.dayIdx = DayIndex(n.time);
+            Fracs(ref n);
             return true;
+        }
+
+        // ------------------------------------------------------------------ la scène (ciel, île 3D) et les textes dans ses coins
+        Text StageText(Transform stage, float x, float y, float w, float h, int fs, TextAnchor a, bool bold)
+        {
+            var t = Ar6dofVrUi.Label(stage, "", new Vector2(x, y), new Vector2(w, h), fs, a);
+            var th = t.GetComponent<Ar6dofThemed>();
+            if (th != null) UnityEngine.Object.Destroy(th);   // la couleur suit le ciel (clair / sombre), pas le thème des menus
+            if (bold) t.fontStyle = FontStyle.Bold;
+            t.gameObject.AddComponent<Ar6dofFitText>().Init(t, fs);
+            return t;
+        }
+
+        /// <summary>Ciel + île 3D (tient dans le cadre : rien ne dépasse sur le reste de la fenêtre) + température et ressenti en bas à gauche, temps et vent en bas à droite.</summary>
+        void BuildStage(Now n)
+        {
+            const float sh = StageH;
+            float sy = RowY(sh);
+            var stage = Ar6dofVrUi.Rect(content, "Scene", new Vector2(0f, sy), new Vector2(IW, sh));
+            sky = stage.gameObject.AddComponent<Ar6dofSkyGraphic>();
+            sky.raycastTarget = false;
+            SkyColors(n.cond, n.day, out skyTop, out skyBot, n.temp);
+            sky.SetColors(skyTop, skyBot, 26f);
+            scene = Ar6dofWeatherScene.Create(stage);
+            float s = Mathf.Min(IW / 4.6f, sh / 3.1f);   // la scène occupe de -1,4 à +1,65 en hauteur
+            scene.transform.localPosition = new Vector3(0f, -0.09f * s, -0.75f * s);
+            scene.transform.localScale = Vector3.one * s;
+
+            // coins du bas : l'île est étroite en bas, il y a de la place (et rien ne passe devant)
+            float x0 = -IW * 0.5f + 16f, bot = -sh * 0.5f, colW = IW * 0.5f - 110f;
+            tFeels = StageText(stage, x0 + colW * 0.5f, bot + 26f, colW, 26f, 21, TextAnchor.MiddleLeft, false);
+            tTemp = StageText(stage, x0 + colW * 0.5f, bot + 72f, colW, 66f, 58, TextAnchor.MiddleLeft, true);
+            float x1 = IW * 0.5f - 16f;
+            tWindT = StageText(stage, x1 - colW * 0.5f, bot + 26f, colW, 26f, 19, TextAnchor.MiddleRight, false);
+            tCond = StageText(stage, x1 - colW * 0.5f, bot + 58f, colW, 36f, 27, TextAnchor.MiddleRight, true);
+
+            ApplyScene(n, true);
+        }
+
+        void ApplyScene(Now n, bool snap)
+        {
+            if (scene == null) return;
+            scene.WindFx = !Hidden(OptWindFx);
+            scene.Apply(n.cond, n.day, n.cover, n.wind, n.windDir, n.temp, snap);
+            scene.SetClock(n.sunF, n.moonF, snap);
+            SkyColors(n.cond, n.day, out skyTop, out skyBot, n.temp);
+            if (sky != null) sky.SetColors(skyTop, skyBot, 26f);
+            lastFlash = -1f;
+            UpdateStageTexts(n);
+        }
+
+        void UpdateStageTexts(Now n)
+        {
+            if (tTemp == null) return;
+            float lum = 0.299f * skyBot.r + 0.587f * skyBot.g + 0.114f * skyBot.b;
+            Color col = lum > 0.52f ? new Color(0.06f, 0.10f, 0.22f, 1f) : Color.white;   // texte sombre sur ciel clair, blanc sur ciel sombre
+            tTemp.text = TempUnit(n.temp); tTemp.color = col;
+            tFeels.gameObject.SetActive(!Hidden(OptFeels));
+            tFeels.text = Ar6dofLoc.F("Ressenti {0}", Temp(n.feels)); tFeels.color = col;
+            tCond.text = Ar6dofLoc.T(WxCodes.Name(n.cond, n.day)); tCond.color = col;
+            tWindT.gameObject.SetActive(!Hidden(OptWindLine));
+            tWindT.text = Ar6dofLoc.F("Vent {0} {1}", WxCodes.Compass(n.windDir), Speed(n.wind)); tWindT.color = col;
         }
 
         // --- Maintenant
@@ -275,80 +517,159 @@ namespace AR6DoF
         {
             Now n;
             if (!GetNow(out n)) { NoData(); return; }
-
-            // température et condition
-            float cy = RowY(84f);
-            float x0 = -IW * 0.5f;
-            var big = L(content, TempUnit(n.temp), x0 + 125f, cy, 250f, 84f, 64, TextAnchor.MiddleLeft);
-            big.fontStyle = FontStyle.Bold;
-            float rx = x0 + 262f, rw = IW - 262f;
-            var cn = L(content, WxCodes.Name(n.cond, n.day), rx + rw * 0.5f, cy + 17f, rw, 36f, 28, TextAnchor.MiddleLeft);
-            cn.fontStyle = FontStyle.Bold;
-            L(content, Ar6dofLoc.F("Ressenti {0}", Temp(n.feels)), rx + rw * 0.5f, cy - 20f, rw, 30f, 21, TextAnchor.MiddleLeft);
-
-            // le monde 3D
-            const float sh = 330f;
-            float sy = RowY(sh);
-            var stage = Ar6dofVrUi.Rect(content, "Scene", new Vector2(0f, sy), new Vector2(IW, sh));
-            sky = stage.gameObject.AddComponent<Ar6dofSkyGraphic>();
-            sky.raycastTarget = false;
-            SkyColors(n.cond, n.day, out skyTop, out skyBot);
-            sky.SetColors(skyTop, skyBot, 26f);
-            scene = Ar6dofWeatherScene.Create(stage);
-            float s = Mathf.Min(IW / 4.4f, sh / 2.55f);
-            scene.transform.localPosition = new Vector3(0f, 6f, -0.75f * s);
-            scene.transform.localScale = Vector3.one * s;
-            scene.Apply(n.cond, n.day, n.cover, n.wind, n.windDir, n.temp, true);
-
-            if (preview >= 0)
-            {
-                Para(Ar6dofLoc.F("Apercu {0} / {1} : {2} ({3})", preview + 1, PreviewCount, Ar6dofLoc.T(WxCodes.Name(n.cond, n.day)), Ar6dofLoc.T(n.day ? "jour" : "nuit")), 30, 19);
-                BtnRow(52f, 21,
-                    "Precedent", (Action)(() => { preview = (preview + PreviewCount - 1) % PreviewCount; Rebuild(); }),
-                    "Suivant", (Action)(() => { preview = (preview + 1) % PreviewCount; Rebuild(); }),
-                    "Quitter", (Action)(() => { preview = -1; Rebuild(); }));
-                return;
-            }
-
-            // détails
-            var d = wx.data.daily;
-            string sun = d.sunrise != null && d.sunrise.Length > 0 && d.sunset != null && d.sunset.Length > 0 ? WxCodes.Clock(d.sunrise[0]) + " / " + WxCodes.Clock(d.sunset[0]) : "--";
-            string uv = At(d.uv_index_max, 0, -1f) >= 0f ? At(d.uv_index_max, 0, 0f).ToString("0.#", Inv) : "--";
-            Space(4f);
-            Cells(
-                "Vent", WxCodes.Compass(n.windDir) + " " + Speed(n.wind),
-                "Rafales", Speed(n.gust),
-                "Humidite", Percent(n.humidity),
-                "Pression", Pressure(n.pressure),
-                "Nuages", Percent(n.cover),
-                "Pluie maintenant", Precip(n.precip),
-                "Pluie aujourd'hui", Precip(At(d.precipitation_sum, 0, 0f)),
-                "Indice UV", uv,
-                "Lever / coucher", sun,
-                "Min / max aujourd'hui", Temp(At(d.temperature_2m_min, 0, n.temp)) + " / " + Temp(At(d.temperature_2m_max, 0, n.temp)));
+            BuildStage(n);
+            if (!Hidden(OptScrub)) BuildScrub();
+            BuildTiles(n);
             Space(2f);
             Lbl("Donnees : Open-Meteo.com (CC BY 4.0)", 24, 16);
         }
 
-        /// <summary>Cases d'information, deux par ligne : paires (titre, valeur).</summary>
-        void Cells(params string[] kv)
+        // --- avancer dans le temps, d'heure en heure
+        void BuildScrub()
         {
-            const float ch = 66f;
-            float cw = (IW - 8f) * 0.5f;
-            int pairs = kv.Length / 2;
-            for (int i = 0; i < pairs; i += 2)
+            int max = MaxHours();
+            if (max < 1) return;
+            hourOffset = Mathf.Clamp(hourOffset, 0, max);
+            Space(2f);
+            timeLabel = Lbl("", 32, 25, TextAnchor.MiddleCenter);
+            timeLabel.fontStyle = FontStyle.Bold;
+            UpdateTimeLabel(true);
+            SliderRow("Dans", 0f, max, () => hourOffset,
+                v => GoHour(Mathf.RoundToInt(v), true),
+                v => v < 0.5f ? Ar6dofLoc.T("Maintenant") : "+" + Mathf.RoundToInt(v).ToString(Inv) + " h", 50f, true);
+            var bs = BtnRow(48f, 20,
+                "-1 h", (Action)(() => GoHour(hourOffset - 1, true)),
+                "Maintenant", (Action)(() => GoHour(0, true)),
+                "+1 h", (Action)(() => GoHour(hourOffset + 1, true)),
+                "Lecture", (Action)TogglePlay);
+            playLabel = bs[3].GetComponentInChildren<Text>();
+            SetPlayLabel();
+        }
+
+        void TogglePlay()
+        {
+            playing = !playing;
+            playTimer = PlayStep * 0.8f;   // la première heure arrive vite
+            SetPlayLabel();
+        }
+
+        void SetPlayLabel() { if (playLabel != null) playLabel.text = Ar6dofLoc.T(playing ? "Pause" : "Lecture"); }
+
+        /// <summary>Va à une heure : le temps de la scène s'accélère un instant (nuages, soleil, pluie filent), puis le nouveau temps s'installe.</summary>
+        void GoHour(int off, bool burst)
+        {
+            if (!wx.HasData || tab != TabNow) return;
+            off = Mathf.Clamp(off, 0, MaxHours());
+            if (off == hourOffset) return;
+            int prev = hourOffset;
+            hourOffset = off;
+            if (scene == null) return;
+            Now n;
+            if (!GetNow(out n)) return;
+            if (burst) scene.Burst(BurstTime);
+            ApplyScene(n, false);
+            UpdateTiles(n);
+            animFrom = prev; animTo = off; animT = burst ? 0f : 1f;
+            UpdateTimeLabel(false);
+            playTimer = 0f;
+        }
+
+        void TickScrub(float dt)
+        {
+            if (tab != TabNow || scene == null || !wx.HasData) return;
+            if (animT < 1f)
             {
-                float cy = RowY(ch);
-                for (int c = 0; c < 2 && i + c < pairs; c++)
+                animT = Mathf.Min(1f, animT + dt / BurstTime);
+                UpdateTimeLabel(false);
+            }
+            if (playing)
+            {
+                playTimer += dt;
+                if (playTimer >= PlayStep)
                 {
-                    float x = -IW * 0.5f + cw * 0.5f + c * (cw + 8f);
-                    var cell = Box(content, new Vector2(x, cy), new Vector2(cw, ch), Ar6dofRole.Band, 18);
-                    L(cell, kv[2 * (i + c)], 0f, 17f, cw - 24f, 24f, 17, TextAnchor.MiddleLeft);
-                    var v = L(cell, kv[2 * (i + c) + 1], 0f, -13f, cw - 24f, 30f, 23, TextAnchor.MiddleLeft);
-                    v.fontStyle = FontStyle.Bold;
-                    v.gameObject.AddComponent<Ar6dofFitText>().Init(v, 23);
+                    playTimer = 0f;
+                    int max = MaxHours();
+                    GoHour(hourOffset >= max ? 0 : hourOffset + 1, true);
                 }
             }
+        }
+
+        bool BaseTime(out DateTime t)
+        {
+            t = DateTime.Now;
+            int b = HourBase();
+            if (b < 0) return false;
+            string iso = wx.data.hourly.time[b];
+            return iso != null && iso.Length >= 16 && DateTime.TryParseExact(iso.Substring(0, 16), "yyyy-MM-dd'T'HH:mm", Inv, DateTimeStyles.None, out t);
+        }
+
+        /// <summary>« Maintenant » ou « Ven. 16:00 (+4 h) » ; pendant l'accélération, l'heure défile.</summary>
+        void UpdateTimeLabel(bool final)
+        {
+            if (timeLabel == null) return;
+            DateTime t0;
+            if (!BaseTime(out t0)) { timeLabel.text = Ar6dofLoc.T("Maintenant"); return; }
+            bool running = !final && animT < 1f;
+            float hrs = running ? Mathf.Lerp(animFrom, animTo, Smooth(animT)) : hourOffset;
+            DateTime t = t0.AddMinutes(hrs * 60f);
+            string clock = t.ToString("HH:mm", Inv);
+            if (!running && hourOffset == 0) { timeLabel.text = Ar6dofLoc.T("Maintenant") + "  " + clock; return; }
+            string day = WxCodes.DayName(t.ToString("yyyy-MM-dd", Inv), t.Date == t0.Date);
+            timeLabel.text = day + "  " + clock + (running ? "" : "   (+" + hourOffset.ToString(Inv) + " h)");
+        }
+
+        // --- cases d'information
+        string TileValue(int i, Now n)
+        {
+            var d = wx.data.daily;
+            int di = n.dayIdx;
+            switch (i)
+            {
+                case 0: return WxCodes.Compass(n.windDir) + " " + Speed(n.wind);
+                case 1: return Speed(n.gust);
+                case 2: return Percent(n.humidity);
+                case 3: return Pressure(n.pressure);
+                case 4: return Percent(n.cover);
+                case 5: return Precip(n.precip);
+                case 6: return Precip(At(d.precipitation_sum, di, 0f));
+                case 7: return At(d.uv_index_max, di, -1f) >= 0f ? At(d.uv_index_max, di, 0f).ToString("0.#", Inv) : "--";
+                case 8:
+                    return d.sunrise != null && d.sunrise.Length > di && d.sunset != null && d.sunset.Length > di ? WxCodes.Clock(d.sunrise[di]) + " / " + WxCodes.Clock(d.sunset[di]) : "--";
+                default: return Temp(At(d.temperature_2m_min, di, n.temp)) + " / " + Temp(At(d.temperature_2m_max, di, n.temp));
+            }
+        }
+
+        void BuildTiles(Now n)
+        {
+            var vis = new List<int>();
+            for (int i = 0; i < TileCount; i++) if (!Hidden(i)) vis.Add(i);
+            if (vis.Count == 0) return;
+            Space(4f);
+            const float ch = 66f;
+            float cw = (IW - 8f) * 0.5f;
+            for (int k = 0; k < vis.Count; k += 2)
+            {
+                float cy = RowY(ch);
+                for (int c = 0; c < 2 && k + c < vis.Count; c++)
+                {
+                    int i = vis[k + c];
+                    float x = -IW * 0.5f + cw * 0.5f + c * (cw + 8f);
+                    var cell = Box(content, new Vector2(x, cy), new Vector2(cw, ch), Ar6dofRole.Band, 18);
+                    tileTitle[i] = L(cell, TileNames[i], 0f, 17f, cw - 24f, 24f, 17, TextAnchor.MiddleLeft);
+                    var v = L(cell, TileValue(i, n), 0f, -13f, cw - 24f, 30f, 23, TextAnchor.MiddleLeft);
+                    v.fontStyle = FontStyle.Bold;
+                    v.gameObject.AddComponent<Ar6dofFitText>().Init(v, 23);
+                    tileVal[i] = v;
+                }
+            }
+            UpdateTiles(n);
+        }
+
+        void UpdateTiles(Now n)
+        {
+            if (!wx.HasData) return;
+            for (int i = 0; i < TileCount; i++) if (tileVal[i] != null) tileVal[i].text = TileValue(i, n);
+            if (tileTitle[5] != null) tileTitle[5].text = Ar6dofLoc.T(hourOffset > 0 ? "Pluie a cette heure" : "Pluie maintenant");
         }
 
         // --- Jours
@@ -375,7 +696,7 @@ namespace AR6DoF
                 if (i == 0) nm.fontStyle = FontStyle.Bold;
                 Icon(content, new Vector2(x0 + 135f, cy), 54f, c, true);
                 float pop = At(d.precipitation_probability_max, i, 0f);
-                var pt = L(content, pop >= 5f ? Percent(pop) : "", x0 + 205f, cy, 70f, 62f, 20);
+                L(content, pop >= 5f ? Percent(pop) : "", x0 + 205f, cy, 70f, 62f, 20);
                 float mn = At(d.temperature_2m_min, i, 0f), mx = At(d.temperature_2m_max, i, 0f);
                 L(content, Temp(mn), x0 + 268f, cy, 62f, 62f, 22, TextAnchor.MiddleRight);
                 float bx0 = x0 + 310f;
@@ -407,13 +728,7 @@ namespace AR6DoF
         {
             if (!wx.HasData) { NoData(); return; }
             var h = wx.data.hourly;
-            string cur = wx.data.current.time ?? "";
-            int idx = 0;
-            if (cur.Length >= 13)
-            {
-                string pre = cur.Substring(0, 13);
-                for (int i = 0; i < h.time.Length; i++) if (h.time[i].StartsWith(pre, StringComparison.Ordinal)) { idx = i; break; }
-            }
+            int idx = Mathf.Max(0, HourBase());
             int count = Mathf.Min(24, h.time.Length - idx);
             if (count < 2) { NoData(); return; }
             var temps = new float[count];
@@ -459,15 +774,47 @@ namespace AR6DoF
         }
 
         // --- Lieu
+        string CoordString()
+        {
+            var p = wx.prefs.place;
+            return p.valid ? p.lat.ToString("0.0000", Inv) + ", " + p.lon.ToString("0.0000", Inv) : "";
+        }
+
+        void UseCoordText()
+        {
+            double lat, lon;
+            if (Ar6dofWeatherClient.ParseCoords(coordText, out lat, out lon))
+            {
+                coordErr = false;
+                coordEdited = false;
+                tab = TabNow;
+                hourOffset = 0;
+                nextTry = Time.unscaledTime + 60f;
+                wx.Cancel();
+                wx.UseCoords(lat, lon);
+            }
+            else coordErr = true;
+            Rebuild();
+        }
+
         void BuildPlace()
         {
             Section("Position");
-            Btn("Utiliser ma position (GPS / Wi-Fi de Windows)", () => { nextTry = Time.unscaledTime + 60f; wx.UseWindowsLocation(); }, 52, 21);
-            Btn("Position approximative (par internet)", () => { nextTry = Time.unscaledTime + 60f; wx.Cancel(); wx.UseIp(); }, 52, 21);
-            Para("Position Windows : active Parametres > Confidentialite et securite > Localisation. Sinon la position approximative (ville) est deduite de ton adresse IP.", 70, 17);
+            Btn("Utiliser ma position (GPS / Wi-Fi de Windows)", () => { nextTry = Time.unscaledTime + 60f; coordEdited = false; hourOffset = 0; wx.UseWindowsLocation(); }, 52, 21);
+            Btn("Position approximative (par internet)", () => { nextTry = Time.unscaledTime + 60f; coordEdited = false; hourOffset = 0; wx.Cancel(); wx.UseIp(); }, 52, 21);
+            Para("Un PC fixe n'a pas de GPS : Windows et internet ne donnent que la zone de ton fournisseur d'acces, parfois a des dizaines de km (la source est affichee en haut). Pour une position exacte, entre tes coordonnees ci-dessous ou cherche ta ville.", 92, 17);
+
+            Section("Coordonnees exactes (latitude, longitude)");
+            if (!coordEdited) coordText = CoordString();
+            float cy = RowY(50f);
+            Ar6dofVrTextField.Make(content, new Vector2(-95f, cy), new Vector2(IW - 190f, 50f), coordText, "47.39, 0.68", s => { coordText = s; coordEdited = true; }, s => { coordText = s; UseCoordText(); }, 24);
+            Text cb;
+            BtnAt(IW * 0.5f - 90f, cy, 180f, 50f, "Utiliser", UseCoordText, out cb, 21);
+            if (coordErr) Lbl("Coordonnees non valides. Exemple : 47.39, 0.68", 30, 18);
+            Para("Astuce : sur une carte en ligne, clic droit sur ton adresse, puis copie les deux nombres (latitude puis longitude).", 52, 17);
 
             Section("Chercher une ville");
-            float cy = RowY(50f);
+            cy = RowY(50f);
             Ar6dofVrTextField.Make(content, new Vector2(-75f, cy), new Vector2(IW - 150f, 50f), query, "Nom de ville", s => query = s, s => { query = s; wx.Search(s); }, 24);
             Text lb;
             BtnAt(IW * 0.5f - 70f, cy, 140f, 50f, "Chercher", () => wx.Search(query), out lb, 21);
@@ -475,7 +822,7 @@ namespace AR6DoF
             {
                 var p = wx.results[i];
                 string name = string.IsNullOrEmpty(p.country) ? p.name : p.name + " - " + p.country;
-                Btn(name, () => { tab = 0; wx.Pick(p); }, 48, 20);
+                Btn(name, () => { tab = TabNow; hourOffset = 0; coordEdited = false; wx.Pick(p); }, 48, 20);
             }
             if (wx.searched && wx.results.Count == 0 && string.IsNullOrEmpty(wx.error)) Lbl("Aucun resultat", 30, 19);
 
@@ -487,9 +834,122 @@ namespace AR6DoF
             for (int i = 0; i < bs.Count; i++) Ar6dofTheme.SetSelected(bs[i], wx.prefs.units == i - 1);
 
             Section("Autres");
-            Btn("Actualiser maintenant", () => { ForceRefresh(); tab = 0; Rebuild(); }, 52, 22);
-            Btn("Voir tous les effets 3D (test)", () => { preview = 0; tab = 0; Rebuild(); }, 52, 22);
+            Btn("Actualiser maintenant", () => { ForceRefresh(); tab = TabNow; Rebuild(); }, 52, 22);
             Para("Donnees meteo : Open-Meteo.com (licence CC BY 4.0), sans compte ni cle. Rien n'est telecharge quand cette fenetre est fermee.", 56, 17);
+        }
+
+        // --- Test : tous les types de temps, a la main
+        static void TypeDefaults(int type, ref float temp)
+        {
+            WxCond c = (WxCond)type;
+            if (WxCodes.IsSnow(c)) temp = -2f;
+            else if (c == WxCond.FreezingRain) temp = -1f;
+            else if (c == WxCond.Fog) temp = 6f;
+            else if (c == WxCond.Clear) temp = 24f;
+            else if (c == WxCond.Thunder) temp = 22f;
+            else temp = 14f;
+        }
+
+        void ApplyTest(bool burst)
+        {
+            if (scene == null) return;
+            Now n;
+            GetNow(out n);
+            if (burst) scene.Burst(0.8f);
+            ApplyScene(n, false);
+            SelectTypeButtons();
+        }
+
+        void SelectTypeButtons()
+        {
+            for (int i = 0; i < typeBtns.Count; i++) if (typeBtns[i] != null) Ar6dofTheme.SetSelected(typeBtns[i], i == tType);
+        }
+
+        void TickAuto(float dt)
+        {
+            if (tab != TabTest || !tAuto || scene == null) return;
+            tAutoTimer += dt;
+            if (tAutoTimer < 4.5f) return;
+            tAutoTimer = 0f;
+            tType = (tType + 1) % 15;
+            TypeDefaults(tType, ref tTemp0);
+            ApplyTest(true);
+            Refresh();
+        }
+
+        void SetWind(float w)
+        {
+            tWind = w;
+            ApplyTest(false);
+            Refresh();
+        }
+
+        void BuildTest()
+        {
+            Now n;
+            GetNow(out n);
+            BuildStage(n);
+
+            Section("Type de temps");
+            const int Cols = 3;
+            float bw = (IW - (Cols - 1) * 8f) / Cols;
+            for (int i = 0; i < 15; i++)
+            {
+                int col = i % Cols;
+                if (col == 0) rowCy = RowY(48f);
+                int idx = i;
+                Text lb;
+                var b = BtnAt(-IW * 0.5f + bw * 0.5f + col * (bw + 8f), rowCy, bw, 48f, WxCodes.Name((WxCond)i, true),
+                    () => { tType = idx; TypeDefaults(idx, ref tTemp0); ApplyTest(false); Refresh(); }, out lb, 19);
+                typeBtns.Add(b);
+            }
+            SelectTypeButtons();
+
+            Section("Conditions");
+            SliderRow("Heure du jour", 0f, 23f, () => tHour, v => { tHour = v; ApplyTest(false); }, v => Mathf.RoundToInt(v).ToString(Inv) + " h", 50f, true);
+            SliderRow("Vent", 0f, 120f, () => tWind, v => { tWind = v; ApplyTest(false); }, v => Speed(v), 50f, true);
+            SliderRow("Temperature", -25f, 45f, () => tTemp0, v => { tTemp0 = v; ApplyTest(false); }, v => TempUnit(v), 50f, true);
+            BtnRow(46f, 19,
+                "Calme", (Action)(() => SetWind(4f)),
+                "Brise", (Action)(() => SetWind(25f)),
+                "Vent fort", (Action)(() => SetWind(55f)),
+                "Tempete", (Action)(() => SetWind(95f)));
+            ToggleRow("Tour automatique des temps", () => tAuto, v => { tAuto = v; tAutoTimer = 0f; }, 52, 21);
+            Para("Le tour automatique passe tous les temps en revue, du ciel degage a l'orage et a la grele. Les curseurs changent l'heure (le soleil et la lune se deplacent), le vent (arbres, moulin, traits de vent) et la temperature (gel, canicule).", 76, 17);
+        }
+
+        // --- Options (roue) : montrer / cacher
+        void OptGrid(params int[] bits)
+        {
+            float w = (IW - 8f) * 0.5f;
+            for (int i = 0; i < bits.Length; i += 2)
+            {
+                float cy = RowY(50f);
+                for (int c = 0; c < 2 && i + c < bits.Length; c++)
+                {
+                    int bit = bits[i + c];
+                    string name = OptName(bit);
+                    Text lbl;
+                    var b = BtnAt(-IW * 0.5f + w * 0.5f + c * (w + 8f), cy, w, 50f, name, () => { SetHidden(bit, !Hidden(bit)); Refresh(); }, out lbl, 19);
+                    Text tl = lbl;
+                    Button bb = b;
+                    string nm = name;
+                    refreshers.Add(() => { tl.text = Ar6dofLoc.T(nm) + " : " + Ar6dofLoc.T(Hidden(bit) ? "Non" : "Oui"); Ar6dofTheme.SetSelected(bb, !Hidden(bit)); });
+                }
+            }
+        }
+
+        void BuildOptions()
+        {
+            Text bl;
+            BtnAt(IW * 0.5f - 62f, -38f, 124f, 40f, "Retour", () => { tab = TabNow; Rebuild(); }, out bl, 19);
+            Para("Choisis ce que montre l'ecran Maintenant. Ce qui est cache ne coute rien.", 44, 18);
+            Section("Cases d'information");
+            OptGrid(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+            Section("Ecran Maintenant");
+            OptGrid(OptFeels, OptWindLine, OptScrub, OptWindFx);
+            Section("Tester");
+            Btn("Voir et tester tous les temps (onglet Test)", () => { tab = TabTest; Rebuild(); }, 52, 21);
         }
     }
 }

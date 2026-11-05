@@ -7,20 +7,26 @@ namespace AR6DoF
     /// Petit monde météo en 3D, rendu « dessin animé » (shader Ar6dofToon : trois tons nets, liseré, lisse — pas de facettes) :
     /// une île flottante avec un arbre, un pin et un moulin dont les ailes tournent avec le vent ; un soleil à rayons ou une lune et des étoiles ;
     /// des nuages qui dérivent selon le vent ; pluie, grêle, neige, brouillard et éclairs selon le temps.
-    /// Tout vit sous le Canvas de la fenêtre Météo : fenêtre fermée, l'objet est désactivé, donc aucun calcul. Ouverte : environ 170 petits objets au maximum
+    /// Tout vit sous le Canvas de la fenêtre Météo : fenêtre fermée, l'objet est désactivé, donc aucun calcul. Ouverte : environ 190 petits objets au maximum
     /// (par temps clair, une dizaine), un seul matériau par couleur, ni ombres ni sondes.
-    /// Unités de la scène : 1 unité = la hauteur d'un grand nuage ; l'application met la scène à l'échelle de son cadre.
+    /// Le vent penche et secoue les arbres (traits de vent et feuilles emportées quand il est fort), la neige recouvre tout (île, troncs, moulin, arbres),
+    /// les nuages naissent et s'effacent en grandissant / rétrécissant, le soleil et la lune suivent l'heure, et Burst() accélère le temps un instant
+    /// (nuages, moulin, pluie, soleil filent) pour passer à l'heure suivante.
+    /// Unités de la scène : 1 unité = la hauteur d'un grand nuage ; l'application met la scène à l'échelle de son cadre (la scène tient dans -1,4 .. +1,65 en hauteur).
     /// </summary>
     public class Ar6dofWeatherScene : MonoBehaviour
     {
-        const int RainN = 90, SnowN = 80, CloudN = 6, StarN = 14;
+        const int RainN = 90, SnowN = 80, CloudN = 6, StarN = 14, StreakN = 8, LeafN = 7;
 
         /// <summary>0..1 : éclair en cours (la fenêtre éclaircit le ciel).</summary>
         public float Flash { get; private set; }
 
-        class Toon { public Material m; public Color c, shade; public float emit; public bool cloud, snowy; }
-        class Cloud { public Transform t; public float x, y, z, size, now; }
+        class Toon { public Material m; public Color c, shade; public float emit; public bool cloud; public float snowK; }   // snowK : 0 = ne blanchit jamais, 1 = tout blanc sous la neige
+        class Cloud { public Transform t; public float x, y, z, size, now, rate; }
         class Drop { public Transform t; public float x, y, z, v, ph; }
+        class SnowCap { public Transform t; public Vector3 baseScale; }
+        class Streak { public Transform t; public float p, y, z, speed; }
+        class Leaf { public Transform t; public float x, y, z, age, dur, ph; }
 
         readonly List<Toon> toons = new List<Toon>();
         readonly Cloud[] clouds = new Cloud[CloudN];
@@ -28,12 +34,15 @@ namespace AR6DoF
         readonly Drop[] snow = new Drop[SnowN];
         readonly Transform[] stars = new Transform[StarN];
         readonly float[] starPh = new float[StarN];
-        readonly Transform[] mist = new Transform[3];
-        readonly float[] mistX = new float[3];
+        readonly Transform[] mist = new Transform[6];
+        readonly float[] mistX = new float[6];
+        readonly List<SnowCap> caps = new List<SnowCap>();
+        readonly Streak[] streaks = new Streak[StreakN];
+        readonly Leaf[] leaves = new Leaf[LeafN];
         Shader shader;
-        Transform rig, world, island, sun, sunRays, moon, bolt, hub, treeA, treeB;
+        Transform rig, world, island, sun, sunRays, moon, bolt, hub, treeA, treeB, canopyA, canopyB, blanket;
         Transform[] boltSeg = new Transform[4];
-        Toon tCloud, tGrass, tLeaves, tPine, tRoof, tRain, tSnow, tHail;
+        Toon tCloud, tLeaves, tRain, tSnow, tHail, tCap, tWind;
         bool snowMode;   // vrai : la flaque de flocons est de la grêle
 
         // état actuel (qui glisse vers la cible) et cible
@@ -45,6 +54,11 @@ namespace AR6DoF
         int cloudTarget = 2;
         float windKmh, windX = 0.2f;
         float time, boltTimer = 2f, boltLeft;
+        float burstLeft, burstDur = 1f, fast = 1f;      // Burst : le temps file un instant
+        Vector2 sunCur = new Vector2(0.9f, 0.86f), sunGoal = new Vector2(0.9f, 0.86f), moonCur = new Vector2(0.9f, 0.86f), moonGoal = new Vector2(0.9f, 0.86f);
+
+        /// <summary>Faux : ni traits de vent ni feuilles emportées (reglage « effets de vent » de la fenetre).</summary>
+        public bool WindFx = true;
         bool thunder, dirty = true;
         int shownRain, shownSnow;
 
@@ -150,6 +164,21 @@ namespace AR6DoF
             return go.transform;
         }
 
+        /// <summary>Boule de feuillage + son bonnet de neige (invisible tant qu'il ne neige pas).</summary>
+        void Blob(Transform parent, Toon t, Vector3 pos, Vector3 scale)
+        {
+            Part(parent, sphere, t, pos, scale);
+            AddCap(parent, sphere, tCap, pos + new Vector3(0f, 0.31f * scale.y, 0f), new Vector3(0.85f * scale.x, 0.5f * scale.y, 0.85f * scale.z));
+        }
+
+        /// <summary>Neige en relief : grandit de 0 à 'scale' avec la neige.</summary>
+        void AddCap(Transform parent, Mesh mesh, Toon t, Vector3 pos, Vector3 scale)
+        {
+            var tr = Part(parent, mesh, t, pos, Vector3.zero);
+            tr.gameObject.SetActive(false);
+            caps.Add(new SnowCap { t = tr, baseScale = scale });
+        }
+
         void Build()
         {
             shader = Resources.Load<Shader>("Ar6dofToon");
@@ -165,40 +194,47 @@ namespace AR6DoF
             island = Group(world, "Ile", Vector3.zero);
 
             // --- île : herbe, terre en pointe vers le bas, quelques cailloux flottants
-            tGrass = Mat(new Color(0.46f, 0.80f, 0.38f)); tGrass.snowy = true;
-            var tEarth = Mat(new Color(0.60f, 0.42f, 0.28f));
-            var tRock = Mat(new Color(0.66f, 0.60f, 0.56f));
+            var tGrass = Mat(new Color(0.46f, 0.80f, 0.38f)); tGrass.snowK = 1f;
+            var tEarth = Mat(new Color(0.60f, 0.42f, 0.28f)); tEarth.snowK = 0.80f;
+            var tRock = Mat(new Color(0.66f, 0.60f, 0.56f)); tRock.snowK = 1f;
+            tCap = Mat(new Color(0.97f, 0.98f, 1f), 0f, 0.22f);   // neige en relief (couche sur l'ile, bonnets sur les arbres)
             Part(island, cylinder, tGrass, new Vector3(0f, -0.10f, 0f), new Vector3(2.3f, 0.10f, 2.3f));
             var earth = Part(island, cone, tEarth, new Vector3(0f, -0.64f, 0f), new Vector3(2.15f, 0.88f, 2.15f));
             earth.localRotation = Quaternion.Euler(180f, 0f, 0f);
             Part(island, sphere, tRock, new Vector3(-0.55f, -1.05f, 0.35f), new Vector3(0.22f, 0.20f, 0.22f));
             Part(island, sphere, tRock, new Vector3(0.45f, -1.18f, -0.25f), new Vector3(0.15f, 0.14f, 0.15f));
+            blanket = Part(island, cylinder, tCap, new Vector3(0f, 0f, 0f), new Vector3(2.36f, 0.001f, 2.36f));
+            blanket.gameObject.SetActive(false);
 
-            // --- arbre feuillu
-            tLeaves = Mat(new Color(0.28f, 0.66f, 0.34f)); tLeaves.snowy = true;
-            var tTrunk = Mat(new Color(0.55f, 0.36f, 0.22f));
+            // --- arbre feuillu : le tronc penche un peu, la cime beaucoup plus (elle plie au vent)
+            tLeaves = Mat(new Color(0.28f, 0.66f, 0.34f)); tLeaves.snowK = 1f;
+            var tTrunk = Mat(new Color(0.55f, 0.36f, 0.22f)); tTrunk.snowK = 0.70f;
             treeA = Group(island, "Arbre", new Vector3(-0.62f, 0f, 0.05f));
             Part(treeA, cylinder, tTrunk, new Vector3(0f, 0.27f, 0f), new Vector3(0.13f, 0.27f, 0.13f));
-            Part(treeA, sphere, tLeaves, new Vector3(0f, 0.80f, 0f), new Vector3(0.86f, 0.80f, 0.86f));
-            Part(treeA, sphere, tLeaves, new Vector3(-0.30f, 0.60f, 0.08f), new Vector3(0.56f, 0.52f, 0.56f));
-            Part(treeA, sphere, tLeaves, new Vector3(0.30f, 0.64f, -0.06f), new Vector3(0.52f, 0.50f, 0.52f));
+            canopyA = Group(treeA, "Cime", new Vector3(0f, 0.50f, 0f));
+            Blob(canopyA, tLeaves, new Vector3(0f, 0.30f, 0f), new Vector3(0.86f, 0.80f, 0.86f));
+            Blob(canopyA, tLeaves, new Vector3(-0.30f, 0.10f, 0.08f), new Vector3(0.56f, 0.52f, 0.56f));
+            Blob(canopyA, tLeaves, new Vector3(0.30f, 0.14f, -0.06f), new Vector3(0.52f, 0.50f, 0.52f));
 
             // --- pin
-            tPine = Mat(new Color(0.20f, 0.52f, 0.36f)); tPine.snowy = true;
+            var tPine = Mat(new Color(0.20f, 0.52f, 0.36f)); tPine.snowK = 1f;
             treeB = Group(island, "Pin", new Vector3(0.18f, 0f, 0.62f));
             treeB.localScale = Vector3.one * 0.7f;
             Part(treeB, cylinder, tTrunk, new Vector3(0f, 0.16f, 0f), new Vector3(0.11f, 0.16f, 0.11f));
-            Part(treeB, cone, tPine, new Vector3(0f, 0.52f, 0f), new Vector3(0.70f, 0.60f, 0.70f));
-            Part(treeB, cone, tPine, new Vector3(0f, 0.92f, 0f), new Vector3(0.52f, 0.52f, 0.52f));
+            canopyB = Group(treeB, "Cime", new Vector3(0f, 0.30f, 0f));
+            Part(canopyB, cone, tPine, new Vector3(0f, 0.22f, 0f), new Vector3(0.70f, 0.60f, 0.70f));
+            Part(canopyB, cone, tPine, new Vector3(0f, 0.62f, 0f), new Vector3(0.52f, 0.52f, 0.52f));
+            AddCap(canopyB, cone, tCap, new Vector3(0f, 0.74f, 0f), new Vector3(0.40f, 0.34f, 0.40f));
 
             // --- moulin à vent : ses ailes tournent avec le vent
-            var tWall = Mat(new Color(0.96f, 0.90f, 0.78f));
-            tRoof = Mat(new Color(0.86f, 0.36f, 0.30f)); tRoof.snowy = true;
+            var tWall = Mat(new Color(0.96f, 0.90f, 0.78f)); tWall.snowK = 0.9f;
+            var tRoof = Mat(new Color(0.86f, 0.36f, 0.30f)); tRoof.snowK = 1f;
             var tBlade = Mat(new Color(0.98f, 0.97f, 0.94f));
-            var tDark = Mat(new Color(0.34f, 0.26f, 0.22f));
+            var tDark = Mat(new Color(0.34f, 0.26f, 0.22f)); tDark.snowK = 0.35f;
             var mill = Group(island, "Moulin", new Vector3(0.78f, 0f, -0.18f));
             Part(mill, cone, tWall, new Vector3(0f, 0.36f, 0f), new Vector3(0.50f, 0.72f, 0.50f));
             Part(mill, cone, tRoof, new Vector3(0f, 0.80f, 0f), new Vector3(0.42f, 0.30f, 0.42f));
+            AddCap(mill, cone, tCap, new Vector3(0f, 0.86f, 0f), new Vector3(0.30f, 0.20f, 0.30f));
             Part(mill, cube, tDark, new Vector3(0f, 0.10f, -0.22f), new Vector3(0.10f, 0.20f, 0.04f));
             hub = Group(mill, "Ailes", new Vector3(0f, 0.62f, -0.20f));
             Part(hub, sphere, tDark, Vector3.zero, new Vector3(0.12f, 0.12f, 0.12f));
@@ -241,7 +277,7 @@ namespace AR6DoF
             // --- nuages
             tCloud = Mat(new Color(0.98f, 0.98f, 1f), 0f, 0.22f); tCloud.cloud = true;
             float[] cx = { -1.6f, -0.85f, -0.1f, 0.65f, 1.45f, -0.45f };
-            float[] cy = { 0.92f, 1.12f, 0.86f, 1.08f, 0.90f, 1.20f };
+            float[] cy = { 0.82f, 0.99f, 0.78f, 0.96f, 0.84f, 1.07f };
             float[] cz = { -0.30f, -0.55f, -0.05f, -0.35f, -0.10f, -0.65f };
             float[] cs = { 1.0f, 0.85f, 1.1f, 0.9f, 1.0f, 0.75f };
             for (int i = 0; i < CloudN; i++)
@@ -252,7 +288,7 @@ namespace AR6DoF
                 Part(g, sphere, tCloud, new Vector3(0.44f, -0.07f, 0f), new Vector3(0.56f, 0.48f, 0.52f));
                 Part(g, sphere, tCloud, new Vector3(0.08f, 0.22f, 0f), new Vector3(0.52f, 0.48f, 0.50f));
                 Part(g, sphere, tCloud, new Vector3(-0.08f, -0.15f, -0.05f), new Vector3(1.10f, 0.30f, 0.52f));   // dessous plus plat
-                clouds[i] = new Cloud { t = g, x = cx[i], y = cy[i], z = cz[i], size = cs[i], now = 0f };
+                clouds[i] = new Cloud { t = g, x = cx[i], y = cy[i], z = cz[i], size = cs[i], now = 0f, rate = 0.85f + 0.12f * i };
                 g.localScale = Vector3.zero;
                 g.gameObject.SetActive(false);
             }
@@ -260,8 +296,8 @@ namespace AR6DoF
             // --- bancs de brouillard
             for (int i = 0; i < mist.Length; i++)
             {
-                mist[i] = Part(world, sphere, tCloud, new Vector3(-0.8f + i * 0.8f, 0.12f + 0.05f * i, -0.55f - 0.1f * i), Vector3.zero);
-                mistX[i] = -0.8f + i * 0.8f;
+                mist[i] = Part(world, sphere, tCloud, new Vector3(-1.2f + i * 0.5f, 0.12f + 0.05f * i, -0.55f - 0.1f * i), Vector3.zero);
+                mistX[i] = -1.2f + i * 0.5f;
                 mist[i].gameObject.SetActive(false);
             }
 
@@ -288,6 +324,22 @@ namespace AR6DoF
             for (int i = 0; i < boltSeg.Length; i++) boltSeg[i] = Part(bolt, cube, tBolt, Vector3.zero, new Vector3(0.06f, 0.3f, 0.03f));
             bolt.gameObject.SetActive(false);
 
+            // --- vent : traits qui filent et feuilles emportées (visibles seulement quand il souffle fort)
+            tWind = Mat(new Color(1f, 1f, 1f), 1f, 0f);
+            var rw = new System.Random(11);
+            for (int i = 0; i < StreakN; i++)
+            {
+                var t = Part(world, cube, tWind, Vector3.zero, Vector3.zero);
+                t.gameObject.SetActive(false);
+                streaks[i] = new Streak { t = t, p = 0f, y = 0.05f + (float)rw.NextDouble() * 1.1f, z = -0.9f + (float)rw.NextDouble() * 0.5f, speed = 0.8f + (float)rw.NextDouble() * 0.5f };
+            }
+            for (int i = 0; i < LeafN; i++)
+            {
+                var t = Part(world, sphere, tLeaves, Vector3.zero, Vector3.zero);
+                t.gameObject.SetActive(false);
+                leaves[i] = new Leaf { t = t, age = 9f, dur = 1f };
+            }
+
             dirty = true;
             sunScale = 1f; sunTarget = 1f; moonScale = 0f;
         }
@@ -298,7 +350,7 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ réglage selon le temps
-        /// <summary>Choisit ce que la scène montre. 'snap' : sans transition (première image).</summary>
+        /// <summary>Choisit ce que la scène montre. 'snap' : sans transition (première image) ; les nuages, eux, poussent toujours en grandissant.</summary>
         public void Apply(WxCond cond, bool day, float cloudCover, float windSpeedKmh, float windFromDeg, float tempC, bool snap)
         {
             int n = Mathf.RoundToInt(Mathf.Clamp01(cloudCover / 100f) * CloudN);
@@ -310,7 +362,7 @@ namespace AR6DoF
                 case WxCond.MostlyClear: n = Mathf.Clamp(n, 1, 2); break;
                 case WxCond.PartlyCloudy: n = Mathf.Clamp(n, 2, 4); d = 0.05f; break;
                 case WxCond.Overcast: n = CloudN; d = 0.35f; break;
-                case WxCond.Fog: n = Mathf.Clamp(n, 3, 5); d = 0.25f; f = 1f; break;
+                case WxCond.Fog: n = Mathf.Clamp(n, 2, 4); d = 0.25f; f = 1f; break;
                 case WxCond.Drizzle: n = Mathf.Max(n, 5); d = 0.40f; r = 0.25f; break;
                 case WxCond.Rain: n = Mathf.Max(n, 5); d = 0.55f; r = 0.55f; break;
                 case WxCond.HeavyRain: n = CloudN; d = 0.75f; r = 1f; break;
@@ -328,13 +380,14 @@ namespace AR6DoF
             snowAmtTarget = s;
             hailTarget = h;
             fogTarget = f;
-            snowTarget = WxCodes.IsSnow(cond) ? 1f : (tempC <= -5f ? 0.7f : 0f);
+            // neige au sol : il neige -> tout blanchit ; gel sans neige -> un peu de givre ; verglas -> givre
+            snowTarget = WxCodes.IsSnow(cond) ? 1f : (cond == WxCond.FreezingRain ? 0.45f : (tempC <= -5f ? 0.7f : 0f));
             dayTarget = day ? 1f : 0f;
             sunTarget = day && n <= 4 ? 1f : 0f;
             moonTarget = !day && n <= 5 ? 1f : 0f;
             starTarget = !day && n <= 3 && f < 0.5f ? 1f : 0f;
             windKmh = Mathf.Max(0f, windSpeedKmh);
-            float k = Mathf.Clamp01(windKmh / 50f);
+            float k = Mathf.Clamp01(windKmh / 60f);
             windX = -Mathf.Sin(windFromDeg * Mathf.Deg2Rad) * k;
             if (Mathf.Abs(windX) < 0.04f) windX = windX < 0f ? -0.04f : 0.04f;   // jamais tout à fait immobile
             if (snap)
@@ -342,9 +395,33 @@ namespace AR6DoF
                 dayMix = dayTarget; dark = darkTarget; snowMix = snowTarget;
                 rainAmt = rainTarget; snowAmt = snowAmtTarget; hailAmt = hailTarget; fogAmt = fogTarget;
                 sunScale = sunTarget; moonScale = moonTarget; starAmt = starTarget;
-                for (int i = 0; i < CloudN; i++) clouds[i].now = i < cloudTarget ? clouds[i].size : 0f;
+                sunCur = sunGoal; moonCur = moonGoal;
             }
             dirty = true;
+        }
+
+        /// <summary>
+        /// Place le soleil et la lune selon l'heure : 'sunFrac' = avancement du jour (0 lever .. 1 coucher), 'moonFrac' = avancement de la nuit (0 coucher .. 1 lever).
+        /// Un nombre négatif = inconnu (position par défaut).
+        /// </summary>
+        public void SetClock(float sunFrac, float moonFrac, bool snap)
+        {
+            sunGoal = Arc(sunFrac < 0f ? 0.78f : sunFrac);
+            moonGoal = Arc(moonFrac < 0f ? 0.72f : moonFrac);
+            if (snap) { sunCur = sunGoal; moonCur = moonGoal; }
+        }
+
+        static Vector2 Arc(float f)
+        {
+            f = Mathf.Clamp01(f);
+            return new Vector2(Mathf.Lerp(-1.5f, 1.5f, f), 0.62f + 0.42f * Mathf.Sin(f * Mathf.PI));
+        }
+
+        /// <summary>Le temps s'accélère pendant 'seconds' (nuages, moulin, pluie, soleil filent, puis ralentissent) : pour passer à l'heure suivante.</summary>
+        public void Burst(float seconds)
+        {
+            burstDur = Mathf.Max(0.2f, seconds);
+            burstLeft = burstLeft > 0f ? Mathf.Max(burstLeft, burstDur * 0.5f) : burstDur;   // déjà en route : on reste à pleine vitesse
         }
 
         // ------------------------------------------------------------------ animation
@@ -353,20 +430,49 @@ namespace AR6DoF
             return Mathf.MoveTowards(cur, target, speed * dt);
         }
 
+        static float Smooth(float x)
+        {
+            x = Mathf.Clamp01(x);
+            return x * x * (3f - 2f * x);
+        }
+
         void Repaint()
         {
             Color tint = Color.Lerp(new Color(0.42f, 0.48f, 0.82f), Color.white, dayMix);
             Color cDark = new Color(0.46f, 0.49f, 0.58f), sDark = new Color(0.26f, 0.28f, 0.37f);
             Color snowC = new Color(0.97f, 0.98f, 1f), snowS = new Color(0.70f, 0.78f, 0.94f);
+            Color fogC = new Color(0.80f, 0.84f, 0.88f), fogS = new Color(0.64f, 0.68f, 0.76f);
             for (int i = 0; i < toons.Count; i++)
             {
                 var t = toons[i];
                 if (t.emit >= 0.5f) continue;
                 Color c = t.c, s = t.shade;
                 if (t.cloud) { c = Color.Lerp(c, cDark, dark); s = Color.Lerp(s, sDark, dark); }
-                if (t.snowy) { c = Color.Lerp(c, snowC, snowMix); s = Color.Lerp(s, snowS, snowMix); }
+                else
+                {
+                    float sk = snowMix * t.snowK;
+                    if (sk > 0f) { c = Color.Lerp(c, snowC, sk); s = Color.Lerp(s, snowS, sk); }
+                    if (fogAmt > 0.01f) { c = Color.Lerp(c, fogC, fogAmt * 0.55f); s = Color.Lerp(s, fogS, fogAmt * 0.55f); }
+                }
                 t.m.SetColor("_Color", new Color(c.r * tint.r, c.g * tint.g, c.b * tint.b, 1f));
                 t.m.SetColor("_Shade", new Color(s.r * tint.r, s.g * tint.g, s.b * tint.b, 1f));
+            }
+        }
+
+        /// <summary>Couche de neige sur l'île et bonnets sur les arbres, le moulin : grandissent avec la neige.</summary>
+        void SetSnowGeo()
+        {
+            bool on = snowMix > 0.02f;
+            if (blanket.gameObject.activeSelf != on) blanket.gameObject.SetActive(on);
+            if (!on) { for (int i = 0; i < caps.Count; i++) if (caps[i].t.gameObject.activeSelf) caps[i].t.gameObject.SetActive(false); return; }
+            float th = 0.075f * snowMix;
+            blanket.localScale = new Vector3(2.36f, Mathf.Max(0.001f, th), 2.36f);
+            blanket.localPosition = new Vector3(0f, th - 0.012f, 0f);
+            for (int i = 0; i < caps.Count; i++)
+            {
+                var c = caps[i];
+                if (!c.t.gameObject.activeSelf) c.t.gameObject.SetActive(true);
+                c.t.localScale = c.baseScale * snowMix;
             }
         }
 
@@ -400,24 +506,34 @@ namespace AR6DoF
 
         void Update()
         {
-            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
+            float rdt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);   // temps réel
+            // Burst : le temps de la scène file (x1 -> x12 -> x1)
+            if (burstLeft > 0f)
+            {
+                burstLeft = Mathf.Max(0f, burstLeft - rdt);
+                fast = 1f + 11f * Mathf.Sin(Mathf.PI * (1f - burstLeft / burstDur));
+            }
+            else fast = 1f;
+            float dt = rdt * fast;   // temps de la scène
+            float gs = 1f + (fast - 1f) * 0.4f;   // les transitions de couleur / quantité vont plus vite pendant un Burst
             time += dt;
 
             // transitions douces vers la cible
-            float oDay = dayMix, oDark = dark, oSnow = snowMix;
-            dayMix = Glide(dayMix, dayTarget, 1.2f, dt);
-            dark = Glide(dark, darkTarget, 0.8f, dt);
-            snowMix = Glide(snowMix, snowTarget, 0.5f, dt);
-            if (dirty || oDay != dayMix || oDark != dark || oSnow != snowMix) { Repaint(); }
+            float oDay = dayMix, oDark = dark, oSnow = snowMix, oFog = fogAmt;
+            dayMix = Glide(dayMix, dayTarget, 1.2f * gs, rdt);
+            dark = Glide(dark, darkTarget, 0.8f * gs, rdt);
+            snowMix = Glide(snowMix, snowTarget, 0.5f * gs, rdt);
+            fogAmt = Glide(fogAmt, fogTarget, 1f * gs, rdt);
+            if (dirty || oDay != dayMix || oDark != dark || oSnow != snowMix || oFog != fogAmt) Repaint();
+            if (dirty || oSnow != snowMix) SetSnowGeo();
             float oR = rainAmt, oS = snowAmt, oH = hailAmt;
-            rainAmt = Glide(rainAmt, rainTarget, 1.2f, dt);
-            snowAmt = Glide(snowAmt, snowAmtTarget, 1.2f, dt);
-            hailAmt = Glide(hailAmt, hailTarget, 1.2f, dt);
+            rainAmt = Glide(rainAmt, rainTarget, 1.2f * gs, rdt);
+            snowAmt = Glide(snowAmt, snowAmtTarget, 1.2f * gs, rdt);
+            hailAmt = Glide(hailAmt, hailTarget, 1.2f * gs, rdt);
             if (dirty || oR != rainAmt || oS != snowAmt || oH != hailAmt) SetCounts();
-            fogAmt = Glide(fogAmt, fogTarget, 1f, dt);
-            sunScale = Glide(sunScale, sunTarget, 2f, dt);
-            moonScale = Glide(moonScale, moonTarget, 2f, dt);
-            starAmt = Glide(starAmt, starTarget, 1.5f, dt);
+            sunScale = Glide(sunScale, sunTarget, 2f * gs, rdt);
+            moonScale = Glide(moonScale, moonTarget, 2f * gs, rdt);
+            starAmt = Glide(starAmt, starTarget, 1.5f * gs, rdt);
             dirty = false;
 
             // lumière du dessin animé : fixe par rapport à la scène (donc elle suit le plateau), plus bleutée la nuit
@@ -429,18 +545,27 @@ namespace AR6DoF
             rig.localRotation = Quaternion.Euler(-14f, Mathf.Sin(time * 0.35f) * 6f, 0f);
             island.localPosition = new Vector3(0f, Mathf.Sin(time * 0.9f) * 0.035f, 0f);
 
-            // vent : arbres qui se penchent et oscillent, moulin qui tourne
-            float k = Mathf.Clamp01(windKmh / 50f);
-            float lean = windX * 16f;
-            treeA.localRotation = Quaternion.Euler(0f, 0f, -(lean + Mathf.Sin(time * (1.6f + k * 2f)) * (1.5f + 5f * k)));
-            treeB.localRotation = Quaternion.Euler(0f, 0f, -(lean * 0.7f + Mathf.Sin(time * (2.1f + k * 2f) + 1.3f) * (1f + 4f * k)));
-            hub.localRotation = Quaternion.Euler(0f, 0f, hub.localEulerAngles.z - Mathf.Clamp(25f + windKmh * 6f, 25f, 420f) * dt);
+            // vent : les arbres se penchent (le tronc un peu, la cime beaucoup) et plient par rafales, le moulin tourne
+            float k = Mathf.Clamp01(windKmh / 60f);
+            float lean = windX * 30f;
+            float gust = 0.7f + 0.3f * Mathf.Sin(time * 0.8f) * Mathf.Sin(time * 1.9f + 0.6f);
+            float swayA = Mathf.Sin(time * (1.7f + k * 3.4f)) * (1.2f + 12f * k) * gust;
+            float swayB = Mathf.Sin(time * (2.3f + k * 3.8f) + 1.3f) * (1.0f + 10f * k) * gust;
+            treeA.localRotation = Quaternion.Euler(0f, 0f, -(lean * 0.30f + swayA * 0.30f));
+            canopyA.localRotation = Quaternion.Euler(0f, 0f, -(lean * 0.70f + swayA * 0.95f));
+            treeB.localRotation = Quaternion.Euler(0f, 0f, -(lean * 0.21f + swayB * 0.25f));
+            canopyB.localRotation = Quaternion.Euler(0f, 0f, -(lean * 0.50f + swayB * 0.80f));
+            hub.localRotation = Quaternion.Euler(0f, 0f, hub.localEulerAngles.z - Mathf.Clamp(25f + windKmh * 6f, 25f, 520f) * dt);
 
-            // soleil, lune, étoiles
-            sun.localScale = Vector3.one * sunScale * (1f + 0.03f * Mathf.Sin(time * 2f));
+            // soleil et lune suivent l'heure (glissent sur leur arc ; cachés, ils sautent directement à leur place)
+            if (sunScale < 0.05f) sunCur = sunGoal; else sunCur = Vector2.MoveTowards(sunCur, sunGoal, 2.4f * fast * rdt);
+            if (moonScale < 0.05f) moonCur = moonGoal; else moonCur = Vector2.MoveTowards(moonCur, moonGoal, 2.4f * fast * rdt);
+            sun.localPosition = new Vector3(sunCur.x, sunCur.y, 0.9f);
+            moon.localPosition = new Vector3(moonCur.x, moonCur.y, 0.9f);
+            sun.localScale = Vector3.one * sunScale * 0.85f * (1f + 0.03f * Mathf.Sin(time * 2f));
             sun.gameObject.SetActive(sunScale > 0.01f);
             if (sunScale > 0.01f) sunRays.localRotation = Quaternion.Euler(0f, 0f, time * 18f);
-            moon.localScale = Vector3.one * moonScale;
+            moon.localScale = Vector3.one * moonScale * 0.9f;
             moon.gameObject.SetActive(moonScale > 0.01f);
             for (int i = 0; i < StarN; i++)
             {
@@ -449,31 +574,31 @@ namespace AR6DoF
                 if (on) stars[i].localScale = Vector3.one * (0.045f * starAmt * (0.65f + 0.35f * Mathf.Sin(time * 2.2f + starPh[i])));
             }
 
-            // nuages : apparaissent / disparaissent en grossissant, dérivent avec le vent
+            // nuages : naissent et s'effacent en grandissant / rétrécissant (jamais d'apparition d'un coup), dérivent avec le vent
             float drift = (windX >= 0f ? 1f : -1f) * Mathf.Clamp(0.035f + windKmh * 0.009f, 0.035f, 0.55f);
             for (int i = 0; i < CloudN; i++)
             {
                 var c = clouds[i];
                 float target = i < cloudTarget ? c.size : 0f;
-                c.now = Mathf.MoveTowards(c.now, target, 1.4f * dt);
-                bool on = c.now > 0.01f;
+                c.now = Mathf.MoveTowards(c.now, target, c.rate * gs * rdt);
+                bool on = c.now > 0.004f;
                 if (c.t.gameObject.activeSelf != on) c.t.gameObject.SetActive(on);
                 if (!on) continue;
                 c.x += drift * dt;
                 if (c.x > 2.6f) c.x = -2.6f; else if (c.x < -2.6f) c.x = 2.6f;
                 c.t.localPosition = new Vector3(c.x, c.y + Mathf.Sin(time * 0.7f + i * 1.7f) * 0.03f, c.z);
-                c.t.localScale = Vector3.one * c.now;
+                c.t.localScale = Vector3.one * (c.size * Smooth(c.now / c.size));
             }
 
-            // brouillard
+            // brouillard : bancs bas et larges qui flottent devant l'île
             for (int i = 0; i < mist.Length; i++)
             {
                 bool on = fogAmt > 0.01f;
                 if (mist[i].gameObject.activeSelf != on) mist[i].gameObject.SetActive(on);
                 if (!on) continue;
                 float x = mistX[i] + Mathf.Sin(time * 0.25f + i * 2f) * 0.35f;
-                mist[i].localPosition = new Vector3(x, 0.14f + 0.04f * i, -0.55f - 0.12f * i);
-                mist[i].localScale = new Vector3(1.9f, 0.30f, 0.7f) * fogAmt;
+                mist[i].localPosition = new Vector3(x, 0.14f + 0.07f * (i % 3), -0.55f - 0.10f * (i % 3));
+                mist[i].localScale = new Vector3(1.5f, 0.32f + 0.06f * (i % 2), 0.7f) * fogAmt;
             }
 
             // pluie : traînées bleues inclinées par le vent
@@ -507,10 +632,12 @@ namespace AR6DoF
                 }
             }
 
+            WindEffects(dt, k);
+
             // éclairs
             if (thunder)
             {
-                boltTimer -= dt;
+                boltTimer -= rdt;
                 if (boltTimer <= 0f)
                 {
                     boltTimer = Random.Range(2.5f, 6f);
@@ -520,14 +647,77 @@ namespace AR6DoF
             }
             if (boltLeft > 0f)
             {
-                boltLeft -= dt;
+                boltLeft -= rdt;
                 bolt.gameObject.SetActive(true);
                 Flash = boltLeft > 0.09f ? 1f : 0.55f;
             }
             else
             {
                 if (bolt.gameObject.activeSelf) bolt.gameObject.SetActive(false);
-                Flash = Mathf.Max(0f, Flash - dt * 4f);
+                Flash = Mathf.Max(0f, Flash - rdt * 4f);
+            }
+        }
+
+        /// <summary>Traits blancs qui filent dans le sens du vent et feuilles arrachées à l'arbre : seulement quand il souffle (et si l'option est active).</summary>
+        void WindEffects(float dt, float k)
+        {
+            float dir = windX >= 0f ? 1f : -1f;
+            int wantStreaks = WindFx && windKmh >= 18f ? Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01((windKmh - 12f) / 45f) * StreakN), 2, StreakN) : 0;
+            for (int i = 0; i < StreakN; i++)
+            {
+                var st = streaks[i];
+                bool wanted = i < wantStreaks;
+                if (st.p <= 0f && !wanted)
+                {
+                    if (st.t.gameObject.activeSelf) st.t.gameObject.SetActive(false);
+                    st.p = 0f;
+                    continue;
+                }
+                if (st.p == 0f) st.p = -Random.Range(0.05f, 0.9f);   // attend un peu : les traits ne partent pas tous ensemble
+                st.p += st.speed * (0.25f + 0.9f * k) * dt;
+                if (st.p <= 0f)
+                {
+                    if (st.t.gameObject.activeSelf) st.t.gameObject.SetActive(false);
+                    continue;
+                }
+                if (st.p >= 1f)
+                {
+                    st.p = 0f;
+                    st.y = Random.Range(0.05f, 1.15f);
+                    st.z = Random.Range(-0.9f, -0.4f);
+                    if (st.t.gameObject.activeSelf) st.t.gameObject.SetActive(false);
+                    continue;
+                }
+                if (!st.t.gameObject.activeSelf) st.t.gameObject.SetActive(true);
+                float env = Mathf.Sin(st.p * Mathf.PI);
+                float x = Mathf.Lerp(-2.3f, 2.3f, dir > 0f ? st.p : 1f - st.p);
+                st.t.localPosition = new Vector3(x, st.y + Mathf.Sin(st.p * 9f + i) * 0.03f, st.z);
+                st.t.localRotation = Quaternion.Euler(0f, 0f, Mathf.Sin(st.p * 7f + i) * 6f);
+                st.t.localScale = new Vector3((0.28f + 0.55f * k) * env, 0.014f, 0.014f);
+            }
+
+            int wantLeaves = WindFx && windKmh >= 32f ? Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01((windKmh - 28f) / 40f) * LeafN), 1, LeafN) : 0;
+            for (int i = 0; i < LeafN; i++)
+            {
+                var lf = leaves[i];
+                if (lf.age >= lf.dur)
+                {
+                    if (i >= wantLeaves) { if (lf.t.gameObject.activeSelf) lf.t.gameObject.SetActive(false); continue; }
+                    lf.x = -0.62f + Random.Range(-0.35f, 0.35f);
+                    lf.y = 0.65f + Random.Range(0f, 0.5f);
+                    lf.z = 0.05f + Random.Range(-0.2f, 0.2f);
+                    lf.age = 0f;
+                    lf.dur = Random.Range(2.2f, 3.6f);
+                    lf.ph = Random.Range(0f, 6.28f);
+                    lf.t.gameObject.SetActive(true);
+                }
+                lf.age += dt;
+                lf.x += dir * (0.6f + 2.6f * k) * dt;
+                lf.y += (-0.10f + Mathf.Sin(time * 5f + lf.ph) * 0.45f) * dt;
+                float env = Mathf.Sin(Mathf.Clamp01(lf.age / lf.dur) * Mathf.PI);
+                lf.t.localPosition = new Vector3(lf.x, Mathf.Max(0.02f, lf.y), lf.z);
+                lf.t.localRotation = Quaternion.Euler(lf.age * 380f, lf.age * 260f, 0f);
+                lf.t.localScale = new Vector3(0.075f, 0.022f, 0.05f) * env;
             }
         }
 

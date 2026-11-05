@@ -311,7 +311,8 @@ class Mixer {
       const float l2 = lim ? SoftLimit(mixL_[(size_t)i]) : Clampf(mixL_[(size_t)i], -1.f, 1.f);
       const float r2 = lim ? SoftLimit(mixR_[(size_t)i]) : Clampf(mixR_[(size_t)i], -1.f, 1.f);
       out[2 * i] = l2; out[2 * i + 1] = r2;
-      pl = std::max(pl, std::fabs(l2)); pr = std::max(pr, std::fabs(r2));
+      // niveau du maitre mesure AVANT le limiteur : au-dessus de 1.0 (0 dB) le signal aurait sature, le voyant rouge de la console s'allume
+      pl = std::max(pl, std::fabs(mixL_[(size_t)i])); pr = std::max(pr, std::fabs(mixR_[(size_t)i]));
       outScope.Push(0.5f * (l2 + r2));
     }
     peakVoice = std::max(pk[kVoice], peakVoice.load() * 0.85f);

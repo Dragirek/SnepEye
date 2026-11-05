@@ -85,10 +85,12 @@ namespace AR6DoF
     }
 
     /// <summary>Fond de ciel : rectangle à coins arrondis dégradé du haut (zénith) vers le bas (horizon).</summary>
-    public class Ar6dofSkyGraphic : MaskableGraphic
+    public class Ar6dofSkyGraphic : Ar6dofRasterGfx
     {
         Color top = new Color(0.30f, 0.58f, 0.92f), bottom = new Color(0.66f, 0.86f, 0.98f);
         float radius = 24f;
+
+        protected override float Supersample { get { return 0.5f; } }   // simple degrade : texture petite, redessinee vite (a chaque eclair)
 
         public void SetColors(Color topColor, Color bottomColor, float cornerRadius)
         {
@@ -106,10 +108,8 @@ namespace AR6DoF
             }
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect r)
         {
-            vh.Clear();
-            Rect r = GetPixelAdjustedRect();
             if (r.width < 2f || r.height < 2f) return;
             float rad = Mathf.Min(radius, Mathf.Min(r.width, r.height) * 0.5f);
             var pts = new List<Vector2>(40);
@@ -134,7 +134,7 @@ namespace AR6DoF
     }
 
     /// <summary>Icône de condition météo dessinée par code : soleil, lune, nuages, pluie, neige, éclair, brouillard.</summary>
-    public class Ar6dofWxIcon : MaskableGraphic
+    public class Ar6dofWxIcon : Ar6dofRasterGfx
     {
         WxCond cond = WxCond.Clear;
         bool day = true;
@@ -210,10 +210,8 @@ namespace AR6DoF
             if (day) Sun(vh, x, y, r); else Moon(vh, x, y, r * 1.15f);
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect rc)
         {
-            vh.Clear();
-            Rect rc = GetPixelAdjustedRect();
             u = Mathf.Min(rc.width, rc.height);
             o = rc.center;
             if (u < 4f) return;
@@ -292,7 +290,7 @@ namespace AR6DoF
     }
 
     /// <summary>Courbe de température sur les prochaines heures, avec la probabilité de pluie en barres.</summary>
-    public class Ar6dofWxChart : MaskableGraphic
+    public class Ar6dofWxChart : Ar6dofRasterGfx
     {
         float[] temp = new float[0], pop = new float[0];
         Color lineCol = new Color(1f, 0.7f, 0.2f);
@@ -310,10 +308,8 @@ namespace AR6DoF
             SetVerticesDirty();
         }
 
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect r)
         {
-            vh.Clear();
-            Rect r = GetPixelAdjustedRect();
             int n = temp.Length;
             if (n < 2 || r.width < 10f) return;
             float x0 = r.xMin + 56f, x1 = r.xMax - 16f, y0 = r.yMin + 12f, y1 = r.yMax - 12f;

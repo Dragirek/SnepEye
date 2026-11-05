@@ -83,15 +83,16 @@ namespace AR6DoF
         public bool seated = false;        // mode assis : le dock se place a hauteur des mains et le sol suppose est ajuste a la hauteur des yeux assis
 
         // Informations dans le dock (heure, date, batterie du PC) ; le format de l'heure est aussi celui de l'application Horloge
-        public bool dockShowClock = false;
+        // Par defaut : heure, date (« 5 novembre ») et batterie (« Secteur » sur un PC fixe) ; sans rien d'autre dans le dock. Les reglages deja enregistres restent tels quels.
+        public bool dockShowClock = true;
         public int dockClockStyle = 0;     // 0 numerique, 1 analogique, 2 les deux
         public int dockFaceStyle = 0;      // visuel du cadran analogique (0..5)
-        public bool dockShowDate = false;
-        public bool dockShowBattery = false;
+        public bool dockShowDate = true;
+        public bool dockShowBattery = true;
         public int dockBatteryStyle = 2;   // 0 texte, 1 icone, 2 icone + pourcentage + temps restant
         public bool clock24h = Ar6dofClockFmt.CultureIs24h();   // faux : 12 h avec AM / PM
         public bool clockSeconds = false;
-        public int dateFormat = 0;         // voir Ar6dofClockFmt.DateFormats
+        public int dateFormat = 5;         // voir Ar6dofClockFmt.DateFormats (5 = « 5 novembre »)
 
         public float keyboardScale = 1f;
 

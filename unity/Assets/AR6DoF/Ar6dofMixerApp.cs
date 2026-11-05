@@ -76,7 +76,7 @@ namespace AR6DoF
             ChannelRow(a, "Voix", 0, m => m.peak[1]);
             ChannelRow(a, "Soundboard", 1, m => m.peak[2]);
             ChannelRow(a, "Musique", 2, m => m.peak[3]);
-            ChannelRow(a, "General", 3, m => Mathf.Max(m.peak[4], m.peak[5]));
+            ChannelRow(a, "Principal", 3, m => Mathf.Max(m.peak[4], m.peak[5]));
             Section("Visuel de la sortie");
             viz = Ar6dofViz.Make(content, new Vector2(0f, RowY(150f)), new Vector2(IW, 150f));
             viz.mode = Mathf.Clamp(a.data.viz, 0, Ar6dofViz.Count - 1);
@@ -113,7 +113,7 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ console avancée
-        static readonly string[] StripNames = { "Voix", "Soundboard", "Musique", "General" };
+        static readonly string[] StripNames = { "Voix", "Soundboard", "Musique", "Principal" };
         static readonly string[] EqNames = { "Gr", "Md", "Ai" };   // graves, medium, aigus
         const float StripW = 156f, StripGap = 6f, StripH = 564f, FaderH = 260f;
 
@@ -155,7 +155,7 @@ namespace AR6DoF
                 for (int c = 0; c < 4; c++) a.ResetStrip(c);
                 Rebuild();
             }, out t2, 20);
-            var hint = Ar6dofVrUi.Label(content, Ar6dofLoc.T("Touche une valeur pour la remettre a zero."), new Vector2(pc, -(top + 512f)), new Vector2(pw, 40f), 16, TextAnchor.UpperLeft);
+            var hint = Ar6dofVrUi.Label(content, Ar6dofLoc.T("Touche une valeur (balance, graves, medium, aigus) pour la remettre a zero. Limiteur : plafond 0 dB, doux des -3 dB. Le vumetre Principal est avant le limiteur : voyant rouge = ca sature."), new Vector2(pc, -(top + 520f)), new Vector2(pw, 74f), 15, TextAnchor.UpperLeft);
             hint.horizontalOverflow = HorizontalWrapMode.Wrap;
             hint.verticalOverflow = VerticalWrapMode.Truncate;
 

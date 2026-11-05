@@ -10,7 +10,7 @@ namespace AR6DoF
     /// Les classiques de l'industrie (analyseur à barres avec retenue des crêtes, miroir, courbe lissée, oscilloscope, spectrogramme, aiguilles VU)
     /// et des effets plus fous dans l'esprit du Lecteur Windows Media de XP (spectre circulaire, ondes psychédéliques).
     /// </summary>
-    public class Ar6dofViz : MaskableGraphic
+    public class Ar6dofViz : Ar6dofRasterGfx
     {
         public const int Bands = 32, Hist = 48, WaveN = 128;
         public static readonly string[] Names =
@@ -19,6 +19,7 @@ namespace AR6DoF
         };
         public static int Count { get { return Names.Length; } }
 
+        protected override float Supersample { get { return 1.5f; } }
         public int mode;
         readonly float[] lvl = new float[Bands], hold = new float[Bands], holdT = new float[Bands];
         readonly float[] wave = new float[WaveN];
@@ -117,10 +118,8 @@ namespace AR6DoF
         static float Avg(float[] a, int from, int to) { float s = 0f; for (int i = from; i < to; i++) s += a[i]; return s / Mathf.Max(1, to - from); }
 
         // ------------------------------------------------------------------ dessin
-        protected override void OnPopulateMesh(VertexHelper vh)
+        protected override void Draw(VertexHelper vh, Rect r)
         {
-            vh.Clear();
-            Rect r = GetPixelAdjustedRect();
             if (r.width < 8f || r.height < 8f) return;
             switch (mode)
             {

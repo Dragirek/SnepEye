@@ -21,7 +21,10 @@ namespace AR6DoF
     {
         public string[] time = new string[0];
         public float[] temperature_2m = new float[0], precipitation_probability = new float[0], precipitation = new float[0];
-        public int[] weather_code = new int[0];
+        // heure par heure complet (curseur « avancer dans le temps » de la fenetre Meteo)
+        public float[] apparent_temperature = new float[0], relative_humidity_2m = new float[0], cloud_cover = new float[0], surface_pressure = new float[0],
+                       wind_speed_10m = new float[0], wind_direction_10m = new float[0], wind_gusts_10m = new float[0];
+        public int[] weather_code = new int[0], is_day = new int[0];
     }
     [Serializable] public class WxDaily
     {
@@ -38,8 +41,10 @@ namespace AR6DoF
         public WxDaily daily = new WxDaily();
     }
 
-    [Serializable] public class WxPlace { public string name = "", country = "", countryCode = ""; public double lat, lon; public bool valid; }
-    [Serializable] public class WxPrefs { public WxPlace place = new WxPlace(); public int units = -1; }   // units : -1 selon le pays, 0 métrique, 1 impérial
+    // source : d'ou vient la position (affichee dans la fenetre) : "windows", "ip", "manual", "search"
+    [Serializable] public class WxPlace { public string name = "", country = "", countryCode = "", source = ""; public double lat, lon; public bool valid; }
+    // units : -1 selon le pays, 0 métrique, 1 impérial. off : masque de bits des elements caches (Ar6dofWeatherApp.Opt*)
+    [Serializable] public class WxPrefs { public WxPlace place = new WxPlace(); public int units = -1; public int off; }
 
     [Serializable] class GeoItem { public string name = "", country = "", admin1 = "", country_code = ""; public double latitude, longitude; }
     [Serializable] class GeoResp { public GeoItem[] results; }
@@ -199,7 +204,7 @@ namespace AR6DoF
                 if (File.Exists(FilePath))
                 {
                     var p = JsonUtility.FromJson<WxPrefs>(File.ReadAllText(FilePath, Encoding.UTF8));
-                    if (p != null && p.place != null) { prefs.place = p.place; prefs.units = p.units; }
+                    if (p != null && p.place != null) { prefs.place = p.place; prefs.units = p.units; prefs.off = p.off; }
                 }
             }
             catch (Exception) { }
@@ -284,7 +289,7 @@ namespace AR6DoF
             error = "";
             string url = "https://api.open-meteo.com/v1/forecast?latitude=" + N(prefs.place.lat) + "&longitude=" + N(prefs.place.lon) +
                 "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
-                "&hourly=temperature_2m,precipitation_probability,precipitation,weather_code" +
+                "&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,apparent_temperature,relative_humidity_2m,cloud_cover,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m,is_day" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset,uv_index_max,wind_speed_10m_max" +
                 "&timezone=auto&forecast_days=7&wind_speed_unit=kmh&temperature_unit=celsius&precipitation_unit=mm";
             Get(url, text =>
@@ -303,9 +308,9 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ position
-        void SetPlace(string name, string country, string cc, double lat, double lon)
+        void SetPlace(string name, string country, string cc, double lat, double lon, string source)
         {
-            prefs.place = new WxPlace { name = name ?? "", country = country ?? "", countryCode = cc ?? "", lat = lat, lon = lon, valid = true };
+            prefs.place = new WxPlace { name = name ?? "", country = country ?? "", countryCode = cc ?? "", source = source ?? "", lat = lat, lon = lon, valid = true };
             Save();
         }
 
@@ -320,7 +325,7 @@ namespace AR6DoF
                 try
                 {
                     var r = JsonUtility.FromJson<IpWho>(text);
-                    if (r != null && r.success && (r.latitude != 0 || r.longitude != 0)) { SetPlace(r.city, r.country, r.country_code, r.latitude, r.longitude); status = ""; Refresh(); return; }
+                    if (r != null && r.success && (r.latitude != 0 || r.longitude != 0)) { SetPlace(r.city, r.country, r.country_code, r.latitude, r.longitude, "ip"); status = ""; Refresh(); return; }
                 }
                 catch (Exception) { }
                 IpFallback();
@@ -334,7 +339,7 @@ namespace AR6DoF
                 try
                 {
                     var r = JsonUtility.FromJson<IpApi>(text);
-                    if (r != null && (r.latitude != 0 || r.longitude != 0)) { SetPlace(r.city, r.country_name, r.country_code, r.latitude, r.longitude); status = ""; Refresh(); return; }
+                    if (r != null && (r.latitude != 0 || r.longitude != 0)) { SetPlace(r.city, r.country_name, r.country_code, r.latitude, r.longitude, "ip"); status = ""; Refresh(); return; }
                 }
                 catch (Exception) { }
                 phase = Phase.Idle; status = ""; error = "Position introuvable : cherche ta ville par son nom";
@@ -385,32 +390,66 @@ namespace AR6DoF
             if (parts.Length == 2 && double.TryParse(parts[0], NumberStyles.Float, Inv, out lat) && double.TryParse(parts[1], NumberStyles.Float, Inv, out lon))
             {
                 status = "Position trouvee";
-                // nom du lieu : géocodage inverse (si ça échoue, on garde les coordonnées)
-                string lang = Ar6dofLoc.Code;
-                Get("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=" + N(lat) + "&longitude=" + N(lon) + "&localityLanguage=" + lang, text =>
-                {
-                    string name = "", country = "", cc = "";
-                    try
-                    {
-                        var g = JsonUtility.FromJson<RevGeo>(text);
-                        if (g != null) { name = !string.IsNullOrEmpty(g.city) ? g.city : g.locality; country = g.countryName; cc = g.countryCode; }
-                    }
-                    catch (Exception) { }
-                    if (string.IsNullOrEmpty(name)) name = lat.ToString("0.00", Inv) + ", " + lon.ToString("0.00", Inv);
-                    SetPlace(name, country, cc, lat, lon);
-                    status = "";
-                    Refresh();
-                }, err =>
-                {
-                    SetPlace(lat.ToString("0.00", Inv) + ", " + lon.ToString("0.00", Inv), "", "", lat, lon);
-                    status = "";
-                    Refresh();
-                });
+                ResolveAndUse(lat, lon, "windows");
                 return;
             }
             // Windows n'a pas pu : localisation coupée dans Paramètres Windows, pas de Wi-Fi/GPS... on prend la position approximative
             UseIp();
             hint = "Localisation Windows indisponible (Parametres Windows > Confidentialite > Localisation) : position approximative utilisee";
+        }
+
+        /// <summary>Cherche le nom du lieu de ces coordonnées (géocodage inverse ; en cas d'échec on garde les chiffres), l'enregistre et charge la météo.</summary>
+        void ResolveAndUse(double lat, double lon, string source)
+        {
+            phase = Phase.Locating;
+            string lang = Ar6dofLoc.Code;
+            Get("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=" + N(lat) + "&longitude=" + N(lon) + "&localityLanguage=" + lang, text =>
+            {
+                string name = "", country = "", cc = "";
+                try
+                {
+                    var g = JsonUtility.FromJson<RevGeo>(text);
+                    if (g != null) { name = !string.IsNullOrEmpty(g.city) ? g.city : g.locality; country = g.countryName; cc = g.countryCode; }
+                }
+                catch (Exception) { }
+                if (string.IsNullOrEmpty(name)) name = lat.ToString("0.00", Inv) + ", " + lon.ToString("0.00", Inv);
+                SetPlace(name, country, cc, lat, lon, source);
+                status = "";
+                Refresh();
+            }, err =>
+            {
+                SetPlace(lat.ToString("0.00", Inv) + ", " + lon.ToString("0.00", Inv), "", "", lat, lon, source);
+                status = "";
+                Refresh();
+            });
+        }
+
+        /// <summary>Position saisie à la main (latitude, longitude en degrés décimaux) : la plus fiable sur un PC fixe, qui n'a pas de GPS.</summary>
+        public void UseCoords(double lat, double lon)
+        {
+            error = "";
+            hint = "";
+            status = "Recherche de ta position...";
+            ResolveAndUse(lat, lon, "manual");
+        }
+
+        /// <summary>Lit « 47.39, 0.68 », « 47,39 0,68 », « 47.39;0.68 » (copié depuis une carte...). Vrai si latitude et longitude sont valides.</summary>
+        public static bool ParseCoords(string text, out double lat, out double lon)
+        {
+            lat = lon = 0;
+            if (string.IsNullOrEmpty(text)) return false;
+            string t = text.Trim().Replace("°", " ");
+            string[] p = t.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length != 2) p = t.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length != 2)
+            {
+                string[] q = t.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                if (q.Length == 2) p = q;
+            }
+            if (p.Length != 2) return false;
+            string a = p[0].Trim().TrimEnd(',').Replace(',', '.'), b = p[1].Trim().TrimEnd(',').Replace(',', '.');
+            if (!double.TryParse(a, NumberStyles.Float, Inv, out lat) || !double.TryParse(b, NumberStyles.Float, Inv, out lon)) return false;
+            return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
         }
 
         // ------------------------------------------------------------------ recherche d'une ville
@@ -444,7 +483,7 @@ namespace AR6DoF
         public void Pick(WxPlace p)
         {
             if (p == null) return;
-            prefs.place = new WxPlace { name = p.name, country = p.country, countryCode = p.countryCode, lat = p.lat, lon = p.lon, valid = true };
+            prefs.place = new WxPlace { name = p.name, country = p.country, countryCode = p.countryCode, source = "search", lat = p.lat, lon = p.lon, valid = true };
             Save();
             results.Clear();
             searched = false;

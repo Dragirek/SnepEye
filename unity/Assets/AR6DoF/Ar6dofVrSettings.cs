@@ -1192,7 +1192,8 @@ namespace AR6DoF
                 {
                     if (g.valid)
                         l4.text = Ar6dofLoc.F("Regard : {0} deg (horizontal)   {1} deg (vertical)", g.yaw.ToString("+0.0;-0.0;0.0"), g.pitch.ToString("+0.0;-0.0;0.0"))
-                            + ((g.blinkL || g.blinkR) ? Ar6dofLoc.T("   clignement") : "");
+                            + ((g.blinkL || g.blinkR) ? Ar6dofLoc.T("   clignement") : "")
+                            + Ar6dofLoc.F("   paupieres : gauche {0} %, droite {1} %", Mathf.RoundToInt(Mathf.Clamp01(g.openL) * 100f), Mathf.RoundToInt(Mathf.Clamp01(g.openR) * 100f));
                     else
                         l4.text = Ar6dofLoc.T(g.calibrated ? "Regard : oeil non detecte" : "Regard : pas d'etalonnage");
                 }
