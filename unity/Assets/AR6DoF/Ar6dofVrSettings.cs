@@ -803,7 +803,7 @@ namespace AR6DoF
             InfoLine(page, Next(ref c, 28f, 4f), PgView, () => Ar6dofLoc.T(pt.HasCalibration ? "Calibration camera : chargee" : "Calibration camera : ABSENTE (camera_model.json)"), 19);
             InfoLine(page, Next(ref c, 28f, 4f), PgView, CalibInfoLine, 19);
             InfoLine(page, Next(ref c, 28f, 8f), PgView, CalibModeLine, 19);
-            Btn(page, 0f, Next(ref c, 48f, 12f), 440f, "Calibrer la camera (guide)", () => { if (dock != null) dock.OpenApp("calibration"); }, 22);
+            InfoLine(page, Next(ref c, 28f, 12f), PgView, CalibHintLine, 19);
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Affichage");
@@ -843,12 +843,22 @@ namespace AR6DoF
             return Ar6dofLoc.F("Suivi : calibration {0}, cameras a {1} mm", src, i.baselineMm.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
         }
 
+        // le suivi adapte tout seul la calibration au mode camera utilise (resolution, cadence) : plus d'alerte, seulement l'information
         string CalibModeLine()
         {
             var i = CalInfo();
             if (i == null) return "";
-            if (i.mismatch) return Ar6dofLoc.F("ATTENTION : mode camera {0} x {1} different de la calibration ({2} x {3}) : distances fausses", i.runW, i.runH, i.calibW, i.calibH);
-            return Ar6dofLoc.F("Mode camera {0} x {1} : identique a la calibration", i.runW, i.runH);
+            if (!i.mismatch) return Ar6dofLoc.F("Mode camera {0} x {1} : identique a la calibration", i.runW, i.runH);
+            return Ar6dofLoc.F("Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5})",
+                i.runW, i.runH, i.runFps, i.calibW, i.calibH, i.zoom.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        string CalibHintLine()
+        {
+            var i = CalInfo();
+            if (i != null && i.mismatch && !i.zoomConfirmed && i.zoomSource != "calib" && i.zoomSource != "manual")
+                return Ar6dofLoc.T("Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure");
+            return Ar6dofLoc.T("Calibration de la camera : dans ar6dof_app.exe, page Calibration");
         }
 
         // ================================================================== OPTIQUE

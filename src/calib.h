@@ -213,6 +213,123 @@ inline bool ConvertRtabmapToNative(const std::string& dir, StereoCalib& out, std
   return SaveNativeCalib(out, nat.string(), err);
 }
 
+// ---- Un seul jeu d'intrinseques pour TOUS les modes de la camera ---------------------------------------------------------------------
+// Une calibration est faite dans UN mode (taille d'image par oeil + cadence). Un autre mode de la meme camera est soit une version REDUITE de
+// l'image (meme champ de vision : la focale en pixels suit la taille), soit un RECADRAGE du centre du capteur (focale en pixels inchangee).
+// On ne peut pas le deviner : on part de « reduit » (zoom 1) et un « zoom du mode » est APPRIS (rotation vue par la camera / rotation du gyro,
+// voir DelayEstimator::EstimateZoom) ou mesure avec la mire, puis garde par mode dans mode_zoom.yml. La distorsion est exprimee en coordonnees
+// normalisees (rayon / focale) : elle ne change pas. La base T est une longueur physique : elle ne change pas non plus.
+struct ModeRel {
+  double sx = 1, sy = 1;    // rapports de taille (mode utilise / mode calibre)
+  double scale = 1;         // rapport retenu pour la focale (si les formats different : celui de la hauteur)
+  double zoom = 1;          // zoom du mode applique en plus
+  bool sameSize = true;     // meme taille d'image que la calibration
+  bool sameAspect = true;
+};
+
+inline std::string ModeKey(cv::Size eye, int fps) { return std::to_string(eye.width) + "x" + std::to_string(eye.height) + "@" + std::to_string(fps); }
+
+// Calibration exprimee dans le mode `eye` : focales * (rapport de taille * zoom), centre optique replace par rapport au centre de l'image.
+inline StereoCalib ResolveCalib(const StereoCalib& c, cv::Size eye, double zoom, ModeRel* rel = nullptr) {
+  ModeRel r;
+  r.sx = (double)eye.width / std::max(1, c.size.width);
+  r.sy = (double)eye.height / std::max(1, c.size.height);
+  r.sameAspect = std::abs(r.sx - r.sy) <= 0.01 * r.sx;
+  r.sameSize = eye == c.size;
+  r.scale = r.sameAspect ? 0.5 * (r.sx + r.sy) : r.sy;
+  r.zoom = zoom > 0 ? zoom : 1.0;
+  StereoCalib o = c;
+  o.size = eye;
+  const double k = r.scale * r.zoom;
+  auto mk = [&](const cv::Mat& K) {
+    cv::Mat m = K.clone();
+    m.at<double>(0, 0) *= k;
+    m.at<double>(1, 1) *= k;
+    m.at<double>(0, 2) = (eye.width - 1) * 0.5 + (K.at<double>(0, 2) - (c.size.width - 1) * 0.5) * k;
+    m.at<double>(1, 2) = (eye.height - 1) * 0.5 + (K.at<double>(1, 2) - (c.size.height - 1) * 0.5) * k;
+    return m;
+  };
+  o.K1 = mk(c.K1);
+  o.K2 = mk(c.K2);
+  if (rel) *rel = r;
+  return o;
+}
+
+// Identifiant d'une calibration : sert a invalider les zooms appris quand la calibration change.
+inline std::string CalibId(const StereoCalib& c) {
+  char b[160];
+  std::snprintf(b, sizeof(b), "%s|%dx%d|%.3f|%.3f", c.created.c_str(), c.size.width, c.size.height, c.K1.empty() ? 0.0 : c.K1.at<double>(0, 0),
+                c.T.empty() ? 0.0 : cv::norm(c.T) * 1000.0);
+  return b;
+}
+
+struct ZoomEntry {
+  std::string key, source;   // source : "auto", "manual"
+  double zoom = 1.0;
+  int samples = 0;
+};
+
+// mode_zoom.yml : un zoom par mode (taille par oeil @ cadence), valable pour UNE calibration (CalibId).
+struct ZoomStore {
+  std::string calibId;
+  std::vector<ZoomEntry> e;
+
+  const ZoomEntry* Find(const std::string& key) const {
+    for (const auto& z : e) if (z.key == key) return &z;
+    return nullptr;
+  }
+  void Set(const ZoomEntry& n) {
+    for (auto& z : e) if (z.key == n.key) { z = n; return; }
+    e.push_back(n);
+  }
+  void Erase(const std::string& key) {
+    for (size_t i = 0; i < e.size(); i++) if (e[i].key == key) { e.erase(e.begin() + i); return; }
+  }
+  // Charge le fichier ; s'il appartient a une autre calibration, il est ignore (liste vide).
+  bool Load(const std::string& path, const std::string& id) {
+    e.clear();
+    calibId = id;
+    try {
+      cv::FileStorage fs(path, cv::FileStorage::READ);
+      if (!fs.isOpened()) return false;
+      std::string fid;
+      fs["calib_id"] >> fid;
+      if (fid != id) return false;
+      cv::FileNode n = fs["modes"];
+      for (auto it = n.begin(); it != n.end(); ++it) {
+        ZoomEntry z;
+        (*it)["key"] >> z.key;
+        z.zoom = (double)(*it)["zoom"];
+        z.samples = (int)(*it)["samples"];
+        (*it)["source"] >> z.source;
+        if (!z.key.empty() && z.zoom > 0.2 && z.zoom < 5.0) e.push_back(z);
+      }
+      return true;
+    } catch (const cv::Exception&) {
+      e.clear();
+      return false;
+    }
+  }
+  bool Save(const std::string& path) const {
+    try {
+      const std::string tmp = path + ".tmp";
+      {
+        cv::FileStorage fs(tmp, cv::FileStorage::WRITE);
+        if (!fs.isOpened()) return false;
+        fs << "format" << "ar6dof_mode_zoom" << "calib_id" << calibId << "modes" << "[";
+        for (const auto& z : e) fs << "{" << "key" << z.key << "zoom" << z.zoom << "samples" << z.samples << "source" << z.source << "}";
+        fs << "]";
+      }
+      std::error_code ec;
+      std::filesystem::remove(path, ec);
+      std::filesystem::rename(tmp, path, ec);
+      return !ec;
+    } catch (const cv::Exception&) {
+      return false;
+    }
+  }
+};
+
 inline bool MakeRectifier(const StereoCalib& c, cv::Size eye, Rectifier& out, std::string& err) {
   double sx = (double)eye.width / c.size.width;
   double sy = (double)eye.height / c.size.height;

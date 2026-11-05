@@ -431,20 +431,30 @@ static void WriteTextAtomic(const std::string& path, const std::string& text) {
   MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 }
 
-// calib_info.json : ce que le suivi utilise (calibration, mode camera, echelle). Unity l'affiche dans Appareils > Tete / Cameras, avec une alerte
-// quand la calibration a ete faite dans un autre mode que celui utilise (distances fausses si ce mode recadre l'image au lieu de la reduire).
-static void WriteCalibInfo(const StereoCalib& c, const Rectifier* r, cv::Size run, const std::string& err) {
-  const double sx = c.size.width > 0 ? (double)run.width / c.size.width : 1.0;
-  const bool mismatch = c.size.width > 0 && (run.width != c.size.width || run.height != c.size.height);
+// calib_info.json : ce que le suivi utilise (calibration, mode camera, zoom du mode). Les applications l'affichent, avec une alerte si le mode a change.
+struct ZoomInfo {
+  double zoom = 1.0;            // zoom du mode applique en ce moment
+  std::string source = "none";  // none (reduit : hypothese), auto (appris avec le gyro), manual (saisi), inherited (autre cadence du meme format)
+  bool autoOn = true;           // apprentissage actif
+  bool confirmed = false;       // le zoom a ete verifie (rotation vue = rotation du gyro)
+  int n = 0;                    // pas utilises par la derniere estimation
+  double motion = 0, spread = 0, residual = 0;   // rotation cumulee (rad), dispersion, dernier zoom residuel mesure
+  int run = 0;                  // cadence du mode utilise
+};
+static void WriteCalibInfo(const StereoCalib& raw, const StereoCalib& cur, const Rectifier* r, cv::Size run, const ZoomInfo& zi, const std::string& err) {
+  const bool mismatch = raw.size.width > 0 && (run.width != raw.size.width || run.height != raw.size.height || (raw.fps > 0 && zi.run > 0 && raw.fps != zi.run));
   std::ostringstream o;
   o.setf(std::ios::fixed);
   o.precision(4);
-  o << "{\"source\":\"" << ar6cal::JEsc(c.source) << "\",\"model\":\"" << ar6cal::JEsc(c.model) << "\",\"calibW\":" << c.size.width
-    << ",\"calibH\":" << c.size.height << ",\"runW\":" << run.width << ",\"runH\":" << run.height << ",\"scale\":" << sx
-    << ",\"mismatch\":" << (mismatch ? "true" : "false") << ",\"baselineMm\":" << (c.T.total() == 3 ? cv::norm(c.T) * 1000.0 : 0.0)
-    << ",\"rms\":" << c.rmsStereo << ",\"epi\":" << c.epiPx << ",\"views\":" << c.views << ",\"fps\":" << c.fps << ",\"squareMm\":"
-    << c.squareMm << ",\"scaleCorr\":" << c.scaleCorr << ",\"hfov\":" << (r ? r->hfov_deg : 0.0) << ",\"created\":\""
-    << ar6cal::JEsc(c.created) << "\",\"error\":\"" << ar6cal::JEsc(err) << "\"}";
+  o << "{\"source\":\"" << ar6cal::JEsc(raw.source) << "\",\"model\":\"" << ar6cal::JEsc(raw.model) << "\",\"calibW\":" << raw.size.width
+    << ",\"calibH\":" << raw.size.height << ",\"runW\":" << run.width << ",\"runH\":" << run.height << ",\"scale\":"
+    << (raw.size.width > 0 ? (double)run.width / raw.size.width : 1.0) << ",\"mismatch\":" << (mismatch ? "true" : "false") << ",\"baselineMm\":"
+    << (cur.T.total() == 3 ? cv::norm(cur.T) * 1000.0 : 0.0) << ",\"rms\":" << raw.rmsStereo << ",\"epi\":" << raw.epiPx << ",\"views\":" << raw.views
+    << ",\"fps\":" << raw.fps << ",\"runFps\":" << zi.run << ",\"squareMm\":" << raw.squareMm << ",\"scaleCorr\":" << raw.scaleCorr << ",\"hfov\":"
+    << (r ? r->hfov_deg : 0.0) << ",\"created\":\"" << ar6cal::JEsc(raw.created) << "\",\"error\":\"" << ar6cal::JEsc(err) << "\",\"zoom\":" << zi.zoom
+    << ",\"zoomSource\":\"" << ar6cal::JEsc(zi.source) << "\",\"zoomAuto\":" << (zi.autoOn ? "true" : "false") << ",\"zoomConfirmed\":"
+    << (zi.confirmed ? "true" : "false") << ",\"zoomN\":" << zi.n << ",\"zoomMotion\":" << zi.motion << ",\"zoomSpread\":" << zi.spread
+    << ",\"zoomResidual\":" << zi.residual << "}";
   WriteTextAtomic(ExeDir() + "\\calib_info.json", o.str());
 }
 
@@ -919,7 +929,7 @@ int main(int argc, char** argv) {
   }
 
   // Calibration : format natif AR6DoF (fait par Unity > Calibration de la camera) ou fichiers RTAB-Map.
-  StereoCalib calib;
+  StereoCalib calib, calibRaw;   // calibRaw : telle que calibree ; calib : exprimee dans le mode camera reellement utilise (ResolveCalib)
   bool haveCalib = false;
   std::string calibErr = "aucun dossier de calibration";
   std::string dir = AskStr("calibdir", "\nDossier de calibration (ar6dof_calib.yml, sinon fichiers RTAB-Map ; '-' = aucune)", ExeDir() + "\\calibration");
@@ -957,6 +967,19 @@ int main(int argc, char** argv) {
       std::cout << "Calibration NON chargee : " << calibErr << "\n";
     }
   }
+
+  if (haveCalib) calibRaw = calib;
+  // Zoom du mode : une calibration faite dans un mode (taille, cadence) sert dans tous les autres. Les focales sont recalculees pour le mode utilise
+  // (ResolveCalib) ; le « zoom » corrige le cas ou un mode recadre le capteur au lieu de le reduire (frequent en 120 i/s). Il est appris avec le gyro.
+  ZoomStore zoomStore;
+  const std::string zoomPath = ExeDir() + "\\mode_zoom.yml";
+  ZoomInfo zi;
+  zi.run = 0;
+  double curZoom = 1.0;
+  cv::Size resolvedFor(0, 0);
+  bool zoomDirty = false;
+  double lastZoomT = 0;
+  if (haveCalib) zoomStore.Load(zoomPath, CalibId(calibRaw));
 
   // Ouverture de la caméra avec la cadence demandée. On MESURE la cadence reçue ;
   // si elle est trop basse avec un backend, on essaie l'autre (MSMF / DirectShow).
@@ -1152,15 +1175,16 @@ int main(int argc, char** argv) {
   WriteCalStatus(true);   // efface un etat laisse par un lancement precedent
   auto CalDir = [&]() { return dir != "-" ? dir : ExeDir() + "\\calibration"; };
   auto ApplyCalib = [&](const StereoCalib& nc) {
+    calibRaw = nc;
     calib = nc;
     haveCalib = true;
     calibErr.clear();
-    ExportCameraModel(calib, ExeDir() + "\\camera_model.json");
-    WriteCalibInfo(calib, nullptr, calib.size, "");
-    rectReady = false;     // la rectification est refaite avec la nouvelle calibration
+    zoomStore.Load(zoomPath, CalibId(calibRaw));   // une nouvelle calibration oublie les zooms appris avec l'ancienne
+    resolvedFor = cv::Size(0, 0);                  // la calibration est re-exprimee dans le mode utilise a la prochaine image
+    rectReady = false;
     trackReady = false;
     haveLast = false;
-    std::cout << "[calibration] calibration appliquee : " << calib.model << ", base " << cv::norm(calib.T) * 1000.0 << " mm" << std::endl;
+    std::cout << "[calibration] calibration appliquee : " << calibRaw.model << ", base " << cv::norm(calibRaw.T) * 1000.0 << " mm" << std::endl;
   };
   auto HandleCal = [&](const std::string& cl) -> bool {
     if (cl.compare(0, 3, "CAL") != 0) return false;
@@ -1222,6 +1246,32 @@ int main(int argc, char** argv) {
         } else {
           std::cout << "[calibration] enregistrement impossible : " << err << std::endl;
         }
+      }
+    } else if (cmd == "CALZOOM") {   // zoom du mode saisi a la main (1.00 = focale reduite avec l'image ; 2.00 = mode recadre x2)
+      double z = 0;
+      is >> z;
+      if (haveCalib && resolvedFor.width > 0 && z > 0.25 && z < 4.0) {
+        ZoomEntry e;
+        e.key = ModeKey(resolvedFor, FPS);
+        e.zoom = z;
+        e.source = "manual";
+        zoomStore.Set(e);
+        zoomStore.Save(zoomPath);
+        zoomDirty = true;
+        std::cout << "[calibration] zoom du mode " << e.key << " fixe a x" << z << std::endl;
+      }
+    } else if (cmd == "CALZOOMAUTO") {   // apprentissage automatique du zoom du mode : 1 = actif (defaut), 0 = fige
+      int a = 1;
+      is >> a;
+      zi.autoOn = a != 0;
+      std::cout << "[calibration] apprentissage du zoom : " << (zi.autoOn ? "actif" : "fige") << std::endl;
+    } else if (cmd == "CALZOOMRESET") {   // oublie le zoom de ce mode : il sera appris de nouveau
+      if (haveCalib && resolvedFor.width > 0) {
+        zoomStore.Erase(ModeKey(resolvedFor, FPS));
+        zoomStore.Save(zoomPath);
+        zoomDirty = true;
+        zi.autoOn = true;
+        std::cout << "[calibration] zoom du mode oublie" << std::endl;
       }
     } else if (cmd == "CALIMPORT") {
       StereoCalib nc;
@@ -1290,6 +1340,40 @@ int main(int argc, char** argv) {
     if (calSess.WantsFrames()) calSess.Feed(left, right, tRead);   // calibration en cours : detection de la mire (une copie toutes les 120 ms au plus)
     WriteCalStatus(false);
 
+    // Calibration exprimee dans le mode camera reellement utilise (taille, cadence, zoom du mode) : le mouvement et l'echelle sont justes meme si la
+    // calibration a ete faite avec une autre resolution ou une autre cadence.
+    if (haveCalib && (resolvedFor != cv::Size(w, frame.rows) || zoomDirty)) {
+      const cv::Size eyeNow(w, frame.rows);
+      const std::string key = ModeKey(eyeNow, FPS);
+      const bool sameMode = calibRaw.size == eyeNow && (calibRaw.fps <= 0 || calibRaw.fps == FPS);
+      zi.run = FPS;
+      if (const ZoomEntry* ze = zoomStore.Find(key)) {
+        curZoom = ze->zoom;
+        zi.source = ze->source;
+        zi.confirmed = ze->source == "manual" || ze->samples > 0;
+        if (ze->source == "manual") zi.autoOn = false;
+      } else if (sameMode) {
+        curZoom = 1.0;
+        zi.source = "calib";
+        zi.confirmed = true;
+      } else {
+        curZoom = 1.0;
+        zi.source = "none";
+        zi.confirmed = false;
+      }
+      zi.zoom = curZoom;
+      ModeRel rel;
+      calib = ResolveCalib(calibRaw, eyeNow, curZoom, &rel);
+      resolvedFor = eyeNow;
+      zoomDirty = false;
+      rectReady = false;
+      trackReady = false;
+      haveLast = false;
+      delayEst.Reset();
+      ExportCameraModel(calib, ExeDir() + "\\camera_model.json");   // Unity relit ce fichier : il doit decrire le mode utilise, pas celui de la calibration
+      std::cout << "[calibration] mode " << key << " (calibre en " << ModeKey(calibRaw.size, calibRaw.fps > 0 ? calibRaw.fps : FPS) << ") : echelle image x"
+                << rel.scale << ", zoom du mode x" << curZoom << " (" << zi.source << ")" << std::endl;
+    }
     // (Re)construire la rectification si besoin (taille réelle de l'image)
     if (haveCalib && (!rectReady || rect.eye != cv::Size(w, frame.rows))) {
       std::string err;
@@ -1298,11 +1382,11 @@ int main(int argc, char** argv) {
         calibErr = err;
         std::cout << "Rectification impossible : " << err << "\n";
         haveCalib = false;
-        WriteCalibInfo(calib, nullptr, cv::Size(w, frame.rows), err);
+        WriteCalibInfo(calibRaw, calib, nullptr, cv::Size(w, frame.rows), zi, err);
       } else {
         // Ces avertissements n'etaient jamais affiches : calibration faite dans un autre mode que celui utilise (echelle possiblement fausse).
         for (const auto& wn : rect.warnings) std::cout << "[calibration] ATTENTION : " << wn << std::endl;
-        WriteCalibInfo(calib, &rect, cv::Size(w, frame.rows), "");
+        WriteCalibInfo(calibRaw, calib, &rect, cv::Size(w, frame.rows), zi, "");
       }
     }
     // Copie des données IMU (un seul verrouillage)
@@ -1433,6 +1517,43 @@ int main(int argc, char** argv) {
           { std::lock_guard<std::mutex> l(imu.m); gcopy = imu.gyroBuf; }   // copie rapide, le calcul se fait hors verrou
           double dEst = 0, qEst = 0;
           if (delayEst.Estimate(gcopy, Rcb, dEst, qEst)) { camDelay = 0.8 * camDelay + 0.2 * dEst; delayQuality = qEst; }
+        }
+        // Zoom du mode : rotation vue par la camera / rotation du gyro. Different de 1 = les focales supposees pour ce mode sont fausses (mode recadre).
+        if (zi.autoOn && pi >= 0 && vo->state == StereoVO::kOk && tRead - lastZoomT > 1.0) {
+          lastZoomT = tRead;
+          std::deque<GyroSample> zcopy;
+          { std::lock_guard<std::mutex> l(imu.m); zcopy = imu.gyroBuf; }
+          double r = 1, sp = 1, mo = 0;
+          int nz = 0;
+          if (delayEst.EstimateZoom(zcopy, Rcb, camDelay, r, sp, nz, mo)) {
+            zi.n = nz; zi.motion = mo; zi.spread = sp; zi.residual = r;
+            const bool reliable = sp < 0.25 && r > 0.3 && r < 4.0;
+            if (reliable && std::fabs(r - 1.0) <= 0.04) {
+              if (!zi.confirmed && zi.source != "calib") {
+                ZoomEntry e;
+                e.key = ModeKey(resolvedFor, FPS);
+                e.zoom = curZoom;
+                e.source = "auto";
+                e.samples = nz;
+                zoomStore.Set(e);
+                zoomStore.Save(zoomPath);
+                std::cout << "[calibration] zoom du mode " << e.key << " confirme : x" << curZoom << std::endl;
+              }
+              zi.confirmed = true;
+            } else if (reliable && zi.source != "calib" && zi.source != "manual") {
+              ZoomEntry e;
+              e.key = ModeKey(resolvedFor, FPS);
+              e.zoom = std::max(0.25, std::min(4.0, curZoom * r));
+              e.source = "auto";
+              e.samples = 0;   // appris mais pas encore verifie : « verifie » = une mesure suivante (avec ce zoom) retombe a +-4 % de 1
+              zoomStore.Set(e);
+              zoomStore.Save(zoomPath);
+              zoomDirty = true;   // les focales sont recalculees, le suivi redemarre une fois
+              std::cout << "[calibration] zoom du mode " << e.key << " appris : x" << e.zoom << " (rotation vue/gyro = " << r << ", " << nz << " pas)" << std::endl;
+            }
+          } else {
+            zi.n = nz; zi.motion = mo;
+          }
         }
         snapT = Vec3{vo->t[0], vo->t[1], vo->t[2]};
         snapV = Vec3{vo->v[0], vo->v[1], vo->v[2]};

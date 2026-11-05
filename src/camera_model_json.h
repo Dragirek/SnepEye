@@ -1,6 +1,7 @@
 #pragma once
 // Exporte le modèle de caméra (calibration) en JSON pour Unity : intrinsèques, distorsion et
 // rotation de rectification de chaque oeil. Unity s'en sert pour corriger l'image du passthrough.
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -26,7 +27,9 @@ inline bool ExportCameraModel(const StereoCalib& c, const std::string& path) {
   cv::Mat R1, R2, P1, P2, Q;
   cv::stereoRectify(c.K1, c.D1, c.K2, c.D2, c.size, c.R, c.T, R1, R2, P1, P2, Q, cv::CALIB_ZERO_DISPARITY, 0, c.size);
   double right_offset = -P2.at<double>(0, 3) / P1.at<double>(0, 0);  // position de l'oeil droit sur l'axe x rectifié (m, signée)
-  std::ofstream f(path);
+  // ecriture atomique (fichier temporaire puis renommage) : Unity relit ce fichier pendant que le suivi tourne et ne doit jamais en voir la moitie
+  const std::string tmp = path + ".tmp";
+  std::ofstream f(tmp);
   if (!f) return false;
   f << std::setprecision(12);
   f << "{\n  \"version\": 1,\n  \"calib_width\": " << c.size.width << ",\n  \"calib_height\": " << c.size.height
@@ -35,5 +38,13 @@ inline bool ExportCameraModel(const StereoCalib& c, const std::string& path) {
     << ",\n  \"rect_cy\": " << P1.at<double>(1, 2) << ",\n  \"left\": {\"K\": " << JsonVec(c.K1, 9)
     << ", \"D\": " << JsonVec(c.D1, 8) << ", \"R\": " << JsonVec(R1, 9) << "},\n  \"right\": {\"K\": " << JsonVec(c.K2, 9)
     << ", \"D\": " << JsonVec(c.D2, 8) << ", \"R\": " << JsonVec(R2, 9) << "}\n}\n";
-  return true;
+  f.close();
+  if (!f) return false;
+  std::error_code ec;
+  std::filesystem::rename(tmp, path, ec);
+  if (ec) {
+    std::filesystem::remove(path, ec);
+    std::filesystem::rename(tmp, path, ec);
+  }
+  return !ec;
 }

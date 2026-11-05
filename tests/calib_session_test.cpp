@@ -1,6 +1,8 @@
 // Test de la calibration maison (src/calib_session.h) avec une camera stereo SIMULEE : verite connue (focale, distorsion, base de 60 mm).
 //   g++ -std=c++17 -O2 -I src tests/calib_session_test.cpp $(OPENCV libs) -o calib_session_test
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <chrono>
 #include <cstdlib>
 #include <random>
@@ -250,6 +252,7 @@ static void TestDetectionAndSession() {
   }
   for (int w = 0; w < 1200 && s.state() == ar6cal::Session::kCompute; w++) std::this_thread::sleep_for(std::chrono::milliseconds(50));
   std::string js = s.StatusJson();
+  if (const char* dump = std::getenv("AR6_DUMP_STATUS")) { std::ofstream(dump) << js; }   // lu par calib_view_test
   std::printf("[session] etat=%d, JSON %zu octets : %.300s\n", (int)s.state(), js.size(), js.c_str());
   CHECK(s.state() == ar6cal::Session::kDone, "la session doit finir en 'done' (etat %d)", (int)s.state());
   if (s.state() == ar6cal::Session::kDone) {

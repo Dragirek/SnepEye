@@ -81,13 +81,6 @@ namespace AR6DoF
         public bool HasFrames { get; private set; }
         public bool HasCalibration => model != null;
 
-        /// <summary>Image brute de la camera (les deux yeux cote a cote ou l'un sur l'autre selon la disposition) : sert a la calibration de la camera.</summary>
-        public Texture2D RawCameraTexture => camTex;
-        public bool RawSideBySide => settings.layout == Ar6dofStereoLayout.SideBySide;
-        public bool SwapEyesSetting => settings.swapEyes;
-
-        /// <summary>Relit camera_model.json (ecrit par ar6dof_probe apres une calibration) : la correction de la distorsion suit tout de suite, sans relancer.</summary>
-        public void ReloadCalibration() { LoadModel(); }
         /// <summary>Transform de ta vue réelle (caméra de l'oeil gauche, orientée vers le centre affiché). Null tant qu'elle n'existe pas.</summary>
         public Transform HeadView => eyeCams[0] != null ? eyeCams[0].transform : null;
 
@@ -136,13 +129,40 @@ namespace AR6DoF
             }
         }
 
-        void LoadModel()
+        string modelFile = "";           // camera_model.json lu en dernier
+        DateTime modelStamp = DateTime.MinValue;
+        float nextModelCheck;
+
+        // ar6dof_probe ecrit camera_model.json pour le mode camera qu'il utilise (resolution, cadence, zoom du mode) a chaque demarrage et apres une calibration :
+        // le fichier est relu des qu'il change (un controle d'horodatage toutes les 1,5 s).
+        void WatchModelFile()
+        {
+            if (Time.unscaledTime < nextModelCheck) return;
+            nextModelCheck = Time.unscaledTime + 1.5f;
+            try
+            {
+                string p = modelFile;
+                if (string.IsNullOrEmpty(p))
+                {
+                    string dir = launcher != null ? launcher.ExeDirectory() : "";
+                    if (string.IsNullOrEmpty(dir)) dir = Ar6dofProbePaths.Dir("");
+                    p = Path.Combine(dir, "camera_model.json");
+                }
+                if (!File.Exists(p)) return;
+                var t = File.GetLastWriteTimeUtc(p);
+                if (t != modelStamp) LoadModel(true);
+            }
+            catch (Exception) { }
+        }
+
+        void LoadModel(bool quiet = false)
         {
             // Ordre : chemin renseigne, puis le camera_model.json qu'ar6dof_probe vient d'ecrire dans SON dossier (toujours a jour : rien a copier ni a glisser
             // dans la scene), puis le fichier glisse dans le champ.
             string json = null;
             string src = "";
-            if (!string.IsNullOrEmpty(cameraModelPath) && File.Exists(cameraModelPath)) { json = File.ReadAllText(cameraModelPath); src = cameraModelPath; }
+            string usedFile = "";
+            if (!string.IsNullOrEmpty(cameraModelPath) && File.Exists(cameraModelPath)) { json = File.ReadAllText(cameraModelPath); src = cameraModelPath; usedFile = cameraModelPath; }
             if (json == null)
             {
                 try
@@ -150,26 +170,30 @@ namespace AR6DoF
                     string dir = launcher != null ? launcher.ExeDirectory() : "";
                     if (string.IsNullOrEmpty(dir)) dir = Ar6dofProbePaths.Dir("");
                     string p = Path.Combine(dir, "camera_model.json");
-                    if (File.Exists(p)) { json = File.ReadAllText(p); src = p; }
+                    if (File.Exists(p)) { json = File.ReadAllText(p); src = p; usedFile = p; }
                 }
                 catch (Exception) { }
             }
             if (json == null && cameraModelJson != null) { json = cameraModelJson.text; src = "fichier du projet"; }
-            if (json != null) Debug.Log("AR6DoF : camera_model.json lu depuis " + src);
+            if (json != null && !quiet) Debug.Log("AR6DoF : camera_model.json lu depuis " + src);
             if (json == null)
             {
-                Debug.LogWarning("AR6DoF : pas de camera_model.json : l'image sera affichée sans correction de distorsion.");
+                if (!quiet) Debug.LogWarning("AR6DoF : pas de camera_model.json : l'image sera affichée sans correction de distorsion.");
                 return;
             }
-            try { model = JsonUtility.FromJson<CameraModelJson>(json); }
-            catch (Exception e) { Debug.LogError("AR6DoF : camera_model.json illisible : " + e.Message); model = null; }
-            if (model == null || !ValidEye(model.left) || !ValidEye(model.right) || model.calib_width <= 0 || model.calib_height <= 0)
+            CameraModelJson m = null;
+            try { m = JsonUtility.FromJson<CameraModelJson>(json); }
+            catch (Exception e) { if (!quiet) Debug.LogError("AR6DoF : camera_model.json illisible : " + e.Message); }
+            if (m == null || !ValidEye(m.left) || !ValidEye(m.right) || m.calib_width <= 0 || m.calib_height <= 0)
             {
-                Debug.LogError("AR6DoF : camera_model.json incomplet.");
-                model = null;
+                if (!quiet) Debug.LogError("AR6DoF : camera_model.json incomplet.");
+                if (!quiet) model = null;   // au demarrage seulement : en cours de route on garde le modele precedent et on reessaie au prochain controle
                 return;
             }
-            if (model.right_offset_x_m < 0)
+            model = m;
+            modelFile = usedFile;
+            try { if (usedFile.Length > 0) modelStamp = File.GetLastWriteTimeUtc(usedFile); } catch (Exception) { }
+            if (model.right_offset_x_m < 0 && !quiet)
                 Debug.LogWarning("AR6DoF : d'après la calibration, les yeux de la caméra semblent inversés : coche 'Swap Eyes'.");
         }
 
@@ -282,6 +306,7 @@ namespace AR6DoF
         {
             Ar6dofPerf.Tick();
             ApplyAaChange();
+            WatchModelFile();
             showUi = Ar6dofDebug.On;          // plus de touche F1 : le panneau complet n'existe qu'en mode debug (Ar6dofDock > Debug)
             Ar6dofUi.Visible = showUi;
             if (!reader.IsOpen && Time.unscaledTime >= nextOpenTry)

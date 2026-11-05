@@ -169,18 +169,6 @@ namespace AR6DoF
                             a = Mathf.Max(a, Mathf.Clamp01(dp < 4f ? 1f : 0f));
                             break;
                         }
-                        case "calib":
-                        {
-                            // damier 4 x 3 (la mire de calibration) dans un cadre arrondi
-                            a = Mathf.Clamp01(2.6f - Mathf.Abs(RRect(fx, fy, 32f, 32f, 28f, 22f, 5f)));
-                            for (int ci = 0; ci < 4; ci++)
-                                for (int cj = 0; cj < 3; cj++)
-                                {
-                                    if (((ci + cj) & 1) != 0) continue;
-                                    a = Mathf.Max(a, Fill(RRect(fx, fy, 14f + ci * 12f, 20f + cj * 12f, 5.5f, 5.5f, 0.5f)));
-                                }
-                            break;
-                        }
                         case "cube":
                         {
                             // cube vu en perspective
