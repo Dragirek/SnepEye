@@ -47,6 +47,17 @@ class SerialPort {
     return static_cast<int>(got);
   }
 
+  // Fait retomber puis remonter DTR (RTS reste coupe, donc aucun reset de la carte) : certains ports USB CDC ne
+  // demarrent l'envoi qu'apres cette transition, surtout juste apres la fermeture du port par un autre programme.
+  void pulseDtr() {
+    if (h_ == INVALID_HANDLE_VALUE) return;
+    EscapeCommFunction(h_, CLRDTR);
+    Sleep(80);
+    EscapeCommFunction(h_, SETDTR);
+    Sleep(40);
+    PurgeComm(h_, PURGE_RXCLEAR | PURGE_TXCLEAR);
+  }
+
   void close() {
     if (h_ != INVALID_HANDLE_VALUE) CloseHandle(h_);
     h_ = INVALID_HANDLE_VALUE;

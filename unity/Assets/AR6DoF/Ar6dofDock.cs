@@ -147,6 +147,13 @@ namespace AR6DoF
             }
         }
 
+        /// <summary>Position de la tête (pour placer une fenêtre devant toi, comme la sonnerie de l'horloge).</summary>
+        public Transform HeadTransform { get { return Head; } }
+
+        Ar6dofDockInfo info;          // bandeau heure / date / batterie (null quand rien n'est coché)
+        int infoSig = -1;
+        Ar6dofClockService clock;
+
         void Awake() { Instance = this; }
         void OnDestroy()
         {
@@ -178,6 +185,7 @@ namespace AR6DoF
             if (vrSettings != null) vrSettings.Tick();
             for (int i = 0; i < windows.Count; i++) if (windows[i].open) windows[i].Tick();
             if (appsApp != null && appsApp.open) appsApp.Tick();
+            if (info != null && canvas != null && canvas.enabled) info.Tick();
         }
 
         const float BarHeight = 200f;
@@ -252,6 +260,7 @@ namespace AR6DoF
         {
             if (!built || canvas == null) return;
             var d = Ar6dofSettings.Current;
+            if (Ar6dofDockInfo.Signature(d) != infoSig) RebuildIcons();   // heure, date ou batterie : le bandeau change
             if (d.dockAtFeet != lastFeetMode) { lastFeetMode = d.dockAtFeet; feetInit = false; Place(); }
             else if (d.dockAtFeet) { feetInit = false; FollowFeet(true); }
             else canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
@@ -324,6 +333,8 @@ namespace AR6DoF
             // moteur audio (inactif tant qu'il n'est pas active), hub Apps et toutes les applications (fermees : une icone dans Apps, rien d'autre)
             audioEngine = GetComponent<Ar6dofAudio>();
             if (audioEngine == null) audioEngine = gameObject.AddComponent<Ar6dofAudio>();
+            clock = GetComponent<Ar6dofClockService>();
+            if (clock == null) clock = gameObject.AddComponent<Ar6dofClockService>();   // alarmes / minuteur : ne fait rien tant qu'aucun n'est actif
             appsApp = new Ar6dofAppsApp(this);
             AdoptWindow(appsApp, 0f);
             foreach (var e in Ar6dofCatalog.Entries)
@@ -479,7 +490,17 @@ namespace AR6DoF
             float gearX = appsX + size * 0.5f + 12f + gearSize * 0.5f;
             float total = gearX + gearSize * 0.5f;
             float barW = Mathf.Max(720f, total + 60f);
-            barRt.sizeDelta = new Vector2(barW, BarHeight);
+            var ds = Ar6dofSettings.Current;
+            infoSig = Ar6dofDockInfo.Signature(ds);
+            float extra = Ar6dofDockInfo.Wanted(ds) ? Ar6dofDockInfo.Height : 0f;   // le bandeau s'ajoute SOUS les icônes : la barre grandit, rien ne bouge dedans
+            barRt.sizeDelta = new Vector2(barW, BarHeight + extra);
+            iconsRoot.anchoredPosition = new Vector2(0f, extra * 0.5f);
+            info = null;
+            if (extra > 0f)
+            {
+                info = new Ar6dofDockInfo();
+                info.Build(iconsRoot, barW, -BarHeight * 0.5f - extra * 0.5f);
+            }
             float shift = -total * 0.5f;
             MakeQuickRow(barW);
 

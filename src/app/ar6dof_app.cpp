@@ -94,7 +94,7 @@ enum {
   ID_THREADS, ID_KEEP,
   ID_A_RESTART, ID_A_FLOOR, ID_A_YAW, ID_A_SWAP, ID_A_CHECK,
   ID_M_STEP1, ID_M_STEP2, ID_M_RESET, ID_M_FLIP,
-  ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_OPENDIR, ID_STATUS,
+  ID_LOG, ID_STATS, ID_SAVE, ID_START, ID_STATUS,
   ID_NAV0 = 300   // 8 pages : ID_NAV0 .. ID_NAV0 + 7
 };
 const int kNavCount = 8;
@@ -789,7 +789,7 @@ void DrawOwner(const DRAWITEMSTRUCT* d) {
     return;
   }
   if (id == ID_START) {
-    FillRect(dc, &r, g_brBg);
+    FillRect(dc, &r, OnCard(d->hwndItem) ? g_brCard : g_brBg);   // le bouton est dans une carte (page Suivi)
     COLORREF fill = disabled ? g_pal.border : g_accent;
     if (pressed) fill = RGB(GetRValue(fill) * 8 / 10, GetGValue(fill) * 8 / 10, GetBValue(fill) * 8 / 10);
     FillRound(dc, r, S(5), fill, fill, false);
@@ -1531,9 +1531,7 @@ void CreateControls() {
 
   // ---- barre du bas
   Button(L"Enregistrer", L"Save", X, 704, 120, 34, ID_SAVE);
-  Mk(L"BUTTON", L"▶  Démarrer le suivi", L"▶  Start tracking", BS_OWNERDRAW | WS_TABSTOP, X + 132, 704, 210, 34, ID_START);
-  Button(L"Ouvrir le dossier", L"Open the folder", X + 354, 704, 140, 34, ID_OPENDIR);
-  Mk(L"STATIC", nullptr, nullptr, SS_RIGHT | SS_NOPREFIX | SS_ENDELLIPSIS, X + 506, 712, 186, 20, ID_STATUS);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + 136, 712, CWd - 136, 20, ID_STATUS);
 
   // ---- page 0 : Caméra
   g_buildPage = PG_CAM;
@@ -1664,16 +1662,17 @@ void CreateControls() {
 
   // ---- page 5 : Suivi
   g_buildPage = PG_TRACK;
-  CardBox(L"Pendant le suivi", L"While tracking", X, 62, CWd, 160);
-  Button(L"Redémarrer le suivi", L"Restart tracking", X + PAD, 106, 208, 34, ID_A_RESTART);
-  Button(L"Verrouiller le sol", L"Lock the floor", X + PAD + 218, 106, 208, 34, ID_A_FLOOR);
-  Button(L"Cap à zéro", L"Zero the heading", X + PAD + 436, 106, 208, 34, ID_A_YAW);
-  Button(L"Inverser gauche / droite", L"Swap left / right", X + PAD, 150, 208, 34, ID_A_SWAP);
-  Button(L"Vérifier la calibration", L"Check the calibration", X + PAD + 218, 150, 208, 34, ID_A_CHECK);
+  CardBox(L"Suivi 6DoF", L"6DoF tracking", X, 62, CWd, 188);
+  Mk(L"BUTTON", L"▶  Démarrer le suivi", L"▶  Start tracking", BS_OWNERDRAW | WS_TABSTOP, X + PAD, 106, 300, 38, ID_START);
+  Button(L"Redémarrer le suivi", L"Restart tracking", X + PAD, 158, 208, 34, ID_A_RESTART);
+  Button(L"Verrouiller le sol", L"Lock the floor", X + PAD + 218, 158, 208, 34, ID_A_FLOOR);
+  Button(L"Cap à zéro", L"Zero the heading", X + PAD + 436, 158, 208, 34, ID_A_YAW);
+  Button(L"Inverser gauche / droite", L"Swap left / right", X + PAD, 202, 208, 34, ID_A_SWAP);
+  Button(L"Vérifier la calibration", L"Check the calibration", X + PAD + 218, 202, 208, 34, ID_A_CHECK);
 
-  CardBox(L"Vue du suivi", L"Tracking view", X, 236, CWd, 330);
-  Mk(L"AR6Preview", nullptr, nullptr, 0, X + 26, 282, 640, 240, ID_PVW_TRK);
-  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 530, CWd - 2 * PAD, 20, ID_STATS);
+  CardBox(L"Vue du suivi", L"Tracking view", X, 264, CWd, 326);
+  Mk(L"AR6Preview", nullptr, nullptr, 0, X + 26, 310, 640, 240, ID_PVW_TRK);
+  Mk(L"STATIC", nullptr, nullptr, SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, X + PAD, 558, CWd - 2 * PAD, 20, ID_STATS);
 
   // ---- page 6 : Journal (les messages d'ar6dof_probe, sur toute la page)
   g_buildPage = PG_LOG;
@@ -1807,7 +1806,6 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           if (g_running) StopProbe(); else StartTracking();
           UpdateState();
           break;
-        case ID_OPENDIR: ShellExecuteW(h, L"open", ExeDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
         case ID_A_RESTART: SendCmd('T'); break;
         case ID_A_FLOOR: SendCmd('V'); break;
         case ID_A_YAW: SendCmd('Z'); break;

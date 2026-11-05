@@ -82,6 +82,17 @@ namespace AR6DoF
         public float dockTilt = 0f;        // inclinaison en plus (deg) ; 0 = face à tes yeux
         public bool seated = false;        // mode assis : le dock se place a hauteur des mains et le sol suppose est ajuste a la hauteur des yeux assis
 
+        // Informations dans le dock (heure, date, batterie du PC) ; le format de l'heure est aussi celui de l'application Horloge
+        public bool dockShowClock = false;
+        public int dockClockStyle = 0;     // 0 numerique, 1 analogique, 2 les deux
+        public int dockFaceStyle = 0;      // visuel du cadran analogique (0..5)
+        public bool dockShowDate = false;
+        public bool dockShowBattery = false;
+        public int dockBatteryStyle = 2;   // 0 texte, 1 icone, 2 icone + pourcentage + temps restant
+        public bool clock24h = Ar6dofClockFmt.CultureIs24h();   // faux : 12 h avec AM / PM
+        public bool clockSeconds = false;
+        public int dateFormat = 0;         // voir Ar6dofClockFmt.DateFormats
+
         public float keyboardScale = 1f;
 
         // Boutons de fenêtre (fermer / réduire) de tous les écrans et menus
@@ -166,6 +177,10 @@ namespace AR6DoF
             if (d.laser.style == null) d.laser.style = new Ar6dofStyle();
             if (d.customStyles == null) d.customStyles = new System.Collections.Generic.List<Ar6dofCustomStyle>();
             d.customStyles.RemoveAll(x => x == null || x.style == null);
+            d.dockClockStyle = Mathf.Clamp(d.dockClockStyle, 0, 2);
+            d.dockBatteryStyle = Mathf.Clamp(d.dockBatteryStyle, 0, 2);
+            d.dockFaceStyle = Mathf.Clamp(d.dockFaceStyle, 0, 5);
+            d.dateFormat = Mathf.Clamp(d.dateFormat, 0, Ar6dofClockFmt.DateFormats.Length - 1);
             if (d.version < 2)
             {   // anciens fichiers : si le style n'a jamais été changé (cyan d'origine), on passe au nouveau style d'usine Eclipse
                 var g = d.global;

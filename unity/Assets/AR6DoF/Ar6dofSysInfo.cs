@@ -48,6 +48,14 @@ namespace AR6DoF
             }
         }
 
+        /// <summary>État de la batterie du PC (portable) : lecture directe, sans fil ni échantillonneur (utilisée par l'affichage du dock).</summary>
+        public struct BatteryInfo
+        {
+            public bool has, onAc, charging;
+            public float pct;        // 0..1, NaN si inconnu
+            public int seconds;      // temps restant sur batterie, -1 inconnu
+        }
+
         static volatile Sample current = new Sample();
         public static Sample Current { get { return current; } }
 
@@ -309,8 +317,29 @@ namespace AR6DoF
         }
 
         static float Clamp01(float v) { return v < 0f ? 0f : (v > 1f ? 1f : v); }
+
+        public static BatteryInfo ReadBattery()
+        {
+            var b = new BatteryInfo { pct = float.NaN, seconds = -1 };
+            try
+            {
+                PowerStatus ps;
+                if (!GetSystemPowerStatus(out ps)) return b;
+                b.has = (ps.batteryFlag & 128) == 0 && ps.batteryFlag != 255;
+                b.onAc = ps.acLine == 1;
+                b.charging = (ps.batteryFlag & 8) != 0;
+                if (b.has)
+                {
+                    if (ps.batteryPercent <= 100) b.pct = ps.batteryPercent / 100f;
+                    if (ps.lifeTime != 0xFFFFFFFFu) b.seconds = (int)Math.Min(ps.lifeTime, int.MaxValue);
+                }
+            }
+            catch (Exception) { }
+            return b;
+        }
 #else
         public static void Touch() { }
+        public static BatteryInfo ReadBattery() { return new BatteryInfo { pct = float.NaN, seconds = -1 }; }
 #endif
     }
 }

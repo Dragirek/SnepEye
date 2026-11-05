@@ -521,6 +521,19 @@ namespace AR6DoF
             upd();
         }
 
+        /// <summary>Choix dans une liste : [<] texte [>]. 'value' donne le texte de la valeur actuelle (déjà traduit si besoin).</summary>
+        void CycleRow(RectTransform page, ref float c, string label, int count, Func<int> get, Action<int> set, Func<int, string> valueOf)
+        {
+            float y = Next(ref c, 48f, 12f);
+            Text lbl = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(CW - 160f, 48f), 22, TextAnchor.MiddleCenter);
+            Action upd = () => lbl.text = Ar6dofLoc.T(label) + " : " + valueOf(get());
+            Text t;
+            Ar6dofVrUi.MakeButton(page, "<", new Vector2(-CW * 0.5f + 36f, y), new Vector2(72f, 48f), () => { set((get() + count - 1) % count); upd(); }, out t, 26);
+            Ar6dofVrUi.MakeButton(page, ">", new Vector2(CW * 0.5f - 36f, y), new Vector2(72f, 48f), () => { set((get() + 1) % count); upd(); }, out t, 26);
+            refreshers.Add(upd);
+            upd();
+        }
+
         Button Btn(RectTransform page, float x, float y, float w, string label, Action click, int fs = 22, float h = 48f)
         {
             Text t;
@@ -581,7 +594,7 @@ namespace AR6DoF
         static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
         static readonly string[] HeadFields = { "moveScale" };
         static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
-        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "keyboardScale" };
+        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
         static readonly string[] PerfFields = { "perfFps", "perfMsaa", "perfRenderScale" };
         static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite" };
@@ -2206,6 +2219,19 @@ namespace AR6DoF
             StepRow(page, ref c, "Taille du dock (%)", 50f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockScale * 100f), v => { Ar6dofSettings.Current.dockScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Inclinaison supplementaire (deg)", -30f, 30f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockTilt), v => { Ar6dofSettings.Current.dockTilt = v; Touch(); }, "0");
             StepRow(page, ref c, "Taille du clavier (%)", 50f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.keyboardScale * 100f), v => { Ar6dofSettings.Current.keyboardScale = v / 100f; Touch(); }, "0");
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Informations sur le dock");
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Afficher l'heure", () => Ar6dofSettings.Current.dockShowClock, v => { Ar6dofSettings.Current.dockShowClock = v; Touch(); }, 600f);
+            CycleRow(page, ref c, "Affichage de l'heure", 3, () => Ar6dofSettings.Current.dockClockStyle, v => { Ar6dofSettings.Current.dockClockStyle = v; Touch(); }, i => Ar6dofLoc.T(i == 0 ? "Numerique" : i == 1 ? "Analogique" : "Les deux"));
+            CycleRow(page, ref c, "Cadran analogique", Ar6dofClockFace.Styles, () => Ar6dofSettings.Current.dockFaceStyle, v => { Ar6dofSettings.Current.dockFaceStyle = v; Touch(); }, i => Ar6dofLoc.T(Ar6dofClockFace.StyleNames[i]));
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Format 24 h (decoche : 12 h avec AM / PM)", () => Ar6dofSettings.Current.clock24h, v => { Ar6dofSettings.Current.clock24h = v; Touch(); }, 600f);
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Afficher les secondes", () => Ar6dofSettings.Current.clockSeconds, v => { Ar6dofSettings.Current.clockSeconds = v; Touch(); }, 600f);
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Afficher la date", () => Ar6dofSettings.Current.dockShowDate, v => { Ar6dofSettings.Current.dockShowDate = v; Touch(); }, 600f);
+            CycleRow(page, ref c, "Format de la date", Ar6dofClockFmt.DateFormats.Length, () => Ar6dofSettings.Current.dateFormat, v => { Ar6dofSettings.Current.dateFormat = v; Touch(); }, i => Ar6dofClockFmt.Date(DateTime.Now, i));
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Afficher la batterie du PC", () => Ar6dofSettings.Current.dockShowBattery, v => { Ar6dofSettings.Current.dockShowBattery = v; Touch(); }, 600f);
+            CycleRow(page, ref c, "Affichage de la batterie", 3, () => Ar6dofSettings.Current.dockBatteryStyle, v => { Ar6dofSettings.Current.dockBatteryStyle = v; Touch(); }, i => Ar6dofLoc.T(i == 0 ? "Texte" : i == 1 ? "Icone" : "Icone, pourcentage, temps restant"));
+            Para(page, ref c, "Un PC fixe n'a pas de batterie : le dock affiche alors une prise (Secteur). Rien de tout cela ne tourne quand les trois cases sont decochees.", 70f);
             CloseCard(page, top, ref c);
             Finish(PgDock, c);
         }

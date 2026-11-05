@@ -74,6 +74,7 @@ struct ImuState {
   double rate_acc = 0, rate_gyr = 0;
   uint64_t bytes = 0, ok = 0, bad = 0;
   bool port_error = false;
+  uint32_t reopens = 0;       // fois ou le port est reste muet 3 s et a ete rouvert
 };
 
 static std::atomic<bool> g_run{true};
@@ -129,11 +130,20 @@ static void PublishPose(ImuState* st, VisionSnap* vs, UdpSender* udp, uint32_t* 
 
 static void ImuThread(std::string port, ImuState* st, VisionSnap* vs, UdpSender* udp) {
   SerialPort sp;
-  if (!sp.open(port)) {
+  // Le port peut etre encore tenu une seconde par le programme qui vient de se fermer (mode services relance, suivi arrete...) :
+  // on reessaie pendant ~5 s avant de declarer une erreur.
+  bool opened = false;
+  for (int tries = 0; tries < 10 && g_run; tries++) {
+    if (sp.open(port)) { opened = true; break; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
+  if (!opened) {
     std::lock_guard<std::mutex> l(st->m);
     st->port_error = true;
     return;
   }
+  sp.pulseDtr();
+  auto lastRx = std::chrono::steady_clock::now();
   ImuParser parser;
   Mahony filt;
   Vec3 accBody;
@@ -151,7 +161,23 @@ static void ImuThread(std::string port, ImuState* st, VisionSnap* vs, UdpSender*
       st->port_error = true;
       return;
     }
+    if (n == 0) {
+      // Rien recu depuis 3 s : port « ouvert mais muet » (carte pas prete, DTR sans effet...). On le rouvre, DTR relance.
+      if (std::chrono::duration<double>(std::chrono::steady_clock::now() - lastRx).count() > 3.0) {
+        sp.close();
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        for (int tries = 0; tries < 6 && g_run; tries++) {
+          if (sp.open(port)) { sp.pulseDtr(); break; }
+          std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        lastRx = std::chrono::steady_clock::now();
+        std::lock_guard<std::mutex> l(st->m);
+        ++st->reopens;
+        st->rate_acc = st->rate_gyr = 0;
+      }
+    }
     if (n > 0) {
+      lastRx = std::chrono::steady_clock::now();
       std::lock_guard<std::mutex> l(st->m);
       parser.feed(buf, n, [&](const ImuSample& s) {
         if (st->reinit) { filt.Reset(); haveAcc = false; haveT = false; st->gyroBuf.clear(); st->reinit = false; }
@@ -734,15 +760,18 @@ static int RunServices() {
       bool err;
       double ra, rg;
       uint64_t okN, badN, bytes;
+      uint32_t ro;
       double na;
       {
         std::lock_guard<std::mutex> l(imu.m);
+        ro = imu.reopens;
         err = imu.port_error; ra = imu.rate_acc; rg = imu.rate_gyr; okN = imu.ok; badN = imu.bad; bytes = imu.bytes; na = Norm(imu.acc_s);
       }
       char sb[240];
       if (pi < 0) std::snprintf(sb, sizeof(sb), "[imu] non selectionnee");
       else if (err) std::snprintf(sb, sizeof(sb), "[imu] erreur d'ouverture ou de lecture du port");
       else if (bytes > 0 && okN == 0) std::snprintf(sb, sizeof(sb), "[imu] octets recus mais 0 paquet valide (firmware v2 flashe ?)");
+      else if (bytes == 0 && ro > 0) std::snprintf(sb, sizeof(sb), "[imu] aucun octet recu (port rouvert %u fois) : carte branchee ? firmware flashe ? autre programme sur le port ?", (unsigned)ro);
       else std::snprintf(sb, sizeof(sb), "[imu] accel %.0f Hz | gyro %.0f Hz | |a| = %.2f m/s2 | paquets ok=%llu ko=%llu", ra, rg, na, (unsigned long long)okN, (unsigned long long)badN);
       std::cout << sb << std::endl;
     }

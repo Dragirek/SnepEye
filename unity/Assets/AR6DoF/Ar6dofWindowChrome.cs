@@ -191,6 +191,19 @@ namespace AR6DoF
                             }
                             break;
                         }
+                        case "clock":
+                        {
+                            // reveil : cadran, deux aiguilles et deux petites cloches
+                            float dcl = Mathf.Sqrt((fx - 32f) * (fx - 32f) + (fy - 30f) * (fy - 30f));
+                            a = Mathf.Clamp01(2.8f - Mathf.Abs(dcl - 21f));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 32f, 30f, 32f, 44f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - SegDist(fx, fy, 32f, 30f, 42f, 24f)));
+                            float db1 = Mathf.Sqrt((fx - 13f) * (fx - 13f) + (fy - 51f) * (fy - 51f));
+                            float db2 = Mathf.Sqrt((fx - 51f) * (fx - 51f) + (fy - 51f) * (fy - 51f));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - Mathf.Abs(db1 - 7f)));
+                            a = Mathf.Max(a, Mathf.Clamp01(2.8f - Mathf.Abs(db2 - 7f)));
+                            break;
+                        }
                         case "plus":
                         {
                             a = Mathf.Max(Mathf.Clamp01(3.2f - SegDist(fx, fy, 32f, 14f, 32f, 50f)), Mathf.Clamp01(3.2f - SegDist(fx, fy, 14f, 32f, 50f, 32f)));
