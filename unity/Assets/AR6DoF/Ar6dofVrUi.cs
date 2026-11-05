@@ -20,6 +20,9 @@ namespace AR6DoF
             return t;
         }
 
+        /// <summary>Tete de l'utilisateur (renseignee par Ar6dofPassthrough) : sert a masquer le dos des menus.</summary>
+        public static Transform ViewHead;
+
         static Font font;
         public static Font GetFont()
         {
@@ -37,6 +40,7 @@ namespace AR6DoF
             var c = go.AddComponent<Canvas>();
             c.renderMode = RenderMode.WorldSpace;
             go.AddComponent<GraphicRaycaster>();
+            go.AddComponent<Ar6dofBackFace>();   // le dos du menu est vide (pas de texte a l'envers)
             var rt = (RectTransform)go.transform;
             rt.sizeDelta = size;
             rt.localScale = Vector3.one * 0.001f;

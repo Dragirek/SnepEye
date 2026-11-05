@@ -108,6 +108,18 @@ namespace AR6DoF
             catch (System.Exception e) { UnityEngine.Debug.LogWarning("AR6DoF : commande non envoyée : " + e.Message); }
         }
 
+        /// <summary>Commande texte (une ligne) envoyée à ar6dof_probe, par exemple « CALSTART 9 6 25 ». Les commandes d'un seul caractère passent par Send.</summary>
+        public void SendLine(string line)
+        {
+            try
+            {
+                if (udp == null) udp = Ar6dofSocket.NoInherit(new UdpClient());
+                var b = System.Text.Encoding.ASCII.GetBytes(line);
+                udp.Send(b, b.Length, "127.0.0.1", controlPort);
+            }
+            catch (System.Exception e) { UnityEngine.Debug.LogWarning("AR6DoF : commande non envoyée : " + e.Message); }
+        }
+
         /// <summary>Arrête ar6dof_probe : d'abord poliment (Q : libère caméras et Bluetooth), puis de force si besoin.</summary>
         public void Stop()
         {

@@ -267,6 +267,7 @@ namespace AR6DoF
                     if (c == null || !c.gameObject.activeInHierarchy || !c.enabled) continue;
                     if (c.worldCamera != ec) c.worldCamera = ec;
                     var rt = (RectTransform)c.transform;
+                    if (Ar6dofBackFace.IsBehind(rt, ray.origin, 0f)) continue;   // le dos d'un menu est vide : le rayon le traverse
                     var plane = new Plane(rt.forward, rt.position);
                     if (!plane.Raycast(ray, out float dist) || dist <= 0f || dist >= best) continue;
                     Vector3 wp = ray.GetPoint(dist);

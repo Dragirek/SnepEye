@@ -80,6 +80,14 @@ namespace AR6DoF
         public double ReprojDeg { get; private set; }
         public bool HasFrames { get; private set; }
         public bool HasCalibration => model != null;
+
+        /// <summary>Image brute de la camera (les deux yeux cote a cote ou l'un sur l'autre selon la disposition) : sert a la calibration de la camera.</summary>
+        public Texture2D RawCameraTexture => camTex;
+        public bool RawSideBySide => settings.layout == Ar6dofStereoLayout.SideBySide;
+        public bool SwapEyesSetting => settings.swapEyes;
+
+        /// <summary>Relit camera_model.json (ecrit par ar6dof_probe apres une calibration) : la correction de la distorsion suit tout de suite, sans relancer.</summary>
+        public void ReloadCalibration() { LoadModel(); }
         /// <summary>Transform de ta vue réelle (caméra de l'oeil gauche, orientée vers le centre affiché). Null tant qu'elle n'existe pas.</summary>
         public Transform HeadView => eyeCams[0] != null ? eyeCams[0].transform : null;
 
@@ -201,6 +209,7 @@ namespace AR6DoF
             rtR = MakeRt("AR6DoF_EyeRight");
             eyeCams[0] = MakeEye("EyeLeft", rtL);
             eyeCams[1] = MakeEye("EyeRight", rtR);
+            Ar6dofVrUi.ViewHead = eyeCams[0].transform;
         }
 
         void BuildComposite()

@@ -800,7 +800,10 @@ namespace AR6DoF
                 : Ar6dofLoc.T("Source : camera non ouverte"), 19);
             InfoLine(page, Next(ref c, 28f, 4f), PgView, () => Ar6dofLoc.F("Envoi GPU : {0} ms   -   reprojection {1} deg   -   delai {2} ms",
                 pt.UploadMs.ToString("0.0"), pt.ReprojDeg.ToString("0.0"), pt.DelayUsedMs.ToString("0")), 19);
-            InfoLine(page, Next(ref c, 28f, 12f), PgView, () => Ar6dofLoc.T(pt.HasCalibration ? "Calibration camera : chargee" : "Calibration camera : ABSENTE (camera_model.json)"), 19);
+            InfoLine(page, Next(ref c, 28f, 4f), PgView, () => Ar6dofLoc.T(pt.HasCalibration ? "Calibration camera : chargee" : "Calibration camera : ABSENTE (camera_model.json)"), 19);
+            InfoLine(page, Next(ref c, 28f, 4f), PgView, CalibInfoLine, 19);
+            InfoLine(page, Next(ref c, 28f, 8f), PgView, CalibModeLine, 19);
+            Btn(page, 0f, Next(ref c, 48f, 12f), 440f, "Calibrer la camera (guide)", () => { if (dock != null) dock.OpenApp("calibration"); }, 22);
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Affichage");
@@ -820,6 +823,32 @@ namespace AR6DoF
             Toggle(page, -164f, y, "Rendu a l'envers", () => pt.settings.flipComposite, v => pt.settings.flipComposite = v);
             CloseCard(page, top, ref c);
             Finish(PgView, c);
+        }
+
+        Ar6dofCalibLink calLink;
+
+        CalInfoJson CalInfo()
+        {
+            if (calLink == null) calLink = new Ar6dofCalibLink(dock);
+            calLink.Poll();
+            return calLink.Info;
+        }
+
+        // ce que le suivi utilise : d'ou vient la calibration et la distance entre les cameras
+        string CalibInfoLine()
+        {
+            var i = CalInfo();
+            if (i == null) return Ar6dofLoc.T("Suivi : pas encore de calibration lue");
+            string src = i.source == "ar6dof" ? Ar6dofLoc.T("AR6DoF (guidee)") : (i.source == "rtabmap" ? "RTAB-Map" : i.source);
+            return Ar6dofLoc.F("Suivi : calibration {0}, cameras a {1} mm", src, i.baselineMm.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        string CalibModeLine()
+        {
+            var i = CalInfo();
+            if (i == null) return "";
+            if (i.mismatch) return Ar6dofLoc.F("ATTENTION : mode camera {0} x {1} different de la calibration ({2} x {3}) : distances fausses", i.runW, i.runH, i.calibW, i.calibH);
+            return Ar6dofLoc.F("Mode camera {0} x {1} : identique a la calibration", i.runW, i.runH);
         }
 
         // ================================================================== OPTIQUE

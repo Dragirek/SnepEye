@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -37,6 +38,7 @@
 #include <opencv2/core/ocl.hpp>
 
 #include "calib.h"
+#include "calib_session.h"
 #include "camera_model_json.h"
 #include "ble_hub.h"
 #include "ble_remote.h"
@@ -416,6 +418,34 @@ static void ToGray(const cv::Mat& src, cv::Mat& dst) {
   if (src.channels() == 3) cv::cvtColor(src, dst, cv::COLOR_BGR2GRAY);
   else if (src.channels() == 4) cv::cvtColor(src, dst, cv::COLOR_BGRA2GRAY);
   else dst = src;
+}
+
+// Ecrit un fichier texte en entier puis le met a sa place d'un seul geste : un lecteur (Unity) ne voit jamais un fichier a moitie ecrit.
+static void WriteTextAtomic(const std::string& path, const std::string& text) {
+  const std::string tmp = path + ".tmp";
+  {
+    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+    if (!f) return;
+    f << text;
+  }
+  MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+}
+
+// calib_info.json : ce que le suivi utilise (calibration, mode camera, echelle). Unity l'affiche dans Appareils > Tete / Cameras, avec une alerte
+// quand la calibration a ete faite dans un autre mode que celui utilise (distances fausses si ce mode recadre l'image au lieu de la reduire).
+static void WriteCalibInfo(const StereoCalib& c, const Rectifier* r, cv::Size run, const std::string& err) {
+  const double sx = c.size.width > 0 ? (double)run.width / c.size.width : 1.0;
+  const bool mismatch = c.size.width > 0 && (run.width != c.size.width || run.height != c.size.height);
+  std::ostringstream o;
+  o.setf(std::ios::fixed);
+  o.precision(4);
+  o << "{\"source\":\"" << ar6cal::JEsc(c.source) << "\",\"model\":\"" << ar6cal::JEsc(c.model) << "\",\"calibW\":" << c.size.width
+    << ",\"calibH\":" << c.size.height << ",\"runW\":" << run.width << ",\"runH\":" << run.height << ",\"scale\":" << sx
+    << ",\"mismatch\":" << (mismatch ? "true" : "false") << ",\"baselineMm\":" << (c.T.total() == 3 ? cv::norm(c.T) * 1000.0 : 0.0)
+    << ",\"rms\":" << c.rmsStereo << ",\"epi\":" << c.epiPx << ",\"views\":" << c.views << ",\"fps\":" << c.fps << ",\"squareMm\":"
+    << c.squareMm << ",\"scaleCorr\":" << c.scaleCorr << ",\"hfov\":" << (r ? r->hfov_deg : 0.0) << ",\"created\":\""
+    << ar6cal::JEsc(c.created) << "\",\"error\":\"" << ar6cal::JEsc(err) << "\"}";
+  WriteTextAtomic(ExeDir() + "\\calib_info.json", o.str());
 }
 
 static double LoadBaseline() {
@@ -888,30 +918,38 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Calibration faite ailleurs (RTAB-Map) : on la charge, on ne la fabrique pas.
+  // Calibration : format natif AR6DoF (fait par Unity > Calibration de la camera) ou fichiers RTAB-Map.
   StereoCalib calib;
   bool haveCalib = false;
   std::string calibErr = "aucun dossier de calibration";
-  std::string dir = AskStr("calibdir", "\nDossier de calibration RTAB-Map ('-' = aucune)", ExeDir() + "\\calibration");
+  std::string dir = AskStr("calibdir", "\nDossier de calibration (ar6dof_calib.yml, sinon fichiers RTAB-Map ; '-' = aucune)", ExeDir() + "\\calibration");
   if (dir != "-") {
-    if (LoadRtabmapStereo(dir, calib, calibErr)) {
+    if (LoadCalibAuto(dir, calib, calibErr)) {
       haveCalib = true;
-      std::cout << "Calibration chargee (" << calib.files << "), faite en "
+      std::cout << "Calibration chargee (" << calib.files << ", " << (calib.source == "ar6dof" ? "AR6DoF" : "RTAB-Map") << "), faite en "
                 << calib.size.width << "x" << calib.size.height << " par oeil.\n";
-      // L'echelle metrique d'une calibration depend de la taille des cases de la mire saisie
-      // pendant la calibration. On peut la corriger avec la distance REELLE entre les 2 objectifs.
+      if (calib.source == "ar6dof")
+        std::cout << "  modele " << calib.model << ", " << calib.views << " vues, erreur " << calib.rmsStereo << " px, ecart vertical " << calib.epiPx
+                  << " px, mode camera " << calib.size.width << "x" << calib.size.height << " a " << calib.fps << " i/s, carreaux de "
+                  << calib.squareMm << " mm.\n";
+      // L'echelle metrique d'une calibration depend de la taille des carreaux de la mire saisie pendant la calibration.
+      // Une calibration AR6DoF a sa propre verification a la regle ; pour un import RTAB-Map on peut corriger avec la distance REELLE des objectifs.
       double calibBase = cv::norm(calib.T) * 1000.0;
-      double saved = LoadBaseline();
-      char defbuf[32];
-      std::snprintf(defbuf, sizeof(defbuf), "%.1f", saved);
       std::cout << "Base entre les cameras dans la calibration : " << calibBase << " mm\n";
-      std::string a = AskStr("baseline", "Base REELLE entre les centres des 2 objectifs, en mm (0 = garder celle de la calibration)", defbuf);
-      double real = 0;
-      try { real = std::stod(a); } catch (...) { real = 0; }
-      SaveBaseline(real);
-      if (real > 1.0 && calibBase > 1.0) {
-        calib.T = calib.T * (real / calibBase);
-        std::cout << "Echelle corrigee : x" << real / calibBase << " (base utilisee : " << real << " mm)\n";
+      if (calib.source == "ar6dof") {
+        std::cout << "(la base saisie a la main est ignoree pour une calibration AR6DoF : l'echelle vient de la taille des carreaux, verifiee a la regle)\n";
+      } else {
+        double saved = LoadBaseline();
+        char defbuf[32];
+        std::snprintf(defbuf, sizeof(defbuf), "%.1f", saved);
+        std::string a = AskStr("baseline", "Base REELLE entre les centres des 2 objectifs, en mm (0 = garder celle de la calibration)", defbuf);
+        double real = 0;
+        try { real = std::stod(a); } catch (...) { real = 0; }
+        SaveBaseline(real);
+        if (real > 1.0 && calibBase > 1.0) {
+          calib.T = calib.T * (real / calibBase);
+          std::cout << "Echelle corrigee : x" << real / calibBase << " (base utilisee : " << real << " mm)\n";
+        }
       }
       if (ExportCameraModel(calib, ExeDir() + "\\camera_model.json"))
         std::cout << "Modele de camera exporte pour Unity : " << ExeDir() << "\\camera_model.json\n";
@@ -1094,6 +1132,111 @@ int main(int argc, char** argv) {
   std::deque<std::string> cmdQ;
   if (autoTrack && haveCalib) cmdQ.push_back("t");   // demarre le tracking des la premiere image
   bool quit = false;
+
+  // ---- Calibration de la camera (Unity > Appareils > Calibration de la camera) : capture guidee, calcul, enregistrement ----
+  // Commandes (lignes UDP 9877) : CALSTART colonnes lignes carreau_mm [base_mm], CALCANCEL, CALCOMPUTE, CALVERIFY mm, CALSCALE rapport,
+  // CALAPPLY, CALIMPORT. L'etat est ecrit dans calib_status.json (lu par Unity) ; rien ne tourne tant que la page n'est pas utilisee.
+  ar6cal::Session calSess;
+  bool calWasTracking = false;
+  unsigned calWrittenVer = ~0u;
+  double calWriteT = -1e9;
+  const std::string calStatusPath = ExeDir() + "\\calib_status.json";
+  auto WriteCalStatus = [&](bool force) {
+    const double t = NowS();
+    const unsigned v = calSess.Version();
+    if (!force && (v == calWrittenVer || t - calWriteT < 0.2)) return;
+    calWrittenVer = v;
+    calWriteT = t;
+    WriteTextAtomic(calStatusPath, calSess.StatusJson());
+  };
+  WriteCalStatus(true);   // efface un etat laisse par un lancement precedent
+  auto CalDir = [&]() { return dir != "-" ? dir : ExeDir() + "\\calibration"; };
+  auto ApplyCalib = [&](const StereoCalib& nc) {
+    calib = nc;
+    haveCalib = true;
+    calibErr.clear();
+    ExportCameraModel(calib, ExeDir() + "\\camera_model.json");
+    WriteCalibInfo(calib, nullptr, calib.size, "");
+    rectReady = false;     // la rectification est refaite avec la nouvelle calibration
+    trackReady = false;
+    haveLast = false;
+    std::cout << "[calibration] calibration appliquee : " << calib.model << ", base " << cv::norm(calib.T) * 1000.0 << " mm" << std::endl;
+  };
+  auto HandleCal = [&](const std::string& cl) -> bool {
+    if (cl.compare(0, 3, "CAL") != 0) return false;
+    std::istringstream is(cl);
+    std::string cmd;
+    is >> cmd;
+    if (cmd == "CALSTART") {
+      int c = 9, r = 6;
+      double mm = 25, hint = 0;
+      is >> c >> r >> mm >> hint;
+      ar6cal::Board b;
+      b.cols = std::max(4, std::min(20, c));
+      b.rows = std::max(3, std::min(20, r));
+      b.squareMm = std::max(3.0, std::min(300.0, mm));
+      if (tracking) calWasTracking = true;
+      tracking = false; haveLast = false; poseValid = false;
+      InvalidateSnap(vsnap);
+      ar6trk::Stop();
+      calSess.Start(b, FPS, 18, hint);
+      trackMsg = "calibration de la camera en cours";
+      std::cout << "[calibration] capture : mire " << b.cols << "x" << b.rows << " coins, carreaux de " << b.squareMm << " mm, mode "
+                << frame.cols / 2 << "x" << frame.rows << " a " << FPS << " i/s" << std::endl;
+    } else if (cmd == "CALCANCEL") {
+      calSess.Cancel();
+      if (calWasTracking && haveCalib) cmdQ.push_back("t");
+      calWasTracking = false;
+      std::cout << "[calibration] annulee" << std::endl;
+    } else if (cmd == "CALCOMPUTE") {
+      calSess.RequestCompute();
+    } else if (cmd == "CALVERIFY") {
+      double mm = 0;
+      is >> mm;
+      std::string e;
+      if (mm < 50 || !calSess.Verify(mm, e)) std::cout << "[calibration] verification impossible : " << (mm < 50 ? "distance invalide" : e) << std::endl;
+    } else if (cmd == "CALSCALE") {
+      double ratio = 1;
+      is >> ratio;
+      calSess.ApplyScale(ratio);
+      std::cout << "[calibration] echelle corrigee : x" << ratio << std::endl;
+    } else if (cmd == "CALAPPLY") {
+      if (!calSess.HasResult()) { std::cout << "[calibration] rien a enregistrer" << std::endl; }
+      else {
+        const std::string dst = CalDir();
+        std::error_code ec;
+        std::filesystem::create_directories(dst, ec);
+        const std::filesystem::path nat = std::filesystem::path(dst) / NativeCalibName();
+        if (std::filesystem::exists(nat, ec)) {
+          std::filesystem::remove(std::filesystem::path(dst) / "ar6dof_calib.prev.yml", ec);
+          std::filesystem::copy_file(nat, std::filesystem::path(dst) / "ar6dof_calib.prev.yml", ec);
+        }
+        StereoCalib nc = calSess.Result().calib;
+        std::string err;
+        if (SaveNativeCalib(nc, nat.string(), err)) {
+          ApplyCalib(nc);
+          calSess.MarkApplied();
+          if (calWasTracking) cmdQ.push_back("t");
+          calWasTracking = false;
+          std::cout << "[calibration] enregistree dans " << nat.string() << std::endl;
+        } else {
+          std::cout << "[calibration] enregistrement impossible : " << err << std::endl;
+        }
+      }
+    } else if (cmd == "CALIMPORT") {
+      StereoCalib nc;
+      std::string err;
+      if (ConvertRtabmapToNative(CalDir(), nc, err)) {
+        ApplyCalib(nc);
+        std::cout << "[calibration] import RTAB-Map converti en " << NativeCalibName() << std::endl;
+      } else {
+        std::cout << "[calibration] import RTAB-Map impossible : " << err << std::endl;
+      }
+    }
+    WriteCalStatus(true);
+    return true;
+  };
+
   auto drainCtl = [&] {
     std::string l;
     while (ctl.PollText(l)) {
@@ -1143,6 +1286,9 @@ int main(int argc, char** argv) {
     cv::Mat left = frame(cv::Rect(0, 0, w, frame.rows));
     cv::Mat right = frame(cv::Rect(w, 0, w, frame.rows));
     if (swapEyes) std::swap(left, right);
+    calSess.SetSwapped(swapEyes);
+    if (calSess.WantsFrames()) calSess.Feed(left, right, tRead);   // calibration en cours : detection de la mire (une copie toutes les 120 ms au plus)
+    WriteCalStatus(false);
 
     // (Re)construire la rectification si besoin (taille réelle de l'image)
     if (haveCalib && (!rectReady || rect.eye != cv::Size(w, frame.rows))) {
@@ -1152,6 +1298,11 @@ int main(int argc, char** argv) {
         calibErr = err;
         std::cout << "Rectification impossible : " << err << "\n";
         haveCalib = false;
+        WriteCalibInfo(calib, nullptr, cv::Size(w, frame.rows), err);
+      } else {
+        // Ces avertissements n'etaient jamais affiches : calibration faite dans un autre mode que celui utilise (echelle possiblement fausse).
+        for (const auto& wn : rect.warnings) std::cout << "[calibration] ATTENTION : " << wn << std::endl;
+        WriteCalibInfo(calib, &rect, cv::Size(w, frame.rows), "");
       }
     }
     // Copie des données IMU (un seul verrouillage)
@@ -1337,6 +1488,7 @@ int main(int argc, char** argv) {
       const std::string cl = cmdQ.front();
       cmdQ.pop_front();
       if (HandleMountLine(cl, mc)) continue;
+      if (HandleCal(cl)) continue;
       if (cl.size() != 1) continue;
       int k = (unsigned char)cl[0];
       if (k == 'V') k = 'v';   // V sol, Z yaw : commandes d'Unity

@@ -1,6 +1,6 @@
 #pragma once
-// Calibration stéréo faite AILLEURS (RTAB-Map : *_left.yaml, *_right.yaml,
-// *_pose.yaml). Ce fichier charge, met à l'échelle, rectifie et contrôle.
+// Calibration stéréo : format NATIF (ar6dof_calib.yml, fait par calib_session.h) ou importé de RTAB-Map (*_left.yaml, *_right.yaml,
+// *_pose.yaml). Ce fichier charge, convertit, met à l'échelle, rectifie et contrôle.
 // Pour supporter un autre format plus tard (Kalibr, etc.), il suffit d'ajouter
 // une fonction qui remplit StereoCalib.
 #include <algorithm>
@@ -20,6 +20,14 @@ struct StereoCalib {
   cv::Mat K1, D1, K2, D2;  // intrinsèques / distorsion gauche et droite (64F)
   cv::Mat R, T;            // transformation caméra gauche -> droite (OpenCV stereoCalibrate)
   std::string files;
+  // Renseignés par la calibration maison (ar6dof_calib.yml) ; valeurs « inconnu » pour un import RTAB-Map.
+  std::string source = "rtabmap";   // "ar6dof" ou "rtabmap"
+  std::string model;                // modèle de distorsion retenu (texte)
+  std::string created;              // date de la calibration
+  int fps = 0, views = 0;           // cadence du mode caméra utilisé, nombre de vues gardées
+  double rmsL = -1, rmsR = -1, rmsStereo = -1, epiPx = -1;   // erreurs de reprojection (px) et écart vertical gauche/droite après rectification
+  double squareMm = 0;              // taille d'un carreau de la mire utilisée (mm)
+  double scaleCorr = 1.0;           // correction d'échelle appliquée à T après la vérification à la règle
 };
 
 struct Rectifier {
@@ -96,6 +104,73 @@ inline bool LoadRtabmapStereo(const std::string& dir, StereoCalib& out, std::str
   return true;
 }
 
+// ---- Format natif : ar6dof_calib.yml (OpenCV FileStorage) --------------------------------------------------------------------------
+// Une seule fichier, avec la résolution/cadence du mode caméra, le modèle de distorsion et les mesures de qualité. Les matrices sont
+// celles d'OpenCV (stereoCalibrate : x_droite = R * x_gauche + T, T en mètres).
+inline const char* NativeCalibName() { return "ar6dof_calib.yml"; }
+
+inline bool SaveNativeCalib(const StereoCalib& c, const std::string& path, std::string& err) {
+  try {
+    std::string tmp = path + ".tmp";
+    {
+      cv::FileStorage fs(tmp, cv::FileStorage::WRITE);
+      if (!fs.isOpened()) { err = "impossible d'ecrire " + path; return false; }
+      fs << "format" << "ar6dof_stereo_calib";
+      fs << "version" << 2;
+      fs << "image_width" << c.size.width << "image_height" << c.size.height;
+      fs << "K1" << c.K1 << "D1" << c.D1 << "K2" << c.K2 << "D2" << c.D2 << "R" << c.R << "T" << c.T;
+      fs << "source" << c.source << "model" << c.model << "created" << c.created;
+      fs << "fps" << c.fps << "views" << c.views;
+      fs << "rms_left" << c.rmsL << "rms_right" << c.rmsR << "rms_stereo" << c.rmsStereo << "epipolar_px" << c.epiPx;
+      fs << "square_mm" << c.squareMm << "scale_correction" << c.scaleCorr;
+      fs << "baseline_mm" << cv::norm(c.T) * 1000.0;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) { err = "impossible de remplacer " + path + " : " + ec.message(); return false; }
+    return true;
+  } catch (const cv::Exception& e) {
+    err = std::string("ecriture de la calibration : ") + e.what();
+    return false;
+  }
+}
+
+inline bool LoadNativeCalib(const std::string& path, StereoCalib& out, std::string& err) {
+  try {
+    cv::FileStorage fs(path, cv::FileStorage::READ);
+    if (!fs.isOpened()) { err = "impossible de lire " + path; return false; }
+    std::string fmt;
+    fs["format"] >> fmt;
+    if (fmt != "ar6dof_stereo_calib") { err = "ce n'est pas une calibration AR6DoF : " + path; return false; }
+    StereoCalib c;
+    c.size = cv::Size((int)fs["image_width"], (int)fs["image_height"]);
+    fs["K1"] >> c.K1; fs["D1"] >> c.D1; fs["K2"] >> c.K2; fs["D2"] >> c.D2; fs["R"] >> c.R; fs["T"] >> c.T;
+    c.K1.convertTo(c.K1, CV_64F); c.K2.convertTo(c.K2, CV_64F); c.D1.convertTo(c.D1, CV_64F);
+    c.D2.convertTo(c.D2, CV_64F); c.R.convertTo(c.R, CV_64F); c.T.convertTo(c.T, CV_64F);
+    if (c.T.total() == 3) c.T = c.T.reshape(1, 3).clone();
+    if (c.D1.total() > 0) c.D1 = c.D1.reshape(1, 1).clone();   // 1 x n, comme les fichiers RTAB-Map
+    if (c.D2.total() > 0) c.D2 = c.D2.reshape(1, 1).clone();
+    if (c.size.width <= 0 || c.size.height <= 0 || c.K1.rows != 3 || c.K1.cols != 3 || c.K2.rows != 3 || c.K2.cols != 3 ||
+        c.D1.empty() || c.D2.empty() || c.R.rows != 3 || c.R.cols != 3 || c.T.rows != 3 || c.T.cols != 1) {
+      err = "calibration AR6DoF incomplete ou illisible : " + path;
+      return false;
+    }
+    fs["source"] >> c.source; fs["model"] >> c.model; fs["created"] >> c.created;
+    c.fps = (int)fs["fps"]; c.views = (int)fs["views"];
+    c.rmsL = (double)fs["rms_left"]; c.rmsR = (double)fs["rms_right"]; c.rmsStereo = (double)fs["rms_stereo"]; c.epiPx = (double)fs["epipolar_px"];
+    c.squareMm = (double)fs["square_mm"];
+    double sc = (double)fs["scale_correction"];
+    c.scaleCorr = sc > 0 ? sc : 1.0;
+    c.files = std::filesystem::path(path).filename().string();
+    out = c;
+    return true;
+  } catch (const cv::Exception& e) {
+    err = std::string("lecture de la calibration : ") + e.what();
+    return false;
+  }
+}
+
 // Met K à l'échelle (convention centre-de-pixel d'OpenCV).
 inline cv::Mat ScaleK(const cv::Mat& K, double sx, double sy) {
   cv::Mat k = K.clone();
@@ -104,6 +179,38 @@ inline cv::Mat ScaleK(const cv::Mat& K, double sx, double sy) {
   k.at<double>(0, 2) = (K.at<double>(0, 2) + 0.5) * sx - 0.5;
   k.at<double>(1, 2) = (K.at<double>(1, 2) + 0.5) * sy - 0.5;
   return k;
+}
+
+// Charge la calibration d'un dossier : le fichier natif ar6dof_calib.yml s'il existe, sinon les fichiers RTAB-Map. Si le natif est
+// illisible mais que RTAB-Map est là, on retombe dessus (et on le dit dans 'files').
+inline bool LoadCalibAuto(const std::string& dir, StereoCalib& out, std::string& err) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::path nat = fs::path(dir) / NativeCalibName();
+  if (fs::exists(nat, ec)) {
+    std::string e1;
+    if (LoadNativeCalib(nat.string(), out, e1)) return true;
+    std::string e2;
+    if (LoadRtabmapStereo(dir, out, e2)) { out.files += " (" + std::string(NativeCalibName()) + " illisible : " + e1 + ")"; return true; }
+    err = e1;
+    return false;
+  }
+  return LoadRtabmapStereo(dir, out, err);
+}
+
+// Import RTAB-Map -> format natif (garde les anciens fichiers intacts ; l'ancien natif est sauvegardé en .prev.yml).
+inline bool ConvertRtabmapToNative(const std::string& dir, StereoCalib& out, std::string& err) {
+  if (!LoadRtabmapStereo(dir, out, err)) return false;
+  out.source = "rtabmap";
+  out.model = out.D1.total() >= 8 ? "rationnel (RTAB-Map)" : "standard (RTAB-Map)";
+  std::error_code ec;
+  std::filesystem::path nat = std::filesystem::path(dir) / NativeCalibName();
+  if (std::filesystem::exists(nat, ec)) {
+    std::filesystem::path prev = std::filesystem::path(dir) / "ar6dof_calib.prev.yml";
+    std::filesystem::remove(prev, ec);
+    std::filesystem::copy_file(nat, prev, ec);
+  }
+  return SaveNativeCalib(out, nat.string(), err);
 }
 
 inline bool MakeRectifier(const StereoCalib& c, cv::Size eye, Rectifier& out, std::string& err) {
@@ -134,7 +241,8 @@ inline bool MakeRectifier(const StereoCalib& c, cv::Size eye, Rectifier& out, st
     out.warnings.push_back("calibration faite en " + std::to_string(c.size.width) + "x" +
                            std::to_string(c.size.height) + ", mise a l'echelle x" +
                            std::to_string(sx).substr(0, 4) +
-                           " : valable seulement si le mode camera a le meme champ de vision");
+                           " : FAUX si ce mode de la camera RECADRE le centre au lieu de reduire l'image (distances et deplacements"
+                           " sous-estimes d'un facteur " + std::to_string(1.0 / sx).substr(0, 3) + "). Refais la calibration dans le mode utilise");
   double offx = std::abs(c.K1.at<double>(0, 2) - c.size.width * 0.5) / c.size.width;
   double offy = std::abs(c.K1.at<double>(1, 2) - c.size.height * 0.5) / c.size.height;
   if (offx > 0.05 || offy > 0.05)

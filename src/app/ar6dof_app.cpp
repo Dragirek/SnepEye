@@ -1468,7 +1468,7 @@ void BrowseCalibDir() {
   BROWSEINFOW bi;
   memset(&bi, 0, sizeof(bi));
   bi.hwndOwner = g_wnd;
-  bi.lpszTitle = Tr(L"Dossier de calibration RTAB-Map", L"RTAB-Map calibration folder");
+  bi.lpszTitle = Tr(L"Dossier de calibration (AR6DoF ou RTAB-Map)", L"Calibration folder (AR6DoF or RTAB-Map)");
   bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
   PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
   if (!pidl) return;
@@ -1569,7 +1569,7 @@ void CreateControls() {
   Button(L"Parcourir…", L"Browse…", X + C0 + CR - 90, 621, 90, 28, ID_CALBROWSE);
   Label(L"Base réelle (mm)", L"Real baseline (mm)", X + PAD, 662, 160);
   Edit(X + C0, 658, 76, ID_BASE);
-  Label(L"0 = celle de la calibration", L"0 = keep the calibration’s", X + C0 + 90, 662, 330);
+  Label(L"0 = celle de la calibration (ignorée pour une calibration AR6DoF)", L"0 = keep the calibration’s (ignored for an AR6DoF calibration)", X + C0 + 90, 662, 330);
 
   // ---- page 1 : Capteurs
   g_buildPage = PG_SENSORS;

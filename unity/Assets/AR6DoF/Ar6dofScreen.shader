@@ -1,5 +1,5 @@
 // Écran virtuel : affiche la texture du bureau (mipmaps + filtrage trilinéaire pour un texte net), ou un aplat de couleur
-// (poignées). Sans éclairage, double face. _Hover (0..1) éclaire le contour de l'écran visé.
+// (poignées). Sans éclairage ; le dos est vide (rien d'affiche quand on regarde l'ecran par derriere). _Hover (0..1) éclaire le contour de l'écran visé.
 Shader "AR6DoF/Screen"
 {
     Properties
@@ -25,10 +25,12 @@ Shader "AR6DoF/Screen"
             float4 _Color;
             float _UseTex, _FlipY, _Hover;
             struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
-            struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
-            v2f vert (appdata v) { v2f o; o.pos = UnityObjectToClipPos(v.vertex); o.uv = v.uv; return o; }
+            struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float back : TEXCOORD1; };
+            // la face visible est celle qu'on voit depuis -Z de l'objet ; camera du cote +Z = on regarde le dos
+            v2f vert (appdata v) { v2f o; o.pos = UnityObjectToClipPos(v.vertex); o.uv = v.uv; o.back = mul(unity_WorldToObject, float4(_WorldSpaceCameraPos, 1.0)).z > 0.0 ? 1.0 : 0.0; return o; }
             float4 frag (v2f i) : SV_Target
             {
+                clip(0.5 - i.back);
                 float4 c = _Color;
                 if (_UseTex > 0.5)
                 {
