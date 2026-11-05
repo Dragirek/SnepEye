@@ -86,6 +86,7 @@ namespace AR6DoF
         readonly Ar6dofFrameReader reader = new Ar6dofFrameReader();
         Texture2D camTex;
         RenderTexture rtL, rtR;
+        int appliedAa = 1;   // echantillons MSAA des textures des yeux en ce moment
         readonly Camera[] eyeCams = new Camera[2];
         Camera compositeCam;
         Material mat;
@@ -171,7 +172,8 @@ namespace AR6DoF
         {
             int size = Mathf.RoundToInt(eyeRenderSize * Mathf.Max(1f, sceneOverscan) * Mathf.Clamp(Ar6dofSettings.Current.perfRenderScale, 0.5f, 1f));
             var rt = new RenderTexture(size, size, 24, RenderTextureFormat.ARGB32);
-            rt.antiAliasing = Mathf.Clamp(Ar6dofSettings.Current.perfMsaa, 1, 4);
+            rt.antiAliasing = Ar6dofPerf.AaSamples;
+            appliedAa = Ar6dofPerf.AaSamples;
             rt.name = n;
             rt.Create();
             return rt;
@@ -189,7 +191,7 @@ namespace AR6DoF
             c.farClipPlane = 100f;
             c.cullingMask = ~(1 << layer);
             c.depth = 0;
-            Ar6dofPerf.ConfigureCamera(c, Ar6dofSettings.Current.perfMsaa > 1);
+            Ar6dofPerf.ConfigureCamera(c, Ar6dofPerf.AaSamples > 1);
             return c;
         }
 
@@ -257,9 +259,20 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ boucle
+        // le lissage des bords se change en direct : on refait la texture de chaque oeil (la camera la garde comme cible)
+        void ApplyAaChange()
+        {
+            int n = Ar6dofPerf.AaSamples;
+            if (n == appliedAa || rtL == null || rtR == null) return;
+            appliedAa = n;
+            foreach (var rt in new[] { rtL, rtR }) { rt.Release(); rt.antiAliasing = n; rt.Create(); }
+            for (int i = 0; i < eyeCams.Length; i++) if (eyeCams[i] != null) Ar6dofPerf.ConfigureCamera(eyeCams[i], n > 1);
+        }
+
         void Update()
         {
             Ar6dofPerf.Tick();
+            ApplyAaChange();
             showUi = Ar6dofDebug.On;          // plus de touche F1 : le panneau complet n'existe qu'en mode debug (Ar6dofDock > Debug)
             Ar6dofUi.Visible = showUi;
             if (!reader.IsOpen && Time.unscaledTime >= nextOpenTry)

@@ -19,13 +19,13 @@ namespace AR6DoF
         static readonly string[] TabNamesPlus = { "Maintenant", "Jours", "Heures", "Lieu", "Plus" };   // « Plus » (ex-Test) : cachée tant qu'on ne l'active pas dans Options
         const int TabNow = 0, TabDays = 1, TabHours = 2, TabPlace = 3, TabTest = 4, TabOptions = 5;   // Options : page de la roue, hors de la barre d'onglets
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-        static readonly float[] FrameH = { 300f, 350f, 400f, 460f, 540f };        // hauteur du cadre de la scène, par niveau (le niveau 2, 400 px, est celui par défaut)
-        static readonly float[] DropBy = { 0.10f, 0.22f, 0.34f, 0.46f, 0.58f };   // de combien l'île descend (en tailles de scène), par niveau ; la scène ne rétrécit plus, la pointe peut sortir du cadre
-        static readonly float[] CloudBy = { -0.30f, -0.15f, 0f, 0.12f, 0.25f };  // de combien les nuages (et la pluie, la neige, les éclairs) montent, par niveau
-        static readonly string[] CloudNames = { "Tres bas", "Bas", "Normal", "Haut", "Tres haut" };
+        static readonly float[] FrameH = { 300f, 340f, 380f, 440f, 520f };        // hauteur du cadre bleu de la scène, par niveau (le niveau 2, 380 px, est celui par défaut)
+        static readonly float[] DropBy = { 0.14f, 0.28f, 0.42f, 0.54f, 0.66f };   // de combien l'île descend (en tailles de scène), par niveau ; la scène ne rétrécit plus, la pointe peut sortir du cadre
+        static readonly float[] CloudBy = { -0.40f, -0.25f, -0.10f, 0.02f, 0.15f };  // de combien les nuages (et la pluie, la neige, les éclairs) montent, par niveau
+        static readonly string[] CloudNames = { "Tres bas", "Bas", "Moyen", "Haut", "Tres haut" };   // par defaut : tres haut
         static readonly string[] DropNames = { "Comme avant", "Un peu plus bas", "Plus bas", "Bas", "Tres bas" };
         int DropLevel { get { return wx.prefs.dropSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.dropSel - 1, 0, 4); } }
-        int CloudLevel { get { return wx.prefs.cloudSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.cloudSel - 1, 0, 4); } }
+        int CloudLevel { get { return wx.prefs.cloudSel <= 0 ? 4 : Mathf.Clamp(wx.prefs.cloudSel - 1, 0, 4); } }
         int FrameLevel { get { return wx.prefs.frameSel <= 0 ? 2 : Mathf.Clamp(wx.prefs.frameSel - 1, 0, 4); } }
         const float PlayStep = 2.6f;     // secondes entre deux heures en lecture
         const float BurstTime = 0.9f;    // durée de l'accélération du temps entre deux heures
@@ -487,7 +487,7 @@ namespace AR6DoF
             scene.transform.localScale = Vector3.one * s;
             // haut du cadre en unites de la scene ; soleil, lune et etoiles gardent leur hauteur d'avant dans le cadre ; tout ce qui sort du cadre est coupe (relief 3D gardé dedans)
             float top = sh * 0.5f / s + 0.09f + drop;
-            scene.SetStage(stage, new Vector2(IW, sh), top, drop - 0.12f);
+            scene.SetStage(stage, new Vector2(IW, sh), top, drop - 0.12f, 26f);   // 26 = rayon des coins du ciel : la 3D est coupee comme lui
             scene.SetCloudShift(CloudBy[CloudLevel]);
 
             // coins du bas : l'île est étroite en bas, il y a de la place (et rien ne passe devant)
@@ -507,6 +507,9 @@ namespace AR6DoF
             scene.WindFx = !Hidden(OptWindFx);
             scene.Apply(n.cond, n.day, n.cover, n.wind, n.windDir, n.temp, snap);
             scene.SetClock(n.sunF, n.moonF, snap);
+            DateTime when;
+            if (n.time == null || n.time.Length < 10 || !DateTime.TryParse(n.time, Inv, System.Globalization.DateTimeStyles.None, out when)) when = DateTime.UtcNow;
+            scene.SetMoonPhase(Ar6dofWeatherScene.MoonPhaseAt(DateTime.SpecifyKind(when, DateTimeKind.Utc)), wx.prefs.place == null || wx.prefs.place.lat >= 0.0);
             SkyColors(n.cond, n.day, out skyTop, out skyBot, n.temp);
             if (sky != null) sky.SetColors(skyTop, skyBot, 26f);
             lastFlash = -1f;

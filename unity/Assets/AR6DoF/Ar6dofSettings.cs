@@ -113,8 +113,12 @@ namespace AR6DoF
 
         // Performances
         public int perfFps = 0;            // 0 suit l'écran, 1 = 60, 2 = 90, 3 = 120, 4 = illimité
-        public int perfMsaa = 1;           // 1 = pas de lissage des bords (inutile : textes et coins arrondis se lissent déjà), 2 = MSAA x2
+        public int perfMsaa = 1;           // ancien reglage (oui/non), remplace par perfAa ; garde pour ne pas casser les anciens fichiers
+        public int perfAa = 2;             // lissage des bords (MSAA materiel, net : ne floute pas l'image comme le FXAA) : 0 aucun, 1 = x2, 2 = x4, 3 = x8
         public float perfRenderScale = 1f; // 0.5 .. 1 : résolution de l'interface des yeux (appliqué au lancement suivant)
+        public float eyeHeightCm = 165f;   // hauteur de tes yeux debout (cm) : sert quand le sol n'est pas detecte, et au bouton « Sol ici »
+        public float eyeHeightSeatedCm = 120f;   // idem assis
+        public bool menusFollow = false;   // « Suivi actif » : tous les menus te suivent quand tu te deplaces ; sinon ils restent ancres dans la piece
         public float moveScale = 1f;       // échelle des déplacements de la tête (0,25 .. 4) : corrige un suivi qui sous- ou sur-estime les pas (base entre les objectifs mal réglée)
 
         // Télécommande

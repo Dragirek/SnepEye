@@ -1049,6 +1049,8 @@ int main(int argc, char** argv) {
   VisionSnap vsnap;
   if (pi >= 0) th = std::thread(ImuThread, ports[pi], &imu, &vsnap, &udp);   // publie la pose à la cadence de l'IMU
   FloorFilter floorF;
+  FloorMap floorMap;          // hauteurs accumulees dans le temps (voir floor.h)
+  double imuWaitT0 = -1;      // debut de l'attente de l'IMU avant d'aligner le monde sur la gravite
   bool floorValid = false, floorLocked = false;
   double floorZ = 0, lastFloorT = 0;
   if (!g_auto) SaveConfig();   // les réponses servent de configuration pour --auto
@@ -1220,7 +1222,15 @@ int main(int argc, char** argv) {
       }
     }
     // ---- Tracking 6DoF ----
-    if (tracking && haveCalib) {
+    // Premier alignement sur la gravite : il faut l'orientation de l'IMU, sinon on supposerait la camera de niveau et tout le monde serait penche
+    // (c'etait la cause du monde « penche » au premier lancement). On attend l'IMU jusqu'a 3 s, puis on demarre quand meme.
+    bool waitImu = false;
+    if (tracking && haveCalib && !haveLast && pi >= 0 && !qok) {
+      if (imuWaitT0 < 0) imuWaitT0 = tRead;
+      if (tRead - imuWaitT0 < 3.0) { waitImu = true; trackMsg = "attente de l'IMU pour aligner le monde sur la gravite"; }
+    }
+    if (haveLast || qok) imuWaitT0 = -1;
+    if (tracking && haveCalib && !waitImu) {
       if (trackReady && vo && !tl.empty()) {
         const double tcap = tSm - camDelay;   // instant de prise de vue = arrivée lissée - délai
         if (!haveLast) {
@@ -1251,6 +1261,12 @@ int main(int argc, char** argv) {
           lastFrameT = tcap;
         }
         snapRvc = FromCv(vo->R);
+        // Inclinaison : le suivi visuel peut deriver en roulis / tangage. L'IMU connait le vrai « haut » : on ramene doucement le monde vers lui
+        // (seulement quand la tete tourne lentement : le gyro et l'image ne sont pas pris au meme instant, a grande vitesse l'ecart serait faux).
+        if (vo->state == StereoVO::kOk && haveLast && qok && pi >= 0 && Norm(gyr) < 0.35) {
+          Vec3 upc = Rcb * ToMat3(q).Row(2);
+          R_GV = GravityRefine(R_GV, snapRvc * upc, 0.02, 0.004);   // au plus ~0,2 deg par image, ~2 % de l'ecart
+        }
         // Mesure du délai : rotation vue par la caméra entre deux images, comparée à l'intégrale du gyro
         if (vo->state == StereoVO::kOk) {
           if (havePrevOk && tSm - prevArr < 0.1) delayEst.AddStep(prevArr, tSm, prevRvc.T() * snapRvc);
@@ -1301,7 +1317,7 @@ int main(int argc, char** argv) {
         const auto& pts = vo->Points3D();
         zs.reserve(pts.size());
         for (const auto& pp : pts) zs.push_back(R_GV.m[2][0] * pp.x + R_GV.m[2][1] * pp.y + R_GV.m[2][2] * pp.z);
-        floorF.Add(EstimateFloor(zs, poseP.z));
+        floorF.Add(floorMap.Update(zs, poseP.z));   // plus bas groupe dense des hauteurs vues depuis le debut (voir floor.h)
         floorValid = floorF.Valid();
         if (floorValid) floorZ = floorF.Z();
       }
@@ -1353,8 +1369,10 @@ int main(int argc, char** argv) {
             trackMsg = "tracking demarre : l'origine est ici, immobile 1 s";
             ar6trk::Reset();
             floorF.Reset();
+            floorMap.Reset();
             floorValid = false;
             floorLocked = false;
+            imuWaitT0 = -1;
           }
         } else {
           tracking = false;

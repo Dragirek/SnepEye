@@ -42,6 +42,10 @@ namespace AR6DoF
         public bool TrackingOk { get; private set; }
         public bool ConnectionLost { get; private set; }
         public bool FloorDetected { get; private set; }
+        /// <summary>Sol fige (bouton « Verrouiller le sol » ou « Sol ici ») : y = 0 ne bouge plus, quelle que soit la source.</summary>
+        public bool FloorLocked { get { return floorLocked; } }
+        /// <summary>0 = suppose (hauteur des yeux reglee), 1 = detecte par le suivi, 2 = verrouille.</summary>
+        public int FloorMode { get { return floorLocked ? 2 : (FloorDetected ? 1 : 0); } }
         /// <summary>Hauteur des yeux au-dessus du sol (m).</summary>
         public float HeadHeight { get; private set; }
         /// <summary>Position de la tête relative à l'origine, SANS l'échelle des déplacements (sert à la mesurer : x, hauteur au-dessus du sol, z).</summary>
@@ -53,15 +57,54 @@ namespace AR6DoF
         Vector3 originU;
         Quaternion yawFix = Quaternion.identity;
         float floorSmoothed;
-        bool floorInit, haveAssumed;
+        bool floorInit, haveAssumed, floorLocked, wantYaw;
+        float lastPosZ;
         float assumedFloorG;
 
         public void Recenter() { wantRecenter = true; }
 
         /// <summary>Mode assis : sans sol detecte, la hauteur des yeux supposee passe de debout (1,65 m) a assis (1,2 m) ; le sol est recalcule a partir de la tete maintenant.</summary>
+        /// <summary>Hauteur des yeux supposee (m) selon le mode et le reglage « Hauteur de tes yeux ».</summary>
+        public static float ConfiguredEyeHeight(bool seated)
+        {
+            var d = Ar6dofSettings.Current;
+            return Mathf.Clamp((seated ? d.eyeHeightSeatedCm : d.eyeHeightCm) * 0.01f, 0.4f, 2.4f);
+        }
+
+        /// <summary>Verrouille / deverrouille le sol : verrouille, y = 0 reste exactement ou il est maintenant (detecte ou suppose).</summary>
+        public void ToggleFloorLock()
+        {
+            floorLocked = !floorLocked;
+            if (!floorLocked) { floorInit = false; haveAssumed = false; }
+        }
+
+        /// <summary>
+        /// « Sol ici » : tes yeux sont maintenant a la hauteur reglee (debout ou assis) ; le sol est place a cette distance sous la tete et verrouille.
+        /// A utiliser quand la detection du sol ne trouve rien ou se trompe.
+        /// </summary>
+        public void SetFloorFromEyeHeight()
+        {
+            assumedEyeHeight = ConfiguredEyeHeight(Ar6dofSettings.Current.seated);
+            assumedFloorG = lastPosZ - assumedEyeHeight;
+            haveAssumed = true;
+            floorLocked = true;
+            floorSmoothed = assumedFloorG; floorInit = true;
+            frozenFloor = assumedFloorG;
+        }
+        float frozenFloor;
+
+        /// <summary>Le suivi redemarre : son monde repart de zero (origine, sol et cap sont a refaire).</summary>
+        public void ResetWorld()
+        {
+            floorLocked = false; floorInit = false; haveAssumed = false; haveOrigin = false;
+        }
+
+        /// <summary>Remet le cap a zero : l'avant du monde devient la ou tu regardes, sans deplacer ta position.</summary>
+        public void RecenterYaw() { wantYaw = true; }
+
         public void SetSeated(bool seated)
         {
-            float h = seated ? SeatedEyeHeight : StandingEyeHeight;
+            float h = ConfiguredEyeHeight(seated);
             if (Mathf.Abs(assumedEyeHeight - h) < 1e-4f) return;
             assumedEyeHeight = h;
             haveAssumed = false;
@@ -96,17 +139,22 @@ namespace AR6DoF
             Vector3 posU = Ar6dofConvert.Position(p.posG + p.velG * (float)dt);
 
             // Sol : y = 0
+            lastPosZ = p.posG.z;
             float floorG;
             FloorDetected = useDetectedFloor && p.FloorValid;
-            if (FloorDetected) floorG = p.floorZ;
+            if (floorLocked) floorG = frozenFloor;
+            else if (FloorDetected) floorG = p.floorZ;
             else
             {
                 if (!haveAssumed) { assumedFloorG = p.posG.z - assumedEyeHeight; haveAssumed = true; }
                 floorG = assumedFloorG;
             }
-            floorSmoothed = floorInit
-                ? Mathf.Lerp(floorSmoothed, floorG, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 3f))
-                : floorG;
+            if (!floorLocked)
+                floorSmoothed = floorInit
+                    ? Mathf.Lerp(floorSmoothed, floorG, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 3f))
+                    : floorG;
+            else floorSmoothed = floorG;
+            if (!floorLocked) frozenFloor = floorSmoothed;   // au verrouillage, on garde exactement le sol d'a l'instant
             floorInit = true;
             posU.y -= floorSmoothed;
 
@@ -120,6 +168,23 @@ namespace AR6DoF
                 haveOrigin = true;
                 haveAssumed = false;
                 wantRecenter = false;
+            }
+
+            if (wantYaw && haveOrigin)
+            {
+                // cap a zero : nouvel avant = regard actuel ; l'origine est deplacee pour que TA position dans le monde ne saute pas
+                Vector3 f2 = rotU * Vector3.forward;
+                f2.y = 0f;
+                if (f2.sqrMagnitude > 1e-4f)
+                {
+                    Quaternion yawNew = Quaternion.Euler(0f, -Mathf.Atan2(f2.x, f2.z) * Mathf.Rad2Deg, 0f);
+                    Vector3 rel = new Vector3(posU.x - originU.x, 0f, posU.z - originU.z);
+                    Vector3 worldNow = yawFix * rel;
+                    Vector3 relNew = Quaternion.Inverse(yawNew) * worldNow;
+                    originU = new Vector3(posU.x - relNew.x, 0f, posU.z - relNew.z);
+                    yawFix = yawNew;
+                }
+                wantYaw = false;
             }
 
             Vector3 flat = new Vector3(posU.x - originU.x, 0f, posU.z - originU.z);

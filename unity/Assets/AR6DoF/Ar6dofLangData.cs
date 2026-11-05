@@ -1194,6 +1194,15 @@ namespace AR6DoF
             "Maillage ondulant => Wavy mesh",
             "Filaments => Filaments",
             "Barres et vagues => Bars and waves",
+            "Hauteur de tes yeux debout (cm) => Your eye height standing (cm)",
+            "Hauteur de tes yeux assis (cm) => Your eye height seated (cm)",
+            "Sol ici : mes yeux sont a cette hauteur => Floor here: my eyes are at this height",
+            "Suivi actif : les menus me suivent (non = ancres dans la piece) => Active follow: menus follow me (off = anchored in the room)",
+            "Suivi actif : les menus et le clavier te suivent quand tu te deplaces (oui) ou restent ancres dans la piece (non) => Active follow: menus and keyboard follow you when you move (on) or stay anchored in the room (off)",
+            "Deverrouiller le sol => Unlock the floor",
+            "verrouille => locked",
+            "Lissage des bords (net, sans flou) => Edge smoothing (sharp, no blur)",
+            "MSAA materiel : bords nets, s'applique tout de suite. x4 conseille ; x8 seulement si le GPU suit. => Hardware MSAA: sharp edges, applies immediately. x4 recommended; x8 only if the GPU keeps up.",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2378,6 +2387,15 @@ namespace AR6DoF
             "Maillage ondulant => Malla ondulante",
             "Filaments => Filamentos",
             "Barres et vagues => Barras y ondas",
+            "Hauteur de tes yeux debout (cm) => Altura de tus ojos de pie (cm)",
+            "Hauteur de tes yeux assis (cm) => Altura de tus ojos sentado (cm)",
+            "Sol ici : mes yeux sont a cette hauteur => Suelo aqui: mis ojos estan a esta altura",
+            "Suivi actif : les menus me suivent (non = ancres dans la piece) => Seguimiento activo: los menus me siguen (no = anclados en la sala)",
+            "Suivi actif : les menus et le clavier te suivent quand tu te deplaces (oui) ou restent ancres dans la piece (non) => Seguimiento activo: los menus y el teclado te siguen al moverte (si) o quedan anclados en la sala (no)",
+            "Deverrouiller le sol => Desbloquear el suelo",
+            "verrouille => bloqueado",
+            "Lissage des bords (net, sans flou) => Suavizado de bordes (nitido, sin desenfoque)",
+            "MSAA materiel : bords nets, s'applique tout de suite. x4 conseille ; x8 seulement si le GPU suit. => MSAA por hardware: bordes nitidos, se aplica al instante. x4 recomendado; x8 solo si la GPU aguanta.",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -3569,6 +3587,15 @@ namespace AR6DoF
             "Maillage ondulant => Wellenmuster",
             "Filaments => Filamente",
             "Barres et vagues => Balken und Wellen",
+            "Hauteur de tes yeux debout (cm) => Deine Augenhoehe im Stehen (cm)",
+            "Hauteur de tes yeux assis (cm) => Deine Augenhoehe im Sitzen (cm)",
+            "Sol ici : mes yeux sont a cette hauteur => Boden hier: meine Augen sind in dieser Hoehe",
+            "Suivi actif : les menus me suivent (non = ancres dans la piece) => Aktives Folgen: Menues folgen mir (aus = im Raum verankert)",
+            "Suivi actif : les menus et le clavier te suivent quand tu te deplaces (oui) ou restent ancres dans la piece (non) => Aktives Folgen: Menues und Tastatur folgen dir beim Bewegen (an) oder bleiben im Raum verankert (aus)",
+            "Deverrouiller le sol => Boden entsperren",
+            "verrouille => gesperrt",
+            "Lissage des bords (net, sans flou) => Kantenglaettung (scharf, ohne Unschaerfe)",
+            "MSAA materiel : bords nets, s'applique tout de suite. x4 conseille ; x8 seulement si le GPU suit. => Hardware-MSAA: scharfe Kanten, sofort wirksam. x4 empfohlen; x8 nur wenn die GPU mitkommt.",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -4760,6 +4787,15 @@ namespace AR6DoF
             "Maillage ondulant => Rete ondulata",
             "Filaments => Filamenti",
             "Barres et vagues => Barre e onde",
+            "Hauteur de tes yeux debout (cm) => Altezza dei tuoi occhi in piedi (cm)",
+            "Hauteur de tes yeux assis (cm) => Altezza dei tuoi occhi da seduto (cm)",
+            "Sol ici : mes yeux sont a cette hauteur => Pavimento qui: i miei occhi sono a questa altezza",
+            "Suivi actif : les menus me suivent (non = ancres dans la piece) => Inseguimento attivo: i menu mi seguono (no = ancorati nella stanza)",
+            "Suivi actif : les menus et le clavier te suivent quand tu te deplaces (oui) ou restent ancres dans la piece (non) => Inseguimento attivo: menu e tastiera ti seguono quando ti muovi (si) o restano ancorati nella stanza (no)",
+            "Deverrouiller le sol => Sblocca il pavimento",
+            "verrouille => bloccato",
+            "Lissage des bords (net, sans flou) => Anti-aliasing (nitido, senza sfocatura)",
+            "MSAA materiel : bords nets, s'applique tout de suite. x4 conseille ; x8 seulement si le GPU suit. => MSAA hardware: bordi nitidi, si applica subito. x4 consigliato; x8 solo se la GPU regge.",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -5950,6 +5986,15 @@ namespace AR6DoF
             "Maillage ondulant => Malha ondulante",
             "Filaments => Filamentos",
             "Barres et vagues => Barras e ondas",
+            "Hauteur de tes yeux debout (cm) => Altura dos seus olhos em pe (cm)",
+            "Hauteur de tes yeux assis (cm) => Altura dos seus olhos sentado (cm)",
+            "Sol ici : mes yeux sont a cette hauteur => Chao aqui: meus olhos estao nesta altura",
+            "Suivi actif : les menus me suivent (non = ancres dans la piece) => Seguimento ativo: os menus me seguem (nao = ancorados na sala)",
+            "Suivi actif : les menus et le clavier te suivent quand tu te deplaces (oui) ou restent ancres dans la piece (non) => Seguimento ativo: menus e teclado seguem voce ao se mover (sim) ou ficam ancorados na sala (nao)",
+            "Deverrouiller le sol => Desbloquear o chao",
+            "verrouille => bloqueado",
+            "Lissage des bords (net, sans flou) => Suavizacao de bordas (nitido, sem desfoque)",
+            "MSAA materiel : bords nets, s'applique tout de suite. x4 conseille ; x8 seulement si le GPU suit. => MSAA por hardware: bordas nitidas, aplica na hora. x4 recomendado; x8 so se a GPU aguentar.",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

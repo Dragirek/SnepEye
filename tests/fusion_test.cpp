@@ -70,6 +70,24 @@ int main() {
     assert(std::abs(r1 - r2) < 1e-9 && std::abs(p1 - p2) < 1e-9 && std::abs(y1 - y2) < 1e-9);
   }
 
+  // 7) correction douce de l'inclinaison : un monde penche de 5 deg revient droit, sans toucher au cap
+  {
+    Vec3 upTrue = {0.02, -0.99, 0.10};   // le vrai "haut" dans V
+    Mat3 Gt = GravityAlign(upTrue);
+    Mat3 G = Gt * ExpMap({0.0873, 0.0, 0.0});   // penche de ~5 deg
+    double e0 = std::acos(std::min(1.0, G.m[2][0] * upTrue.x / Norm(upTrue) + G.m[2][1] * upTrue.y / Norm(upTrue) + G.m[2][2] * upTrue.z / Norm(upTrue)));
+    for (int i = 0; i < 900; i++) G = GravityRefine(G, upTrue, 0.03);   // 900 images (~15 s a 60 i/s)
+    Vec3 zr = G * (upTrue * (1.0 / Norm(upTrue)));
+    double e1 = std::acos(std::min(1.0, zr.z));
+    std::printf("inclinaison du monde : %.2f deg -> %.3f deg\n", e0 * 57.2958, e1 * 57.2958);
+    assert(e0 > 0.05 && e1 < 0.002);
+    // le cap (direction de l'axe X du monde, vu de dessus) ne tourne presque pas
+    Vec3 fwd0 = Gt.T() * Vec3{1, 0, 0}, fwd1 = G.T() * Vec3{1, 0, 0};
+    assert(Dot(fwd0, fwd1) > 0.99);
+    // deja droit : rien ne bouge
+    Mat3 G2 = GravityRefine(Gt, upTrue, 0.03);
+    assert(Err(G2, Gt) < 1e-9);
+  }
   std::puts("TOUS LES TESTS DE FUSION OK");
   return 0;
 }

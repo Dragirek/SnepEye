@@ -12,6 +12,10 @@ namespace AR6DoF
     public static class Ar6dofPerf
     {
         public static readonly string[] FpsNames = { "Ecran (auto)", "60", "90", "120", "Illimite" };
+        public static readonly string[] AaNames = { "Aucun", "x2", "x4", "x8" };
+
+        /// <summary>Nombre d'echantillons MSAA du reglage de lissage (1, 2, 4 ou 8).</summary>
+        public static int AaSamples { get { int i = Mathf.Clamp(Ar6dofSettings.Current.perfAa, 0, 3); return i == 0 ? 1 : (1 << i); } }
 
         static bool hooked;
         static float fpsSmooth = 60f;

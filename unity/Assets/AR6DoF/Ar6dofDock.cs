@@ -193,6 +193,26 @@ namespace AR6DoF
             if (appsApp != null && appsApp.open) appsApp.Tick();
             if (notifApp != null) notifApp.DockTick();
             if (info != null && canvas != null && canvas.enabled) info.Tick();
+            FollowMenusTick();
+        }
+
+        // « Suivi actif » : tous les menus ouverts te suivent (reglage Appareils > Tete, ou bouton Suivi de la barre rapide) ; coupe = ancres dans la piece
+        Ar6dofMenuFollow menuFollow;
+        readonly List<Canvas> followList = new List<Canvas>();
+        void FollowMenusTick()
+        {
+            if (!Ar6dofSettings.Current.menusFollow) { if (menuFollow != null) menuFollow.Reset(); return; }
+            if (menuFollow == null) menuFollow = new Ar6dofMenuFollow();
+            followList.Clear();
+            foreach (var a in ExtraApps())
+            {
+                if (!a.open || a == kbApp || a == notifApp || animating.Contains(a)) continue;
+                Canvas c = null;
+                var ca = a as CanvasApp; var dm = a as DeviceMenu; var aw = a as Ar6dofAppWindow;
+                if (ca != null) c = ca.canvas; else if (dm != null) c = dm.canvas; else if (aw != null) c = aw.canvas;
+                if (c != null && c.gameObject.activeInHierarchy) followList.Add(c);
+            }
+            menuFollow.Tick(Head, followList, Time.unscaledDeltaTime);
         }
 
         const float BarHeight = 200f;
@@ -246,7 +266,7 @@ namespace AR6DoF
             group.blocksRaycasts = on;
             group.interactable = on;
             canvas.enabled = reveal > 0.003f;
-            if (followLbl != null && kbMenu != null) followLbl.text = Ar6dofLoc.T(kbMenu.follow ? "Suivi : OUI" : "Suivi : NON");
+            if (followLbl != null) followLbl.text = Ar6dofLoc.T(Ar6dofSettings.Current.menusFollow ? "Suivi : OUI" : "Suivi : NON");
             if (seatLbl != null) seatLbl.text = Ar6dofLoc.T(Ar6dofSettings.Current.seated ? "Assis : OUI" : "Assis : NON");
             if (viewLbl != null && camHub != null) viewLbl.text = camHub.ViewLabel();
         }
@@ -286,6 +306,7 @@ namespace AR6DoF
             if (!built || canvas == null) return;
             var d = Ar6dofSettings.Current;
             if (Ar6dofDockInfo.Signature(d) != infoSig) RebuildIcons();   // heure, date ou batterie : le bandeau change
+            if (kbMenu != null) kbMenu.follow = d.menusFollow;
             if (d.dockAtFeet != lastFeetMode) { lastFeetMode = d.dockAtFeet; feetInit = false; Place(); }
             else if (d.dockAtFeet) { feetInit = false; FollowFeet(true); }
             else canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
@@ -598,11 +619,14 @@ namespace AR6DoF
             x += bw + gap;
             var b4 = Ar6dofVrUi.MakeButton(iconsRoot, "Suivi : NON", new Vector2(x, y), new Vector2(bw, bh), () =>
             {
-                if (kbMenu != null) kbMenu.follow = !kbMenu.follow;
+                var sd = Ar6dofSettings.Current;
+                sd.menusFollow = !sd.menusFollow;
+                Ar6dofSettings.SaveFields(new[] { "menusFollow" });
+                if (kbMenu != null) kbMenu.follow = sd.menusFollow;
                 ApplyReveal();
             }, out lbl, 22);
             followLbl = lbl;
-            Tip(b4, "Le clavier te suit quand tu t'eloignes (oui / non)");
+            Tip(b4, "Suivi actif : les menus et le clavier te suivent quand tu te deplaces (oui) ou restent ancres dans la piece (non)");
             x += bw + gap;
             var b5 = Ar6dofVrUi.MakeButton(iconsRoot, "Assis : NON", new Vector2(x, y), new Vector2(bw, bh), ToggleSeated, out lbl, 22);
             seatLbl = lbl;
@@ -635,6 +659,9 @@ namespace AR6DoF
             BringMenus();
             ApplyReveal();
         }
+
+        /// <summary>Ramene les menus ouverts devant toi (cap remis a zero, bouton « Menus ici »).</summary>
+        public void BringMenusHere() { BringMenus(); }
 
         void BringMenus()
         {

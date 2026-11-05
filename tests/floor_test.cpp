@@ -55,6 +55,59 @@ int main() {
     }
     assert(ff.Valid() && std::abs(ff.Z() + 1.62) < 0.03);
   }
+  // 6) carte accumulee : le sol n'est vu que pendant 4 estimations (tete baissee), les autres images ne montrent que des murs
+  {
+    FloorMap fm;
+    FloorEstimate e;
+    int firstOk = -1;
+    for (int it = 0; it < 80; it++) {
+      std::vector<double> z;
+      if (it >= 20 && it < 24)   // regard vers le bas : 14 points de sol a -1.60 m (peu), et des meubles
+      {
+        for (int i = 0; i < 14; i++) z.push_back(-1.60 + (Rnd() - 0.5) * 0.05);
+        for (int i = 0; i < 12; i++) z.push_back(-1.0 + Rnd() * 0.5);
+      }
+      else
+        for (int i = 0; i < 40; i++) z.push_back(-0.35 + Rnd() * 1.8);   // des murs, des etageres : jamais assez bas
+      e = fm.Update(z, 0.0);
+      if (e.ok && firstOk < 0) firstOk = it;
+    }
+    std::printf("carte accumulee : sol=%.3f (vrai -1.600) trouve a l'estimation %d ok=%d\n", e.z, firstOk, (int)e.ok);
+    assert(e.ok && std::abs(e.z + 1.60) < 0.05 && firstOk >= 20 && firstOk < 30);
+    // la meme scene avec l'ancienne methode (une seule image) ne trouve rien
+    std::vector<double> z;
+    for (int i = 0; i < 14; i++) z.push_back(-1.60 + (Rnd() - 0.5) * 0.05);
+    for (int i = 0; i < 12; i++) z.push_back(-1.0 + Rnd() * 0.5);
+    assert(!EstimateFloor(z, 0.0).ok);
+  }
+  // 7) la table a 0.7 m sous la tete ne devient jamais le sol, meme accumulee
+  {
+    FloorMap fm;
+    FloorEstimate e;
+    for (int it = 0; it < 60; it++) {
+      std::vector<double> z;
+      for (int i = 0; i < 50; i++) z.push_back(-0.7 + (Rnd() - 0.5) * 0.04);
+      e = fm.Update(z, 0.0);
+    }
+    assert(!e.ok);
+  }
+  // 8) une fois le sol trouve, il est garde quand la tete descend (accroupi : 0.5 m au-dessus du sol)
+  {
+    FloorMap fm;
+    FloorEstimate e;
+    for (int it = 0; it < 30; it++) {
+      std::vector<double> z;
+      for (int i = 0; i < 40; i++) z.push_back(-1.62 + (Rnd() - 0.5) * 0.05);
+      e = fm.Update(z, 0.0);
+    }
+    assert(e.ok);
+    for (int it = 0; it < 10; it++) {
+      std::vector<double> z;
+      for (int i = 0; i < 40; i++) z.push_back(-1.62 + (Rnd() - 0.5) * 0.05); // les points ne bougent pas dans G ; c'est la tete qui descend de 1.1 m
+      e = fm.Update(z, -1.1);
+    }
+    assert(e.ok && std::abs(e.z + 1.62) < 0.06);
+  }
   std::puts("TOUS LES TESTS DU SOL OK");
   return 0;
 }

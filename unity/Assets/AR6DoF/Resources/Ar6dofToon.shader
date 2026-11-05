@@ -40,22 +40,35 @@ Shader "AR6DoF/Toon"
             {
                 if (_ClipHalf.z > 0.5)
                 {
+                    // coupe au cadre bleu, coins arrondis compris (meme rayon que le ciel) ; la profondeur reste libre
                     float3 q = mul(_ClipM, float4(i.wpos, 1.0)).xyz;
-                    clip(float2(_ClipHalf.x - abs(q.x), _ClipHalf.y - abs(q.y)));
+                    float2 dd = max(abs(q.xy) - (_ClipHalf.xy - _ClipHalf.w), 0.0);
+                    clip(_ClipHalf.w - length(dd));
                 }
                 float3 n = normalize(i.n);
                 float3 v = normalize(_WorldSpaceCameraPos - i.wpos);
                 float3 l = normalize(_Light.xyz);
                 float d = dot(n, l);
+                // les trois tons ont des transitions de ~1 pixel (derivees) : plus de marches d'escalier sur les bords des aplats
+                float w = max(fwidth(d) * 1.2, 0.015);
+                float tHi = smoothstep(0.35 - w, 0.35 + w, d);
+                float tMid = smoothstep(-0.25 - w, -0.25 + w, d);
                 float3 mid = lerp(_Shade.rgb, _Color.rgb, 0.55);
-                float3 col = d > 0.35 ? _Color.rgb : (d > -0.25 ? mid : _Shade.rgb);
+                float3 col = lerp(_Shade.rgb, lerp(mid, _Color.rgb, tHi), tMid);
                 // petit reflet franc
-                col += step(0.975, saturate(dot(normalize(l + v), n))) * 0.22;
+                float sp = dot(normalize(l + v), n);
+                float ws = max(fwidth(sp) * 1.2, 0.004);
+                col += smoothstep(0.975 - ws, 0.975 + ws, sp) * 0.22;
                 // émission : aplat lumineux (soleil, étoiles, gouttes)
                 col = lerp(col, _Color.rgb * 1.08, _Emit);
-                // liseré sombre sur les bords
-                float edge = step(saturate(dot(n, v)), _Outline * 0.5);
-                col = lerp(col, lerp(_OutlineColor.rgb, _Color.rgb * 0.62, _Emit), edge);
+                // liseré : fin, lisse (anticrenelé) et de la couleur de l'objet en plus fonce, pas noir pur
+                float nv = saturate(dot(n, v));
+                float th = _Outline * 0.38;
+                float wv = max(fwidth(nv) * 1.4, 0.012);
+                float edge = 1.0 - smoothstep(th - wv, th + wv, nv);
+                float3 oc = lerp(_OutlineColor.rgb, _Color.rgb * 0.42, 0.65);
+                oc = lerp(oc, _Color.rgb * 0.62, _Emit);
+                col = lerp(col, oc, edge);
                 return float4(saturate(col), 1.0);
             }
             ENDCG

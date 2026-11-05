@@ -105,3 +105,20 @@ inline void MatToEuler(const Mat3& R, double& roll, double& pitch, double& yaw) 
   pitch = std::asin(std::max(-1.0, std::min(1.0, -R.m[2][0])));
   yaw = std::atan2(R.m[1][0], R.m[0][0]);
 }
+
+// Corrige doucement l'INCLINAISON du monde G. up_V = direction du "haut" mesuree par l'IMU, exprimee dans V (= Rvc * Rcb * haut_casque).
+// Si le suivi visuel derive en roulis / tangage, le "haut" mesure s'ecarte de l'axe Z de G : on le ramene d'une fraction 'alpha' de l'ecart
+// (au plus 'maxStepRad' par appel). Rotation minimale (axe horizontal) : le cap n'est pas touche.
+inline Mat3 GravityRefine(const Mat3& R_GV, const Vec3& up_V, double alpha, double maxStepRad = 0.01) {
+  double n = Norm(up_V);
+  if (n < 1e-9) return R_GV;
+  Vec3 zt = up_V * (1.0 / n);
+  Vec3 z0 = {R_GV.m[2][0], R_GV.m[2][1], R_GV.m[2][2]};
+  Vec3 ax = Cross(z0, zt);
+  double s = Norm(ax), c = Dot(z0, zt);
+  double ang = std::atan2(s, c);
+  if (s < 1e-12 || ang < 1e-7) return R_GV;
+  double step = std::min(maxStepRad, ang * alpha);
+  Mat3 P = ExpMap(ax * (step / s));   // tourne z0 vers zt
+  return R_GV * P.T();
+}

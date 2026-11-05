@@ -72,6 +72,7 @@ namespace AR6DoF
         readonly List<Button> chromeStyleButtons = new List<Button>();
         readonly List<Button> chromeCornerButtons = new List<Button>();
         readonly List<Button> fpsBtns = new List<Button>();
+        readonly List<Button> aaBtns = new List<Button>();
         RectTransform separateBox;
         readonly List<Button> kbLayoutBtns = new List<Button>();
         readonly List<Button> kbModeBtns = new List<Button>();
@@ -593,11 +594,11 @@ namespace AR6DoF
         static readonly string[] LookFields = { "global", "dock", "menus", "keyboard", "screens", "laser", "customStyles" };
         static readonly string[] ChromeFields = { "chromeStyle", "chromeCorner", "chromeScale" };
         static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
-        static readonly string[] HeadFields = { "moveScale" };
+        static readonly string[] HeadFields = { "moveScale", "eyeHeightCm", "eyeHeightSeatedCm", "menusFollow" };
         static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
         static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
-        static readonly string[] PerfFields = { "perfFps", "perfMsaa", "perfRenderScale" };
+        static readonly string[] PerfFields = { "perfFps", "perfAa", "perfRenderScale" };
         static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite" };
         static readonly string[] OpticsImgFields = { "left", "right", "linkEyes", "swapEyes", "layout", "centerOnImage" };
 
@@ -957,6 +958,14 @@ namespace AR6DoF
         Vector3 scaleStart;
         Text scaleBtnText;
 
+        Text lockFloorText;
+        void UpdateLockBtn()
+        {
+            if (lockFloorText == null) return;
+            bool on = dock.rig != null && dock.rig.FloorLocked;
+            lockFloorText.text = Ar6dofLoc.T(on ? "Deverrouiller le sol" : "Verrouiller le sol");
+        }
+
         void UpdateScaleBtn()
         {
             if (scaleBtnText == null) return;
@@ -1024,15 +1033,33 @@ namespace AR6DoF
             {
                 var rig = dock.rig;
                 if (rig == null || !rig.HasPose) return "";
-                return Ar6dofLoc.F("Sol : {0}   -   hauteur des yeux : {1} cm", Ar6dofLoc.T(rig.FloorDetected ? "detecte" : "estime"), Mathf.RoundToInt(rig.HeadHeight * 100f));
+                string src = rig.FloorMode == 2 ? "verrouille" : (rig.FloorDetected ? "detecte" : "estime");
+                return Ar6dofLoc.F("Sol : {0}   -   hauteur des yeux : {1} cm", Ar6dofLoc.T(src), Mathf.RoundToInt(rig.HeadHeight * 100f));
             });
             if (dock.launcher != null)
             {
                 float y = Next(ref c, 48f, 12f);
-                Btn(page, Col3(0), y, 208f, "Redemarrer le suivi", () => dock.launcher.Send('T'), 18);
-                Btn(page, Col3(1), y, 208f, "Verrouiller le sol", () => dock.launcher.Send('V'), 18);
-                Btn(page, Col3(2), y, 208f, "Remettre le cap a zero", () => dock.launcher.Send('Z'), 18);
+                Btn(page, Col3(0), y, 208f, "Redemarrer le suivi", () => { dock.launcher.Send('T'); if (dock.rig != null) dock.rig.ResetWorld(); }, 18);
+                // le verrouillage se fait AUSSI dans Unity : y = 0 reste exactement ou il est (avant, seul le calcul de la sonde etait fige, donc rien ne se voyait)
+                lockFloorText = ButtonText(page, Col3(1), y, 208f, "Verrouiller le sol", () =>
+                {
+                    if (dock.rig != null) dock.rig.ToggleFloorLock();
+                    dock.launcher.Send('V');
+                    UpdateLockBtn();
+                }, 18);
+                // le cap du monde est celui d'Unity (le « cap » de la sonde ne concerne que l'IMU) : on remet l'avant sur ton regard et on ramene les menus devant toi
+                Btn(page, Col3(2), y, 208f, "Remettre le cap a zero", () =>
+                {
+                    dock.launcher.Send('Z');
+                    if (dock.rig != null) dock.rig.RecenterYaw();
+                    dock.BringMenusHere();
+                }, 18);
+                refreshers.Add(UpdateLockBtn);
             }
+            StepRow(page, ref c, "Hauteur de tes yeux debout (cm)", 100f, 210f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.eyeHeightCm), v => { Ar6dofSettings.Current.eyeHeightCm = v; Touch(); }, "0");
+            StepRow(page, ref c, "Hauteur de tes yeux assis (cm)", 60f, 160f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.eyeHeightSeatedCm), v => { Ar6dofSettings.Current.eyeHeightSeatedCm = v; Touch(); }, "0");
+            ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "Sol ici : mes yeux sont a cette hauteur", () => { if (dock.rig != null && dock.rig.HasPose) dock.rig.SetFloorFromEyeHeight(); }, 20);
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Suivi actif : les menus me suivent (non = ancres dans la piece)", () => Ar6dofSettings.Current.menusFollow, v => { Ar6dofSettings.Current.menusFollow = v; Touch(); }, 600f);
             // échelle des déplacements : si les menus "reculent" quand tu avances, le suivi sous-estime tes pas ; on la mesure avec un pas connu
             StepRow(page, ref c, "Echelle des deplacements (%, 100 = exact)", 40f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.moveScale * 100f), v => { Ar6dofSettings.Current.moveScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Distance que tu vas parcourir (cm)", 30f, 300f, 1f, 10f, 50f, () => scaleDistCm, v => { scaleDistCm = Mathf.Round(v); UpdateScaleBtn(); }, "0");
@@ -1090,7 +1117,15 @@ namespace AR6DoF
             }
             refreshers.Add(() => { for (int i = 0; i < fpsBtns.Count; i++) Ar6dofTheme.SetSelected(fpsBtns[i], Ar6dofSettings.Current.perfFps == i); });
             InfoLine(page, Next(ref c, 28f, 12f), PgPerf, () => Ar6dofLoc.F("Images par seconde actuelles : {0}", Ar6dofPerf.Fps));
-            Toggle(page, 0f, Next(ref c, 48f, 12f), "Lissage des bords (MSAA x2) : plus beau, plus lourd", () => Ar6dofSettings.Current.perfMsaa > 1, v => { Ar6dofSettings.Current.perfMsaa = v ? 2 : 1; Touch(); }, 640f);
+            Ar6dofVrUi.Label(page, "Lissage des bords (net, sans flou)", new Vector2(0f, Next(ref c, 28f, 8f)), new Vector2(CW, 28f), 20, TextAnchor.MiddleLeft);
+            float ay = Next(ref c, 46f, 6f);
+            for (int i = 0; i < Ar6dofPerf.AaNames.Length; i++)
+            {
+                int ai = i;
+                aaBtns.Add(Btn(page, -259f + 172.67f * i, ay, 166f, Ar6dofPerf.AaNames[i], () => { Ar6dofSettings.Current.perfAa = ai; Touch(); }, 18, 46f));
+            }
+            refreshers.Add(() => { for (int i = 0; i < aaBtns.Count; i++) Ar6dofTheme.SetSelected(aaBtns[i], Ar6dofSettings.Current.perfAa == i); });
+            Ar6dofVrUi.Label(page, "MSAA materiel : bords nets, s'applique tout de suite. x4 conseille ; x8 seulement si le GPU suit.", new Vector2(0f, Next(ref c, 44f, 12f)), new Vector2(CW, 44f), 16, TextAnchor.UpperLeft);
             StepRow(page, ref c, "Resolution de l'interface (%, au prochain lancement)", 50f, 100f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.perfRenderScale * 100f), v => { Ar6dofSettings.Current.perfRenderScale = v / 100f; Touch(); }, "0");
             CloseCard(page, top, ref c);
 

@@ -38,7 +38,8 @@ Shader "AR6DoF/Mist"
                 if (_ClipHalf.z > 0.5)
                 {
                     float3 q = mul(_ClipM, float4(i.wpos, 1.0)).xyz;
-                    clip(float2(_ClipHalf.x - abs(q.x), _ClipHalf.y - abs(q.y)));
+                    float2 dd = max(abs(q.xy) - (_ClipHalf.xy - _ClipHalf.w), 0.0);
+                    clip(_ClipHalf.w - length(dd));
                 }
                 float3 n = normalize(i.n);
                 float3 v = normalize(_WorldSpaceCameraPos - i.wpos);

@@ -21,7 +21,7 @@ namespace AR6DoF
         /// <summary>0..1 : éclair en cours (la fenêtre éclaircit le ciel).</summary>
         public float Flash { get; private set; }
 
-        class Toon { public Material m; public Color c, shade; public float emit; public bool cloud, fog; public float snowK; }   // snowK : 0 = ne blanchit jamais, 1 = tout blanc sous la neige
+        class Toon { public Material m; public Color c, shade; public float emit; public bool cloud, fog, noPaint; public float snowK; }   // snowK : 0 = ne blanchit jamais, 1 = tout blanc sous la neige
         class Cloud { public Transform t; public float x, y, z, size, now, rate, row; }   // row : de combien le nuage est sous le haut du cadre
         class Drop { public Transform t; public float x, y, z, v, ph; }
         class SnowCap { public Transform t; public Vector3 baseScale; }
@@ -44,6 +44,8 @@ namespace AR6DoF
         Shader shader, mistShader;
         Transform rig, world, island, sun, sunRays, moon, bolt, hub, treeA, treeB, canopyA, canopyB, blanket;
         Transform[] boltSeg = new Transform[4];
+        Toon tMoon, tCrater;
+        float moonPhase = 0.5f; bool moonNorth = true;   // phase : 0 nouvelle lune, 0,5 pleine lune, 1 nouvelle lune
         Toon tCloud, tCloud2, tMist, tLeaves, tRain, tSnow, tHail, tCap, tWind;
         // cadre : le haut du cadre (en unites de la scene) place les nuages, et tout ce qui sort du cadre en largeur / hauteur est coupe (la profondeur reste libre)
         float topY = 1.93f, skyShift = 0.22f, cloudShift;
@@ -315,8 +317,11 @@ namespace AR6DoF
             }
 
             // --- lune + étoiles
-            var tMoon = Mat(new Color(0.96f, 0.95f, 0.84f), 0.7f, 0.24f);
-            var tCrater = Mat(new Color(0.78f, 0.78f, 0.70f), 0.5f, 0.1f);
+            // lune : peu d'emission pour que la lumiere dessine la phase ; la face dans l'ombre reste d'un bleu nuit
+            tMoon = Mat(new Color(0.97f, 0.96f, 0.86f), 0.12f, 0.16f); tMoon.noPaint = true;
+            tMoon.m.SetColor("_Shade", new Color(0.13f, 0.15f, 0.27f, 1f));
+            tCrater = Mat(new Color(0.80f, 0.80f, 0.72f), 0.1f, 0.05f); tCrater.noPaint = true;
+            tCrater.m.SetColor("_Shade", new Color(0.11f, 0.13f, 0.24f, 1f));
             moon = Group(world, "Lune", new Vector3(1.30f, 0.98f, 0.9f));
             Part(moon, sphere, tMoon, Vector3.zero, new Vector3(0.62f, 0.62f, 0.62f));
             Part(moon, sphere, tCrater, new Vector3(-0.10f, 0.08f, -0.27f), new Vector3(0.16f, 0.16f, 0.06f));
@@ -422,17 +427,31 @@ namespace AR6DoF
         /// Dit a la scene ou est son cadre : 'stage' (centre = centre du cadre), sa taille en pixels, le haut du cadre en unites de la scene ('top', pour placer les nuages) et
         /// de combien monter soleil, lune et etoiles ('skyLift') pour qu'ils restent a la meme hauteur dans le cadre quand l'ile descend. Tout ce qui sort du cadre est coupe.
         /// </summary>
-        public void SetStage(RectTransform stage, Vector2 size, float top, float skyLift)
+        public void SetStage(RectTransform stage, Vector2 size, float top, float skyLift, float corner)
         {
             clipRt = stage; topY = top; skyShift = skyLift;
             for (int i = 0; i < StarN; i++) if (stars[i] != null) stars[i].localPosition = new Vector3(stars[i].localPosition.x, starY[i] + skyShift, stars[i].localPosition.z);
-            for (int i = 0; i < toons.Count; i++) toons[i].m.SetVector("_ClipHalf", new Vector4(size.x * 0.5f, size.y * 0.5f, 1f, 0f));
+            for (int i = 0; i < toons.Count; i++) toons[i].m.SetVector("_ClipHalf", new Vector4(size.x * 0.5f, size.y * 0.5f, 1f, corner));
             UpdateClip(true);
             dirty = true;
         }
 
         /// <summary>Monte (+) ou descend (-) les nuages et, avec eux, l'endroit d'ou tombent pluie, neige et eclairs (en unites de la scene).</summary>
         public void SetCloudShift(float v) { cloudShift = v; }
+
+        /// <summary>Phase de la lune : 0 nouvelle lune, 0,25 premier quartier, 0,5 pleine lune, 0,75 dernier quartier. 'north' faux : hemisphere sud (la lune est vue a l'envers : le cote eclaire est inverse).</summary>
+        public void SetMoonPhase(float phase, bool north) { moonPhase = Mathf.Repeat(phase, 1f); moonNorth = north; }
+
+        /// <summary>Phase lunaire a une date (UTC) : jours depuis la nouvelle lune du 6 janvier 2000 a 18:14 UTC, modulo le mois synodique (29,530589 jours).</summary>
+        public static float MoonPhaseAt(System.DateTime utc)
+        {
+            double days = (utc - new System.DateTime(2000, 1, 6, 18, 14, 0, System.DateTimeKind.Utc)).TotalDays;
+            double p = days / 29.530588853;
+            return (float)(p - System.Math.Floor(p));
+        }
+
+        /// <summary>Part du disque eclairee (0..1) pour une phase : sert a cacher la lune quand elle est « nouvelle ».</summary>
+        public static float MoonIllumination(float phase) { return 0.5f * (1f - Mathf.Cos(phase * 2f * Mathf.PI)); }
 
         void UpdateClip(bool force)
         {
@@ -549,7 +568,7 @@ namespace AR6DoF
                     t.m.SetFloat("_Alpha", 0.30f * Mathf.Clamp01(fogAmt));
                     continue;
                 }
-                if (t.emit >= 0.5f) continue;
+                if (t.emit >= 0.5f || t.noPaint) continue;
                 Color c = t.c, s = t.shade;
                 if (t.cloud) { c = Color.Lerp(c, cDark, dark); s = Color.Lerp(s, sDark, dark); }
                 else
@@ -645,6 +664,13 @@ namespace AR6DoF
             Vector3 ld = Vector3.Lerp(new Vector3(0.30f, 0.70f, -0.60f), new Vector3(-0.40f, 0.80f, -0.55f), dayMix);
             Vector4 lw = transform.TransformDirection(ld.normalized);
             for (int i = 0; i < toons.Count; i++) toons[i].m.SetVector("_Light", lw);
+            // la lune est eclairee depuis la direction du soleil de la phase : pleine = de face, croissant = de cote, nouvelle = de dos
+            {
+                float th = moonPhase * 2f * Mathf.PI;
+                Vector3 ml = new Vector3((moonNorth ? 1f : -1f) * Mathf.Sin(th), 0.12f, Mathf.Cos(th));
+                Vector4 mw = moon.TransformDirection(ml.normalized);
+                tMoon.m.SetVector("_Light", mw); tCrater.m.SetVector("_Light", mw);
+            }
 
             // plateau : légère inclinaison vers toi + balancement lent
             rig.localRotation = Quaternion.Euler(-14f, Mathf.Sin(time * 0.35f) * 6f, 0f);
@@ -670,8 +696,9 @@ namespace AR6DoF
             sun.localScale = Vector3.one * sunScale * 0.85f * (1f + 0.03f * Mathf.Sin(time * 2f));
             sun.gameObject.SetActive(sunScale > 0.01f);
             if (sunScale > 0.01f) sunRays.localRotation = Quaternion.Euler(0f, 0f, time * 18f);
-            moon.localScale = Vector3.one * moonScale * 0.9f;
-            moon.gameObject.SetActive(moonScale > 0.01f);
+            float moonShown = moonScale * Mathf.Clamp01((MoonIllumination(moonPhase) - 0.01f) / 0.04f);   // nouvelle lune : on ne la voit pas
+            moon.localScale = Vector3.one * moonShown * 0.9f;
+            moon.gameObject.SetActive(moonShown > 0.01f);
             for (int i = 0; i < StarN; i++)
             {
                 bool on = starAmt > 0.01f;
