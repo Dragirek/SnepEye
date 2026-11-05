@@ -99,8 +99,8 @@ Puis : **supprime la Main Camera**, et ajoute `Ar6dofComposite.shader`, `Ar6dofS
 - **Canvas** : inutile. Il n'y a aucun Canvas à créer : tous les menus (barre de tâches, réglages, clavier, appareils Bluetooth, étalonnage des yeux) sont fabriqués par le code en « World Space » et branchés au laser tout seuls. Un Canvas de ton ancien montage ne sert à rien : supprime-le.
 - **EventSystem** : créé automatiquement par le pointeur. Supprime le tien (ou garde-le, ça ne gêne pas).
 - **Main Camera** : supprime-la. Le passthrough crée une caméra par oeil.
-- **Ar6dofFloatingMenu, Ar6dofStereoRig, Ar6dofScreenPanel, Ar6dofBle, Ar6dofDeviceMenus, Ar6dofEyeTracker, Ar6dofEyeCalibration** : ajoutés automatiquement quand il le faut (ou obsolètes). Ne les ajoute pas.
-- `Ar6dofWindowPanel.cs` et `Ar6dofWidgetMenus.cs` sont des fichiers vides d'anciennes versions : tu peux les supprimer. Idem pour toute copie « ...1.cs » ou « ... (1).cs » (erreur *already contains a definition*).
+- **Ar6dofFloatingMenu, Ar6dofScreenPanel, Ar6dofBle, Ar6dofDeviceMenus, Ar6dofEyeTracker, Ar6dofEyeCalibration** : ajoutés automatiquement quand il le faut (ou obsolètes). Ne les ajoute pas.
+- Fichiers d'anciennes versions, supprimés du dépôt : `Ar6dofWindowPanel.cs`, `Ar6dofWidgetMenus.cs`, `Ar6dofStore.cs`, `Ar6dofCalibApp.cs`, `Ar6dofCalibWidgets.cs` et `Ar6dofStereoRig.cs`. S'il en reste dans ton projet Unity, supprime-les avec leur `.meta` (la calibration de la caméra se fait maintenant dans `ar6dof_app.exe`). Idem pour toute copie « ...1.cs » ou « ... (1).cs » (erreur *already contains a definition*).
 - **uWindowCapture** : plus utilisé, supprime-le.
 
 ---
