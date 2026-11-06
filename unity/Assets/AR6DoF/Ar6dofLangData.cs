@@ -1218,6 +1218,10 @@ namespace AR6DoF
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Mode zoom not measured yet: move your head for a few seconds so the IMU can measure it",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Camera mode {0} x {1} at {2} fps, different from the calibration ({3} x {4}): adapted automatically (mode zoom x{5})",
             "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Scale set to {0} (tracking saw {1} cm, Unity camera {2} cm)",
+            "Test d'ancrage du menu : depart => Menu anchor test: start",
+            "Test d'ancrage : arrivee (j'ai bouge) => Anchor test: end (I moved)",
+            "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Start noted: move about 50 cm, then click at the end",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Anchor test: tracking {0} cm, Unity camera {1} cm, MENU {2} cm (must be 0), menu rotation {3} deg",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2426,6 +2430,10 @@ namespace AR6DoF
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Zoom del modo aun sin medir: mueve la cabeza unos segundos para que la IMU lo mida",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Modo de camara {0} x {1} a {2} fps, distinto de la calibracion ({3} x {4}): adaptado automaticamente (zoom del modo x{5})",
             "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Escala ajustada a {0} (el seguimiento veia {1} cm, la camara de Unity {2} cm)",
+            "Test d'ancrage du menu : depart => Prueba de anclaje del menu: inicio",
+            "Test d'ancrage : arrivee (j'ai bouge) => Prueba de anclaje: fin (me movi)",
+            "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Inicio anotado: muevete unos 50 cm y pulsa al final",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Prueba de anclaje: seguimiento {0} cm, camara de Unity {1} cm, MENU {2} cm (debe ser 0), rotacion del menu {3} grados",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -3641,6 +3649,10 @@ namespace AR6DoF
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Modus-Zoom noch nicht gemessen: Beweg den Kopf ein paar Sekunden, damit die IMU ihn misst",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Kameramodus {0} x {1} mit {2} B/s, anders als die Kalibrierung ({3} x {4}): automatisch angepasst (Modus-Zoom x{5})",
             "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Skala auf {0} gestellt (Tracking sah {1} cm, Unity-Kamera {2} cm)",
+            "Test d'ancrage du menu : depart => Menue-Verankerungstest: Start",
+            "Test d'ancrage : arrivee (j'ai bouge) => Verankerungstest: Ende (ich habe mich bewegt)",
+            "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Start notiert: beweg dich etwa 50 cm, dann am Ende klicken",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Verankerungstest: Tracking {0} cm, Unity-Kamera {1} cm, MENUE {2} cm (muss 0 sein), Menuerotation {3} Grad",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -4856,6 +4868,10 @@ namespace AR6DoF
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Zoom della modalita non ancora misurato: muovi la testa per qualche secondo cosi l'IMU lo misura",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Modalita camera {0} x {1} a {2} fps, diversa dalla calibrazione ({3} x {4}): adattata automaticamente (zoom della modalita x{5})",
             "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Scala impostata a {0} (il tracking vedeva {1} cm, camera di Unity {2} cm)",
+            "Test d'ancrage du menu : depart => Test di ancoraggio del menu: partenza",
+            "Test d'ancrage : arrivee (j'ai bouge) => Test di ancoraggio: arrivo (mi sono mosso)",
+            "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Partenza annotata: spostati di circa 50 cm, poi clicca all'arrivo",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Test di ancoraggio: tracking {0} cm, camera di Unity {1} cm, MENU {2} cm (deve essere 0), rotazione del menu {3} gradi",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -6070,6 +6086,10 @@ namespace AR6DoF
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Zoom do modo ainda nao medido: mexa a cabeca por alguns segundos para a IMU medir",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Modo da camera {0} x {1} a {2} fps, diferente da calibracao ({3} x {4}): adaptado automaticamente (zoom do modo x{5})",
             "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Escala ajustada para {0} (o rastreamento viu {1} cm, camera do Unity {2} cm)",
+            "Test d'ancrage du menu : depart => Teste de ancoragem do menu: inicio",
+            "Test d'ancrage : arrivee (j'ai bouge) => Teste de ancoragem: chegada (me movi)",
+            "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Inicio anotado: mova-se cerca de 50 cm e clique no final",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Teste de ancoragem: rastreamento {0} cm, camera do Unity {1} cm, MENU {2} cm (deve ser 0), rotacao do menu {3} graus",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

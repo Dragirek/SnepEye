@@ -1011,6 +1011,48 @@ namespace AR6DoF
             scaleBtnText.text = scaleStep == 0 ? Ar6dofLoc.T("Mesurer l'echelle : point de depart") : Ar6dofLoc.F("Arrivee : j'ai avance de {0} cm", Mathf.RoundToInt(scaleDistCm));
         }
 
+        // test d'ancrage : ne change AUCUN reglage. Mesure ce que fait ce menu quand tu te deplaces : il doit rester a 0 cm (fixe dans la piece).
+        // Si le menu bouge alors que le suivi et la camera ont bouge de la bonne distance, quelque chose dans le code deplace le menu.
+        int anchorStep;
+        Vector3 anchorRaw, anchorCam, anchorMenu;
+        Quaternion anchorMenuRot;
+        Text anchorBtnText;
+
+        void UpdateAnchorBtn()
+        {
+            if (anchorBtnText == null) return;
+            anchorBtnText.text = Ar6dofLoc.T(anchorStep == 0 ? "Test d'ancrage du menu : depart" : "Test d'ancrage : arrivee (j'ai bouge)");
+        }
+
+        void AnchorTest()
+        {
+            var rig = dock.rig;
+            if (rig == null || !rig.HasPose || rig.ConnectionLost || canvas == null) { Say("Suivi indisponible"); return; }
+            Transform cam = dock.HeadTransform;
+            if (anchorStep == 0)
+            {
+                anchorRaw = rig.RawPosition;
+                anchorCam = cam != null ? cam.position : rig.CameraStep;
+                anchorMenu = canvas.transform.position;
+                anchorMenuRot = canvas.transform.rotation;
+                anchorStep = 1;
+                Say("Depart note : deplace-toi (50 cm), puis clique a l'arrivee");
+            }
+            else
+            {
+                Vector3 dr = rig.RawPosition - anchorRaw;
+                Vector3 dc = (cam != null ? cam.position : rig.CameraStep) - anchorCam;
+                Vector3 dm = canvas.transform.position - anchorMenu;
+                float rot = Quaternion.Angle(canvas.transform.rotation, anchorMenuRot);
+                anchorStep = 0;
+                statusMsg = Ar6dofLoc.F("Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg",
+                    Mathf.RoundToInt(dr.magnitude * 100f), Mathf.RoundToInt(dc.magnitude * 100f), Mathf.RoundToInt(dm.magnitude * 100f), Mathf.RoundToInt(rot));
+                statusUntil = Time.unscaledTime + 15f;
+                UpdateStatus();
+            }
+            UpdateAnchorBtn();
+        }
+
         void ScaleMeasure()
         {
             var rig = dock.rig;
@@ -1109,6 +1151,8 @@ namespace AR6DoF
             StepRow(page, ref c, "Distance que tu vas parcourir (cm)", 30f, 300f, 1f, 10f, 50f, () => scaleDistCm, v => { scaleDistCm = Mathf.Round(v); UpdateScaleBtn(); }, "0");
             scaleBtnText = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", ScaleMeasure, 20);
             refreshers.Add(UpdateScaleBtn);
+            anchorBtnText = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", AnchorTest, 20);
+            refreshers.Add(UpdateAnchorBtn);
             CloseCard(page, top, ref c);
 
             Finish(PgHead, c);
