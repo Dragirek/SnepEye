@@ -222,7 +222,9 @@ namespace AR6DoF
         {
             if (!hadLayout || canvas == null) return;
             var rt = (RectTransform)canvas.transform;
-            canvas.transform.position = bottomBefore + canvas.transform.up * (rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y));
+            var an = canvas.GetComponent<Ar6dofSizeAnim>();
+            if (an != null && an.enabled) an.KeepBottom(bottomBefore);    // la fenetre glisse : le bas reste en place pendant qu'elle grandit
+            else canvas.transform.position = bottomBefore + canvas.transform.up * (rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y));
         }
 
         int MusicSignature()

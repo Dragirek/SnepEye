@@ -33,8 +33,8 @@ namespace AR6DoF
             return font;
         }
 
-        /// <summary>Taille d'un pixel d'interface en mètres : 1 mm x 0,5 x le réglage général "Taille de l'interface" (100 % = fenêtres d'environ 40 cm).</summary>
-        public const float UnitScale = 0.0005f;
+        /// <summary>Taille d'un pixel d'interface en mètres : 1 mm x 0,375 x le réglage général "Taille de l'interface" (100 % = fenêtres d'environ 30 cm).</summary>
+        public const float UnitScale = 0.000375f;
         public static float BaseScale { get { return UnitScale * Mathf.Clamp(Ar6dofSettings.Current.uiScale, 0.4f, 3f); } }
 
         /// <summary>Annoncé quand la taille générale change : reçoit la nouvelle BaseScale.</summary>
@@ -59,7 +59,7 @@ namespace AR6DoF
             if (ev != null) ev(now);
         }
 
-        /// <summary>Canvas World Space de 'size' pixels ; 1 pixel = 0,5 mm x la taille générale. Pas encore actif dans la scène : à placer par l'appelant.
+        /// <summary>Canvas World Space de 'size' pixels ; 1 pixel = 0,375 mm x la taille générale. Pas encore actif dans la scène : à placer par l'appelant.
         /// scaled = faux : garde 1 pixel = 1 mm (étalonnage, où la géométrie est calculée en pixels). Le dock gère lui-même son échelle.</summary>
         public static Canvas NewCanvas(string name, Vector2 size, Ar6dofElem elem = Ar6dofElem.Menus, bool scaled = true)
         {
@@ -69,6 +69,7 @@ namespace AR6DoF
             c.renderMode = RenderMode.WorldSpace;
             go.AddComponent<GraphicRaycaster>();
             go.AddComponent<Ar6dofBackFace>();   // le dos du menu est vide (pas de texte a l'envers)
+            if (scaled && elem != Ar6dofElem.Dock) go.AddComponent<Ar6dofSizeAnim>();   // la fenetre change de taille en glissant, pas d'un coup
             var rt = (RectTransform)go.transform;
             rt.sizeDelta = size;
             rt.localScale = Vector3.one * (scaled ? BaseScale : 0.001f);
@@ -277,6 +278,43 @@ namespace AR6DoF
             t.fontSize = baseSize;
             float pw = t.preferredWidth;
             if (pw > avail) t.fontSize = Mathf.Max(minSize, Mathf.FloorToInt(baseSize * avail / pw));
+        }
+    }
+
+    /// <summary>
+    /// Quand le contenu d'une fenêtre change et que sa taille change avec (page suivante, liste qui s'allonge...), la fenêtre glisse vers sa nouvelle taille au lieu de sauter.
+    /// Le code qui règle la taille ne change pas : ce composant lit la taille demandée à chaque image et affiche une taille qui la rejoint en douceur (environ 0,2 s).
+    /// </summary>
+    public class Ar6dofSizeAnim : MonoBehaviour
+    {
+        RectTransform rt;
+        Vector2 shown, target;
+        bool have, keep;
+        Vector3 bottomWorld;
+
+        void Awake() { rt = (RectTransform)transform; }
+        void OnEnable() { have = false; keep = false; }
+
+        /// <summary>Une fenêtre qui grandit vers le haut (bas fixe) : la position suit la taille affichée jusqu'à l'arrivée.</summary>
+        public void KeepBottom(Vector3 worldBottom) { bottomWorld = worldBottom; keep = true; }
+
+        void LateUpdate()
+        {
+            Vector2 cur = rt.sizeDelta;
+            if (!have) { shown = target = cur; have = true; return; }
+            if ((cur - shown).sqrMagnitude > 1e-4f) target = cur;            // le code a demandé une nouvelle taille
+            if ((shown - target).sqrMagnitude > 1e-4f)
+            {
+                shown = Vector2.Lerp(shown, target, 1f - Mathf.Exp(-14f * Time.unscaledDeltaTime));
+                if ((shown - target).sqrMagnitude < 0.25f) shown = target;
+            }
+            else shown = target;
+            if ((rt.sizeDelta - shown).sqrMagnitude > 1e-4f) rt.sizeDelta = shown;
+            if (keep)
+            {
+                transform.position = bottomWorld + transform.up * (shown.y * Mathf.Abs(rt.lossyScale.y));
+                if (shown == target) keep = false;
+            }
         }
     }
 }

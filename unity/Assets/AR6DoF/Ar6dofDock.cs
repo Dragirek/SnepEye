@@ -223,7 +223,6 @@ namespace AR6DoF
             Transform h = Head;
             if (h == null) return;
             var d = Ar6dofSettings.Current;
-            if (!d.dockAtFeet) { reveal = 1f; ApplyReveal(); return; }
             if (rig != null && !rig.HasPose)   // pas de suivi : on ne sait pas ou sont tes pieds, le dock reste visible devant toi
             {
                 reveal = 1f;
@@ -232,7 +231,7 @@ namespace AR6DoF
                 return;
             }
 
-            // inclinaison de la tête vers le bas (degrés) : le dock apparaît entre dockRevealStart et dockRevealFull
+            // inclinaison de la tête vers le bas (degrés) : le dock commence à apparaître à dockRevealStart et est plein quelques degrés plus bas
             float pitch = Mathf.Asin(Mathf.Clamp(-h.forward.y, -1f, 1f)) * Mathf.Rad2Deg;
             // assis, le dock est plus pres et moins bas : il apparait en baissant moins la tete (on compare l'angle reel du dock a celui d'un dock au sol, environ 66 deg)
             float sub = 0f;
@@ -244,7 +243,8 @@ namespace AR6DoF
                 sub = Mathf.Clamp(66f - dockAng, 0f, 30f);
             }
             float rs = Mathf.Max(8f, d.dockRevealStart - sub);
-            float a = Mathf.Clamp01(Mathf.InverseLerp(rs, Mathf.Max(rs + 1f, d.dockRevealFull - sub), pitch));
+            float w = Mathf.Clamp(90f - d.dockRevealStart, 2f, 8f);    // il devient plein quelques degres plus bas (de moins en moins pres de 90)
+            float a = Mathf.Clamp01(Mathf.InverseLerp(rs, rs + w, pitch));
             a = a * a * (3f - 2f * a);
             float dt = Time.unscaledDeltaTime;
             reveal = Mathf.Lerp(reveal, a, 1f - Mathf.Exp(-12f * dt));
@@ -289,8 +289,8 @@ namespace AR6DoF
             Vector3 f = h.forward; f.y = 0f;
             if (f.sqrMagnitude > 1e-3f) lastFlat = f.normalized;
             // debout : sur le sol devant les pieds ; assis : a hauteur des mains (sous les yeux), plus pres
-            float ty = d.seated ? Mathf.Max(0.2f, h.position.y - Mathf.Clamp(d.dockSeatedDrop, 0.3f, 1.4f)) : 0.12f;
-            float dist = Mathf.Clamp(d.dockDistance, 0.3f, 1.5f);
+            float ty = d.seated ? Mathf.Max(0.2f, h.position.y - Mathf.Clamp(d.dockSeatedDrop, 0.1f, 0.8f)) : 0.12f;
+            float dist = Mathf.Clamp(d.dockDistance, 0.1f, 0.8f);
             if (d.seated) dist = Mathf.Min(dist, 0.55f);
             Vector3 target = new Vector3(h.position.x, ty, h.position.z) + lastFlat * dist;
             if (snap || !feetInit) { feetPos = target; feetInit = true; }
@@ -307,9 +307,7 @@ namespace AR6DoF
             var d = Ar6dofSettings.Current;
             if (Ar6dofDockInfo.Signature(d) != infoSig) RebuildIcons();   // heure, date ou batterie : le bandeau change
             if (kbMenu != null) kbMenu.follow = d.menusFollow;
-            if (d.dockAtFeet != lastFeetMode) { lastFeetMode = d.dockAtFeet; feetInit = false; Place(); }
-            else if (d.dockAtFeet) { feetInit = false; FollowFeet(true); }
-            else canvas.transform.localScale = Vector3.one * Ar6dofVrUi.BaseScale * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
+            feetInit = false; FollowFeet(true);
             foreach (var a in apps) SetIndicator(a);
             SetIndicator(settingsApp);
             if (appsApp != null) SetIndicator(appsApp);

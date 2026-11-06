@@ -480,6 +480,7 @@ namespace AR6DoF
             sky.raycastTarget = false;
             SkyColors(n.cond, n.day, out skyTop, out skyBot, n.temp);
             sky.SetColors(skyTop, skyBot, 26f);
+            sky.enabled = false;                          // plus de cadre : la 3D est posee directement sur la fenetre, sans bordure ni decoupe
             scene = Ar6dofWeatherScene.Create(stage);
             float drop = DropBy[DropLevel];
             float s = Mathf.Min(IW / 4.6f, sh / 2.98f);   // la scène occupe de -1,4 à +1,65 en hauteur ; descendre l'île ne rétrécit plus la scène (la pointe peut sortir du cadre)
@@ -487,7 +488,7 @@ namespace AR6DoF
             scene.transform.localScale = Vector3.one * s;
             // haut du cadre en unites de la scene ; soleil, lune et etoiles gardent leur hauteur d'avant dans le cadre ; tout ce qui sort du cadre est coupe (relief 3D gardé dedans)
             float top = sh * 0.5f / s + 0.09f + drop;
-            scene.SetStage(stage, new Vector2(IW, sh), top, drop - 0.12f, 26f);   // 26 = rayon des coins du ciel : la 3D est coupee comme lui
+            scene.SetStage(stage, new Vector2(IW, sh), top, drop - 0.12f, 26f);   // sans decoupe : voir SetStage
             scene.SetCloudShift(CloudBy[CloudLevel]);
 
             // coins du bas : l'île est étroite en bas, il y a de la place (et rien ne passe devant)

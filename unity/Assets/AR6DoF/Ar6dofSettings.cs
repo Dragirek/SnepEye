@@ -74,13 +74,14 @@ namespace AR6DoF
         public System.Collections.Generic.List<Ar6dofCustomStyle> customStyles = new System.Collections.Generic.List<Ar6dofCustomStyle>();
 
         // Dock
-        public bool dockAtFeet = true;     // vrai : accroché à tes pieds, invisible tant que tu ne baisses pas la tête
-        public float dockDistance = 0.65f; // devant tes pieds (m)
-        public float dockRevealStart = 35f;// angle de la tête vers le bas où il commence à apparaître (deg)
-        public float dockRevealFull = 55f; // angle où il est entièrement visible (deg)
+        public bool dockAtFeet = true;     // toujours vrai (plus de réglage) : accroché à tes pieds, invisible tant que tu ne baisses pas la tête
+        public float dockDistance = 0.30f; // devant tes pieds (m)
+        public float dockRevealStart = 75f;// angle de la tête vers le bas où il commence à apparaître (deg), jusqu'à 90 ; il est plein quelques degrés plus bas
+        public float dockRevealFull = 85f; // ancien réglage, plus utilisé
+        public int dockLayoutV = 0;        // 1 : nouvelles valeurs d'origine du dock (30 cm, 40 cm assis, 75 deg) déjà appliquées
         public float dockScale = 1f;
         public float dockTilt = 0f;        // inclinaison en plus (deg) ; 0 = face à tes yeux
-        public float dockSeatedDrop = 0.85f; // assis : le dock est sous tes yeux de cette hauteur (m) ; debout il est au sol
+        public float dockSeatedDrop = 0.40f; // assis : le dock est sous tes yeux de cette hauteur (m) ; debout il est au sol
         public bool seated = false;        // mode assis : le dock se place a hauteur des mains et le sol suppose est ajuste a la hauteur des yeux assis
 
         // Informations dans le dock (heure, date, batterie du PC) ; le format de l'heure est aussi celui de l'application Horloge
@@ -185,7 +186,15 @@ namespace AR6DoF
             if (d.laser.style == null) d.laser.style = new Ar6dofStyle();
             if (d.customStyles == null) d.customStyles = new System.Collections.Generic.List<Ar6dofCustomStyle>();
             d.customStyles.RemoveAll(x => x == null || x.style == null);
-            d.dockSeatedDrop = Mathf.Clamp(d.dockSeatedDrop, 0.3f, 1.4f);
+            if (d.dockLayoutV < 1)
+            {   // nouvelles valeurs d'origine du dock : 30 cm devant les pieds, 40 cm sous les yeux assis, apparition a 75 deg
+                d.dockDistance = 0.30f; d.dockSeatedDrop = 0.40f; d.dockRevealStart = 75f;
+                d.dockLayoutV = 1;
+            }
+            d.dockAtFeet = true;
+            d.dockDistance = Mathf.Clamp(d.dockDistance, 0.1f, 0.8f);
+            d.dockRevealStart = Mathf.Clamp(d.dockRevealStart, 30f, 90f);
+            d.dockSeatedDrop = Mathf.Clamp(d.dockSeatedDrop, 0.1f, 0.8f);
             d.dockClockStyle = Mathf.Clamp(d.dockClockStyle, 0, 2);
             d.dockBatteryStyle = Mathf.Clamp(d.dockBatteryStyle, 0, 2);
             d.dockFaceStyle = Mathf.Clamp(d.dockFaceStyle, 0, 5);

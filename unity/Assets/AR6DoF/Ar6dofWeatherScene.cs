@@ -431,7 +431,8 @@ namespace AR6DoF
         {
             clipRt = stage; topY = top; skyShift = skyLift;
             for (int i = 0; i < StarN; i++) if (stars[i] != null) stars[i].localPosition = new Vector3(stars[i].localPosition.x, starY[i] + skyShift, stars[i].localPosition.z);
-            for (int i = 0; i < toons.Count; i++) toons[i].m.SetVector("_ClipHalf", new Vector4(size.x * 0.5f, size.y * 0.5f, 1f, corner));
+            // plus de cadre : rien n'est coupe (la decoupe du cadre est repoussee tres loin ; le code du shader reste, sans effet)
+            for (int i = 0; i < toons.Count; i++) toons[i].m.SetVector("_ClipHalf", new Vector4(1e5f, 1e5f, 1f, 0f));
             UpdateClip(true);
             dirty = true;
         }

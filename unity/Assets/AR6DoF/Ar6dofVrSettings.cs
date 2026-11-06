@@ -810,6 +810,8 @@ namespace AR6DoF
 
             top = OpenCard(page, ref c, "Affichage");
             StepRow(page, ref c, "FOV affiche (deg)", 40f, 130f, 1f, 5f, 10f, () => pt.settings.displayFovDeg, v => pt.settings.displayFovDeg = v, "0");
+            Text fov = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", () => { pt.settings.displayFovDeg = Mathf.Clamp(pt.MaxFovNoBlackDeg, 40f, 130f); RefreshAll(); }, 20);
+            refreshers.Add(() => fov.text = Ar6dofLoc.F("FOV max sans bord noir : {0} deg", pt.MaxFovNoBlackDeg.ToString("0")));
             StepRow(page, ref c, "IPD logiciel (+ = ecarte)", -400f, 400f, 1f, 10f, 50f, () => Mathf.Round(pt.settings.ipdShift * 1000f), v => pt.settings.ipdShift = v / 1000f, "0");
             StepRow(page, ref c, "Delai manuel (ms)", 0f, 120f, 1f, 5f, 10f, () => pt.settings.captureDelayMs, v => pt.settings.captureDelayMs = v, "0");
             CloseCard(page, top, ref c);
@@ -924,10 +926,8 @@ namespace AR6DoF
             Toggle(page, -cx, y, "Miroir horizontal", () => Eye(pt).mirrorX, v => Eye(pt).mirrorX = v);
             Toggle(page, cx, y, "Miroir vertical", () => Eye(pt).mirrorY, v => Eye(pt).mirrorY = v);
             y = Next(ref c, 48f, 10f);
-            Text lay = ButtonText(page, -cx, y, cw, "", () => { pt.settings.layout = pt.settings.layout == Ar6dofStereoLayout.SideBySide ? Ar6dofStereoLayout.TopBottom : Ar6dofStereoLayout.SideBySide; RefreshAll(); }, 20);
+            Text lay = ButtonText(page, 0f, y, 520f, "", () => { pt.settings.layout = pt.settings.layout == Ar6dofStereoLayout.SideBySide ? Ar6dofStereoLayout.TopBottom : Ar6dofStereoLayout.SideBySide; RefreshAll(); }, 20);
             refreshers.Add(() => lay.text = Ar6dofLoc.T(pt.settings.layout == Ar6dofStereoLayout.SideBySide ? "Flux : cote a cote" : "Flux : haut / bas"));
-            Text fov = ButtonText(page, cx, y, cw, "", () => { pt.settings.displayFovDeg = Mathf.Clamp(pt.MaxFovNoBlackDeg, 40f, 130f); RefreshAll(); }, 20);
-            refreshers.Add(() => fov.text = Ar6dofLoc.F("FOV max sans bord noir : {0} deg", pt.MaxFovNoBlackDeg.ToString("0")));
             y = Next(ref c, 48f, 10f);
             Toggle(page, 0f, y, "Recentrer sur le milieu de l'image (decale tout : deconseille)", () => pt.settings.centerOnImage, v => pt.settings.centerOnImage = v, 640f);
             CloseCard(page, top, ref c);
@@ -2618,20 +2618,143 @@ namespace AR6DoF
             CloseCard(gr, top, ref c);
         }
 
+        // ---- schema du dock : vue de profil, debout (a gauche) et assis (a droite)
+        static Image DiagBar(RectTransform parent, Color col)
+        {
+            var rt = Ar6dofVrUi.Rect(parent, "Trait", Vector2.zero, new Vector2(10f, 4f));
+            var img = rt.gameObject.AddComponent<Image>();
+            img.raycastTarget = false;
+            img.color = col;
+            return img;
+        }
+
+        static Image DiagDot(RectTransform parent, Color col, float size)
+        {
+            var rt = Ar6dofVrUi.Rect(parent, "Point", Vector2.zero, new Vector2(size, size));
+            var img = rt.gameObject.AddComponent<Image>();
+            img.raycastTarget = false;
+            img.color = col;
+            Ar6dofTheme.SetRounded(img, Mathf.RoundToInt(size * 0.5f));
+            return img;
+        }
+
+        static void DiagSeg(Image img, Vector2 a, Vector2 b, float thick)
+        {
+            var rt = img.rectTransform;
+            Vector2 d = b - a;
+            rt.anchoredPosition = (a + b) * 0.5f;
+            rt.sizeDelta = new Vector2(Mathf.Max(0.01f, d.magnitude), thick);
+            rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg);
+        }
+
+        void BuildDockDiagram(RectTransform page, ref float c)
+        {
+            const float H = 300f, K = 1.2f;          // K : pixels par centimetre
+            float y = Next(ref c, H, 10f);
+            var area = Ar6dofVrUi.Rect(page, "Schema", new Vector2(0f, y), new Vector2(CW, H));
+            var bg = area.gameObject.AddComponent<Image>();
+            bg.raycastTarget = false;
+            bg.color = new Color(0f, 0f, 0f, 0.22f);
+            Ar6dofTheme.SetRounded(bg, 14);
+
+            Color body = new Color(0.78f, 0.80f, 0.88f, 1f), gaze = new Color(1f, 0.86f, 0.2f, 1f), faint = new Color(1f, 1f, 1f, 0.28f);
+            float floor = -H * 0.5f + 66f;
+            float xs = -CW * 0.25f, xa = CW * 0.25f;
+
+            Text titleS = Ar6dofVrUi.Label(area, "", new Vector2(xs, H * 0.5f - 20f), new Vector2(300f, 30f), 20);
+            Text titleA = Ar6dofVrUi.Label(area, "", new Vector2(xa, H * 0.5f - 20f), new Vector2(300f, 30f), 20);
+            Text legend = Ar6dofVrUi.Label(area, "", new Vector2(0f, -H * 0.5f + 14f), new Vector2(CW - 20f, 26f), 17);
+
+            Image floorS = DiagBar(area, faint), floorA = DiagBar(area, faint);
+            Image headS = DiagDot(area, body, 24f), headA = DiagDot(area, body, 24f);
+            Image bodyS = DiagBar(area, body), bodyA = DiagBar(area, body), thigh = DiagBar(area, body), shin = DiagBar(area, body);
+            Image level = DiagBar(area, faint), levelA = DiagBar(area, faint);
+            Image viewS = DiagBar(area, gaze), viewA = DiagBar(area, gaze);
+            Image dockS = DiagBar(area, Color.white), dockA = DiagBar(area, Color.white);
+            Image brS = DiagBar(area, faint), brA = DiagBar(area, faint);
+            Text angS = Ar6dofVrUi.Label(area, "", Vector2.zero, new Vector2(120f, 26f), 18, TextAnchor.MiddleLeft);
+            Text distS = Ar6dofVrUi.Label(area, "", Vector2.zero, new Vector2(120f, 26f), 17);
+            Text angA = Ar6dofVrUi.Label(area, "", Vector2.zero, new Vector2(120f, 26f), 18, TextAnchor.MiddleLeft);
+            Text dropA = Ar6dofVrUi.Label(area, "", Vector2.zero, new Vector2(120f, 26f), 17, TextAnchor.MiddleRight);
+            angS.color = gaze; angA.color = gaze;
+
+            refreshers.Add(() =>
+            {
+                var d = Ar6dofSettings.Current;
+                Color acc = Ar6dofSettings.StyleFor(Ar6dofElem.Dock).accent;
+                dockS.color = acc; dockA.color = acc;
+                titleS.text = Ar6dofLoc.T("Debout");
+                titleA.text = Ar6dofLoc.T("Assis");
+                legend.text = Ar6dofLoc.T("Jaune : ta ligne de regard quand le dock commence a apparaitre");
+
+                // ---- debout
+                float E = Mathf.Clamp(d.eyeHeightCm, 100f, 180f) * K;
+                float px = xs - 90f;
+                float dist = Mathf.Clamp(d.dockDistance, 0.1f, 0.8f) * 100f * K;
+                Vector2 eye = new Vector2(px, floor + E);
+                headS.rectTransform.anchoredPosition = eye;
+                DiagSeg(floorS, new Vector2(xs - 150f, floor), new Vector2(xs + 150f, floor), 2f);
+                DiagSeg(bodyS, new Vector2(px, eye.y - 12f), new Vector2(px, floor + 2f), 9f);
+                DiagSeg(level, eye, eye + new Vector2(60f, 0f), 2f);
+                float al = Mathf.Clamp(d.dockRevealStart, 30f, 90f);
+                float hit = E / Mathf.Max(0.05f, Mathf.Tan(al * Mathf.Deg2Rad));
+                DiagSeg(viewS, eye, new Vector2(px + hit, floor), 3f);
+                angS.rectTransform.anchoredPosition = eye + new Vector2(92f, -26f);
+                angS.text = al.ToString("0") + "\u00B0";
+                Vector2 dc = new Vector2(px + dist, floor + 5f);
+                Vector2 v = eye - dc;
+                Vector2 u = new Vector2(-v.y, v.x).normalized * 14f * K;
+                DiagSeg(dockS, dc - u, dc + u, 7f);
+                DiagSeg(brS, new Vector2(px, floor - 12f), new Vector2(px + dist, floor - 12f), 2f);
+                distS.rectTransform.anchoredPosition = new Vector2(px + dist * 0.5f, floor - 28f);
+                distS.text = Mathf.Round(d.dockDistance * 100f).ToString("0") + " cm";
+
+                // ---- assis
+                float S = Mathf.Clamp(d.eyeHeightSeatedCm, 60f, 150f);
+                float Sy = S * K;
+                float pa = xa - 50f;
+                float dist2 = Mathf.Min(Mathf.Clamp(d.dockDistance, 0.1f, 0.8f), 0.55f);
+                float dockM = Mathf.Max(0.2f, S / 100f - Mathf.Clamp(d.dockSeatedDrop, 0.1f, 0.8f));
+                Vector2 eyeA = new Vector2(pa, floor + Sy);
+                headA.rectTransform.anchoredPosition = eyeA;
+                float seat = floor + 48f * K;
+                DiagSeg(floorA, new Vector2(xa - 150f, floor), new Vector2(xa + 150f, floor), 2f);
+                DiagSeg(bodyA, new Vector2(pa, eyeA.y - 12f), new Vector2(pa, seat), 9f);
+                DiagSeg(thigh, new Vector2(pa, seat), new Vector2(pa + 42f * K, seat), 9f);
+                DiagSeg(shin, new Vector2(pa + 42f * K, seat), new Vector2(pa + 42f * K, floor + 2f), 9f);
+                DiagSeg(levelA, eyeA, eyeA + new Vector2(60f, 0f), 2f);
+                Vector2 dcA = new Vector2(pa + dist2 * 100f * K, floor + dockM * 100f * K);
+                float dropReal = S / 100f - dockM;
+                float dockAng = Mathf.Atan2(dropReal, Mathf.Max(0.05f, dist2)) * Mathf.Rad2Deg;
+                float sub = Mathf.Clamp(66f - dockAng, 0f, 30f);
+                float alA = Mathf.Max(8f, al - sub);
+                float hitA = (eyeA.y - dcA.y) / Mathf.Max(0.05f, Mathf.Tan(alA * Mathf.Deg2Rad));
+                DiagSeg(viewA, eyeA, new Vector2(pa + hitA, dcA.y), 3f);
+                angA.rectTransform.anchoredPosition = eyeA + new Vector2(92f, -26f);
+                angA.text = alA.ToString("0") + "\u00B0";
+                Vector2 vA = eyeA - dcA;
+                Vector2 uA = new Vector2(-vA.y, vA.x).normalized * 14f * K;
+                DiagSeg(dockA, dcA - uA, dcA + uA, 7f);
+                float bx = pa - 22f;
+                DiagSeg(brA, new Vector2(bx, eyeA.y), new Vector2(bx, dcA.y), 2f);
+                dropA.rectTransform.anchoredPosition = new Vector2(bx - 66f, (eyeA.y + dcA.y) * 0.5f);
+                dropA.text = Mathf.Round(d.dockSeatedDrop * 100f).ToString("0") + " cm";
+            });
+        }
+
         // ================================================================== DOCK
         void BuildDock(RectTransform page)
         {
             float c = BeginPage(page, PgDock);
             float top = OpenCard(page, ref c, "Position");
-            Toggle(page, 0f, Next(ref c, 48f, 12f), "Dock aux pieds (cache, apparait en baissant la tete)", () => Ar6dofSettings.Current.dockAtFeet, v => { Ar6dofSettings.Current.dockAtFeet = v; Touch(); }, 600f);
-            StepRow(page, ref c, "Distance devant les pieds (cm)", 30f, 140f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockDistance * 100f), v => { Ar6dofSettings.Current.dockDistance = v / 100f; Touch(); }, "0");
-            StepRow(page, ref c, "Assis : dock sous les yeux de (cm)", 30f, 140f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockSeatedDrop * 100f), v => { Ar6dofSettings.Current.dockSeatedDrop = v / 100f; Touch(); }, "0");
-            StepRow(page, ref c, "Debut d'apparition : tete baissee de (deg)", 5f, 70f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealStart), v => { Ar6dofSettings.Current.dockRevealStart = v; Touch(); }, "0");
-            StepRow(page, ref c, "Pleinement visible a (deg)", 15f, 85f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealFull), v => { Ar6dofSettings.Current.dockRevealFull = v; Touch(); }, "0");
+            StepRow(page, ref c, "Distance devant les pieds (cm)", 10f, 50f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockDistance * 100f), v => { Ar6dofSettings.Current.dockDistance = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Assis : dock sous les yeux de (cm)", 10f, 70f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockSeatedDrop * 100f), v => { Ar6dofSettings.Current.dockSeatedDrop = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Debut d'apparition : tete baissee de (deg)", 30f, 90f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockRevealStart), v => { Ar6dofSettings.Current.dockRevealStart = v; Touch(); }, "0");
+            BuildDockDiagram(page, ref c);
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Taille");
-            StepRow(page, ref c, "Taille de l'interface (%, 100 = fenetres d'environ 40 cm)", 40f, 300f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.uiScale * 100f), v => { Ar6dofSettings.Current.uiScale = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Taille de l'interface (%, 100 = fenetres d'environ 30 cm)", 40f, 300f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.uiScale * 100f), v => { Ar6dofSettings.Current.uiScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Taille du dock (%)", 50f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockScale * 100f), v => { Ar6dofSettings.Current.dockScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Inclinaison supplementaire (deg)", -30f, 30f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockTilt), v => { Ar6dofSettings.Current.dockTilt = v; Touch(); }, "0");
             StepRow(page, ref c, "Taille du clavier (%)", 50f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.keyboardScale * 100f), v => { Ar6dofSettings.Current.keyboardScale = v / 100f; Touch(); }, "0");

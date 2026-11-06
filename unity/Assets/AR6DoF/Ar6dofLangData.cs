@@ -117,10 +117,8 @@ namespace AR6DoF
             "Rayures => Stripes",
             "Degrade => Gradient",
             "Bruit => Noise",
-            "Dock aux pieds (cache, apparait en baissant la tete) => Dock at the feet (hidden, appears when looking down)",
             "Distance devant les pieds (m) => Distance in front of the feet (m)",
             "Debut d'apparition : tete baissee de (deg) => Starts appearing: head tilted down by (deg)",
-            "Pleinement visible a (deg) => Fully visible at (deg)",
             "Taille du dock => Dock size",
             "Inclinaison supplementaire (deg) => Extra tilt (deg)",
             "Taille du clavier => Keyboard size",
@@ -1224,7 +1222,10 @@ namespace AR6DoF
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Window opening distance (cm, next time a window opens)",
             "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Anchor test: tracking {0} cm, Unity camera {1} cm, MENU {2} cm (must be 0), menu rotation {3} deg. Scene eye spacing: {4} mm (file {5})",
             "Test sans relief (meme image aux deux yeux) => Flat test (same image in both eyes)",
-            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Interface size (%, 100 = windows about 40 cm wide)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 30 cm) => Interface size (%, 100 = windows about 30 cm wide)",
+            "Debout => Standing",
+            "Assis => Seated",
+            "Jaune : ta ligne de regard quand le dock commence a apparaitre => Yellow: your line of sight when the dock starts to appear",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -1333,10 +1334,8 @@ namespace AR6DoF
             "Rayures => Rayas",
             "Degrade => Degradado",
             "Bruit => Ruido",
-            "Dock aux pieds (cache, apparait en baissant la tete) => Dock a los pies (oculto, aparece al bajar la cabeza)",
             "Distance devant les pieds (m) => Distancia delante de los pies (m)",
             "Debut d'apparition : tete baissee de (deg) => Empieza a aparecer: cabeza inclinada (grados)",
-            "Pleinement visible a (deg) => Totalmente visible a (grados)",
             "Taille du dock => Tamano del dock",
             "Inclinaison supplementaire (deg) => Inclinacion adicional (grados)",
             "Taille du clavier => Tamano del teclado",
@@ -2439,7 +2438,10 @@ namespace AR6DoF
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Distancia de apertura de ventanas (cm, en la proxima apertura)",
             "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Prueba de anclaje: seguimiento {0} cm, camara de Unity {1} cm, MENU {2} cm (debe ser 0), rotacion del menu {3} grados. Separacion de ojos de la escena: {4} mm (archivo {5})",
             "Test sans relief (meme image aux deux yeux) => Prueba sin relieve (misma imagen en ambos ojos)",
-            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Tamano de la interfaz (%, 100 = ventanas de unos 40 cm)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 30 cm) => Tamano de la interfaz (%, 100 = ventanas de unos 30 cm)",
+            "Debout => De pie",
+            "Assis => Sentado",
+            "Jaune : ta ligne de regard quand le dock commence a apparaitre => Amarillo: tu linea de vision cuando el dock empieza a aparecer",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -2549,10 +2551,8 @@ namespace AR6DoF
             "Rayures => Streifen",
             "Degrade => Verlauf",
             "Bruit => Rauschen",
-            "Dock aux pieds (cache, apparait en baissant la tete) => Dock an den Fuessen (versteckt, erscheint beim Nach-unten-Schauen)",
             "Distance devant les pieds (m) => Abstand vor den Fuessen (m)",
             "Debut d'apparition : tete baissee de (deg) => Beginnt zu erscheinen: Kopf geneigt um (Grad)",
-            "Pleinement visible a (deg) => Voll sichtbar bei (Grad)",
             "Taille du dock => Dock-Groesse",
             "Inclinaison supplementaire (deg) => Zusaetzliche Neigung (Grad)",
             "Taille du clavier => Tastaturgroesse",
@@ -3661,7 +3661,10 @@ namespace AR6DoF
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Oeffnungsabstand der Fenster (cm, beim naechsten Oeffnen)",
             "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Verankerungstest: Tracking {0} cm, Unity-Kamera {1} cm, MENUE {2} cm (muss 0 sein), Menuedrehung {3} Grad. Augenabstand der Szene: {4} mm (Datei {5})",
             "Test sans relief (meme image aux deux yeux) => Test ohne Tiefe (gleiches Bild auf beiden Augen)",
-            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Groesse der Oberflaeche (%, 100 = Fenster von etwa 40 cm)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 30 cm) => Groesse der Oberflaeche (%, 100 = Fenster von etwa 30 cm)",
+            "Debout => Stehend",
+            "Assis => Sitzend",
+            "Jaune : ta ligne de regard quand le dock commence a apparaitre => Gelb: deine Blickrichtung, wenn das Dock zu erscheinen beginnt",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -3771,10 +3774,8 @@ namespace AR6DoF
             "Rayures => Righe",
             "Degrade => Sfumatura",
             "Bruit => Rumore",
-            "Dock aux pieds (cache, apparait en baissant la tete) => Dock ai piedi (nascosto, appare abbassando la testa)",
             "Distance devant les pieds (m) => Distanza davanti ai piedi (m)",
             "Debut d'apparition : tete baissee de (deg) => Inizia ad apparire: testa inclinata di (gradi)",
-            "Pleinement visible a (deg) => Completamente visibile a (gradi)",
             "Taille du dock => Dimensione del dock",
             "Inclinaison supplementaire (deg) => Inclinazione aggiuntiva (gradi)",
             "Taille du clavier => Dimensione della tastiera",
@@ -4883,7 +4884,10 @@ namespace AR6DoF
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Distanza di apertura delle finestre (cm, alla prossima apertura)",
             "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Test di ancoraggio: tracciamento {0} cm, camera di Unity {1} cm, MENU {2} cm (deve essere 0), rotazione del menu {3} gradi. Distanza occhi della scena: {4} mm (file {5})",
             "Test sans relief (meme image aux deux yeux) => Test senza rilievo (stessa immagine in entrambi gli occhi)",
-            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Dimensione dell'interfaccia (%, 100 = finestre di circa 40 cm)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 30 cm) => Dimensione dell'interfaccia (%, 100 = finestre di circa 30 cm)",
+            "Debout => In piedi",
+            "Assis => Seduto",
+            "Jaune : ta ligne de regard quand le dock commence a apparaitre => Giallo: la tua linea di sguardo quando il dock inizia ad apparire",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -4992,10 +4996,8 @@ namespace AR6DoF
             "Rayures => Riscas",
             "Degrade => Gradiente",
             "Bruit => Ruido",
-            "Dock aux pieds (cache, apparait en baissant la tete) => Dock aos pes (escondido, aparece ao baixar a cabeca)",
             "Distance devant les pieds (m) => Distancia a frente dos pes (m)",
             "Debut d'apparition : tete baissee de (deg) => Comeca a aparecer: cabeca inclinada (graus)",
-            "Pleinement visible a (deg) => Totalmente visivel a (graus)",
             "Taille du dock => Tamanho do dock",
             "Inclinaison supplementaire (deg) => Inclinacao adicional (graus)",
             "Taille du clavier => Tamanho do teclado",
@@ -6104,7 +6106,10 @@ namespace AR6DoF
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Distancia de abertura das janelas (cm, na proxima abertura)",
             "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Teste de ancoragem: rastreamento {0} cm, camera do Unity {1} cm, MENU {2} cm (deve ser 0), rotacao do menu {3} graus. Distancia dos olhos da cena: {4} mm (arquivo {5})",
             "Test sans relief (meme image aux deux yeux) => Teste sem relevo (mesma imagem nos dois olhos)",
-            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Tamanho da interface (%, 100 = janelas de cerca de 40 cm)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 30 cm) => Tamanho da interface (%, 100 = janelas de cerca de 30 cm)",
+            "Debout => Em pe",
+            "Assis => Sentado",
+            "Jaune : ta ligne de regard quand le dock commence a apparaitre => Amarelo: sua linha de visao quando o dock comeca a aparecer",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 
