@@ -20,6 +20,7 @@ namespace AR6DoF
         public readonly Material mat;
         readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         readonly List<Action<float>> ticks = new List<Action<float>>();
+        readonly List<Func<float, bool>> shots = new List<Func<float, bool>>();
         readonly List<Ar6dofLabel3D> labels = new List<Ar6dofLabel3D>();
         readonly MaterialPropertyBlock mpb = new MaterialPropertyBlock();
         struct Pop { public Transform tr; public float start; public Vector3 scale; }
@@ -174,10 +175,12 @@ namespace AR6DoF
         public void SlabGlow(float g) { Paint(slabRend, slabCol, g); }
 
         // ---------------------------------------------------------------- contenu
-        public Ar6dofBoard3D AddBoard(int n, float cell, float cx, float cz, Action<int> click)
+        public Ar6dofBoard3D AddBoard(int n, float cell, float cx, float cz, Action<int> click) { return AddBoard(n, n, cell, cx, cz, click); }
+
+        public Ar6dofBoard3D AddBoard(int rows, int cols, float cell, float cx, float cz, Action<int> click)
         {
-            var b = new Ar6dofBoard3D(this, n, cell, cx, cz, click);
-            Grow(cx - n * cell * 0.5f, cx + n * cell * 0.5f, cz - n * cell * 0.5f, cz + n * cell * 0.5f, 0.03f);
+            var b = new Ar6dofBoard3D(this, rows, cols, cell, cx, cz, click);
+            Grow(cx - cols * cell * 0.5f, cx + cols * cell * 0.5f, cz - rows * cell * 0.5f, cz + rows * cell * 0.5f, 0.03f);
             return b;
         }
 
@@ -190,6 +193,9 @@ namespace AR6DoF
 
         public void AddTick(Action<float> a) { ticks.Add(a); }
 
+        /// <summary>Animation ponctuelle : 'f' est appelee a chaque image avec l'heure et rend vrai quand elle est finie (elle est alors retiree).</summary>
+        public void AddShot(Func<float, bool> f) { shots.Add(f); }
+
         public void PopIn(Transform tr, Vector3 scale)
         {
             tr.localScale = Vector3.zero;
@@ -200,7 +206,7 @@ namespace AR6DoF
         public void ClearContent()
         {
             for (int i = content.childCount - 1; i >= 0; i--) UnityEngine.Object.Destroy(content.GetChild(i).gameObject);
-            ticks.Clear(); labels.Clear(); pops.Clear();
+            ticks.Clear(); shots.Clear(); labels.Clear(); pops.Clear();
             hasBounds = false;
             slab.gameObject.SetActive(false);
         }
@@ -218,6 +224,13 @@ namespace AR6DoF
                 p.tr.localScale = p.scale * e;
             }
             for (int i = 0; i < ticks.Count; i++) ticks[i](now);
+            for (int i = shots.Count - 1; i >= 0; i--)
+            {
+                bool done;
+                try { done = shots[i](now); }
+                catch (Exception e) { Debug.LogWarning("AR6DoF : animation arretee : " + e.Message); done = true; }
+                if (done && i < shots.Count) shots.RemoveAt(i);
+            }
             if (fest != null) fest.Tick(now);
             if (labels.Count > 0)
             {
@@ -238,7 +251,7 @@ namespace AR6DoF
             live.Remove(this);
             if (root != null) UnityEngine.Object.Destroy(root);
             for (int i = 0; i < owned.Count; i++) if (owned[i] != null) UnityEngine.Object.Destroy(owned[i]);
-            owned.Clear(); ticks.Clear(); labels.Clear(); pops.Clear();
+            owned.Clear(); ticks.Clear(); shots.Clear(); labels.Clear(); pops.Clear();
             fest = null;
         }
     }
@@ -335,13 +348,21 @@ namespace AR6DoF
         public void OnPointerEnter() { hover = true; board.SetHover(idx, true); }
         public void OnPointerExit() { hover = false; board.SetHover(idx, false); }
         public void OnPointerHover(Vector3 worldPoint) { }
-        public void OnPointerDown(Vector3 worldPoint, int button) { if (button == 0) down = true; }
+        public void OnPointerDown(Vector3 worldPoint, int button) { if (button == 0) down = true; else if (button == 1) downR = true; }
         public void OnPointerUp(Vector3 worldPoint, int button)
         {
+            if (button == 1)
+            {
+                bool fireR = downR && hover;
+                downR = false;
+                if (fireR) board.RightClick(idx);
+                return;
+            }
             bool fire = button == 0 && down && hover;
             down = false;
             if (fire) board.Click(idx);
         }
+        bool downR;
     }
 
     /// <summary>Un objet cliquable (un de, le levier) : appelle 'action' quand on relache le bouton dessus.</summary>

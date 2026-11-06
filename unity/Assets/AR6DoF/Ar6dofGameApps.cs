@@ -70,26 +70,44 @@ namespace AR6DoF
     /// <summary>Un plateau de n x n cases cliquables, avec pour chaque case : fond, piece, marque (point) et texte facultatif. Se met a jour sans rien reconstruire.</summary>
     public sealed class Ar6dofBoardView
     {
-        public readonly int n;
+        public readonly int n, rows, cols;
         readonly Image[] bg, pc, mk;
         readonly Text[] tx;
         Ar6dofBoard3D b3;     // non nul : le plateau est en 3D sur la table (aucun element 2D n'existe alors)
 
-        Ar6dofBoardView(int n)
+        Ar6dofBoardView(int rows, int cols)
         {
-            this.n = n;
-            bg = new Image[n * n]; pc = new Image[n * n]; mk = new Image[n * n]; tx = new Text[n * n];
+            this.rows = rows; this.cols = cols; this.n = cols;
+            int t = rows * cols;
+            bg = new Image[t]; pc = new Image[t]; mk = new Image[t]; tx = new Text[t];
         }
+
+        /// <summary>Le plateau 3D (null en 2D) : pour y lancer des animations.</summary>
+        public Ar6dofBoard3D Board3D { get { return b3; } }
+
+        /// <summary>Clic droit sur une case (3D seulement : le bouton droit du laser).</summary>
+        public Action<int> OnRightClick { set { if (b3 != null) b3.rightClick = value; } }
+
+        /// <summary>3D : le laser entre / sort d'une case (sert a surligner toute la colonne au puissance 4).</summary>
+        public Action<int, bool> OnHover { set { if (b3 != null) b3.hoverCb = value; } }
+
+        /// <summary>2D : teinte de la piece d'une case (en 3D la piece a deja sa couleur).</summary>
+        public void Tint(int i, Color c) { if (b3 == null && pc[i] != null) pc[i].color = c; }
 
         public bool Is3D { get { return b3 != null; } }
 
         /// <summary>Hauteur prise dans la fenetre par le plateau (rien en 3D).</summary>
-        public float Space(float cell) { return b3 != null ? 0f : n * cell + 8f; }
+        public float Space(float cell) { return b3 != null ? 0f : rows * cell + 8f; }
 
         public static Ar6dofBoardView Make3D(Ar6dofTable3D table, int n, float cell, float cx, float cz, Action<int> click)
         {
-            var v = new Ar6dofBoardView(n);
-            v.b3 = table.AddBoard(n, cell, cx, cz, click);
+            return Make3D(table, n, n, cell, cx, cz, click);
+        }
+
+        public static Ar6dofBoardView Make3D(Ar6dofTable3D table, int rows, int cols, float cell, float cx, float cz, Action<int> click)
+        {
+            var v = new Ar6dofBoardView(rows, cols);
+            v.b3 = table.AddBoard(rows, cols, cell, cx, cz, click);
             return v;
         }
 
@@ -99,12 +117,17 @@ namespace AR6DoF
         /// <summary>'cx' : centre horizontal ; 'top' : distance depuis le haut du contenu ; la case 0 est en haut a gauche.</summary>
         public static Ar6dofBoardView Make(Transform parent, float cx, float top, float cell, int n, Action<int> click, bool text)
         {
-            var v = new Ar6dofBoardView(n);
-            for (int r = 0; r < n; r++)
-                for (int c = 0; c < n; c++)
+            return Make(parent, cx, top, cell, n, n, click, text);
+        }
+
+        public static Ar6dofBoardView Make(Transform parent, float cx, float top, float cell, int rows, int cols, Action<int> click, bool text)
+        {
+            var v = new Ar6dofBoardView(rows, cols);
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < cols; c++)
                 {
-                    int i = r * n + c;
-                    var rt = Ar6dofVrUi.Rect(parent, "Case", new Vector2(cx + (c - (n - 1) * 0.5f) * cell, -(top + (r + 0.5f) * cell)), new Vector2(cell, cell));
+                    int i = r * cols + c;
+                    var rt = Ar6dofVrUi.Rect(parent, "Case", new Vector2(cx + (c - (cols - 1) * 0.5f) * cell, -(top + (r + 0.5f) * cell)), new Vector2(cell, cell));
                     var im = rt.gameObject.AddComponent<Image>();
                     im.color = Color.gray;
                     v.bg[i] = im;
@@ -144,6 +167,13 @@ namespace AR6DoF
         public void Piece(int i, Sprite s, int token)
         {
             if (b3 != null) { b3.Piece(i, s == null ? 0 : token); return; }
+            Piece(i, s);
+        }
+
+        /// <summary>Comme Piece, mais en 3D la piece tombe de 'dropFrom' metres au-dessus de sa case.</summary>
+        public void PieceDrop(int i, Sprite s, int token, float dropFrom)
+        {
+            if (b3 != null) { b3.Piece(i, s == null ? 0 : token, dropFrom); return; }
             Piece(i, s);
         }
 
@@ -568,8 +598,6 @@ namespace AR6DoF
             rechargeBtn = bs[3];
             refreshers.Add(() => { if (rechargeBtn != null) rechargeBtn.interactable = credits < Bets[betIdx]; });
             Btn("Lancer", Spin, 66f, 32);
-            if (s3 != null)
-                SliderRow("Sol sous la tete", 0.6f, 2.4f, () => FloorDrop, v => FloorDrop = v, v => Fmt("{0:0.00} m", v), 50f);
             SliderRow("Volume", 0f, 1f, () => SoundVolume, v => SoundVolume = v, Pct, 50f);
 
             // table des gains
@@ -733,7 +761,6 @@ namespace AR6DoF
             {
                 message = "Perdu... retente ta chance !";
                 snd.StopWhirr();
-                Play(Ar6dofGameSound.Id.Lose, 0.8f);
                 if (s3 != null) Banner(++bannerId, Ar6dofLoc.T("Perdu"), new Color(0.72f, 0.8f, 0.97f), new Vector3(0f, 0.5f, 0.02f), 0.2f);
             }
             Draw();
@@ -783,15 +810,33 @@ namespace AR6DoF
         string myShot = "", pcShot = "";
         Ar6dofBoardView enemyView, ownView;
         Text status, shots, count;
+        Ar6dofBattleFx fx;                  // tirs animes (3D seulement)
+        Action pending;                     // le tir en vol : sa suite est appelee a l'impact
+        bool flying;
+        readonly int[] lvEnemy = new int[100], lvOwn = new int[100];
 
         public Ar6dofBattleshipApp(Ar6dofDock d) : base(d, "battleship", "Bataille navale", "ship", "Bataille navale contre le PC : place ta flotte et coule la sienne.", 840f)
         {
             Shuffle();
         }
 
-        protected override void GameRebuildStart() { enemyView = null; ownView = null; status = null; shots = null; count = null; }
+        protected override void GameRebuildStart() { fx = null; FinishPending(); enemyView = null; ownView = null; status = null; shots = null; count = null; }
 
-        public override void OnClosed() { pcAt = -1f; }
+        public override void OnClosed() { fx = null; FinishPending(); }
+
+        protected override void OnVisible(bool on)
+        {
+            if (!on) { fx = null; FinishPending(); }
+            base.OnVisible(on);
+        }
+
+        /// <summary>Un tir est en vol et la fenetre se reconstruit ou se ferme : on applique son resultat tout de suite, sans animation, pour que la partie ne reste jamais bloquee.</summary>
+        void FinishPending()
+        {
+            var a = pending;
+            pending = null; flying = false;
+            if (a != null) a();
+        }
 
         void Shuffle() { mine.PlaceRandom(rnd); }
 
@@ -800,6 +845,7 @@ namespace AR6DoF
             Shuffle();
             theirs.PlaceRandom(rnd);
             ai = new Ar6dofNavalAi(rnd);
+            pending = null; flying = false;
             phase = 0; playerTurn = true; iWon = false; pcAt = -1f; myShot = ""; pcShot = "";
             Rebuild();
         }
@@ -833,6 +879,16 @@ namespace AR6DoF
                 table.AddLabel(null, new Vector3(-0.12f, 0.03f, 0.19f), 0.16f, 44, Color.white, false).Set(Ar6dofLoc.T("Flotte ennemie"), Color.white);
                 table.AddLabel(null, new Vector3(0.2f, 0.03f, 0.14f), 0.12f, 44, Color.white, false).Set(Ar6dofLoc.T("Ma flotte"), Color.white);
             }
+            fx = null;
+            if (enemyView.Is3D && ownView.Is3D && table != null)
+            {
+                try
+                {
+                    fx = new Ar6dofBattleFx(table, enemyView.Board3D, ownView.Board3D, (id, v) => Play(id, v));
+                    table.AddTick(fx.Tick);
+                }
+                catch (Exception e) { Debug.LogWarning("AR6DoF : animations de tir impossibles : " + e.Message); fx = null; }
+            }
             y += enemyView.Space(Cell);
             count = Lbl("", 32, 20, TextAnchor.MiddleCenter);
             Draw();
@@ -840,12 +896,46 @@ namespace AR6DoF
 
         void OnEnemyCell(int i)
         {
-            if (phase != 1 || !playerTurn || theirs.shot[i]) return;
+            if (phase != 1 || !playerTurn || flying || theirs.shot[i]) return;
+            if (fx != null)
+            {
+                // le tir part maintenant ; le resultat n'est connu (et montre) qu'a l'impact : le vol est le meme que le tir touche ou non
+                flying = true; playerTurn = false;
+                pending = () => ResolveMine(i);
+                fx.Launch(true, i, () => { var a = pending; pending = null; flying = false; if (a != null) a(); });
+                Draw();
+                return;
+            }
+            ResolveMine(i);
+        }
+
+        static int[] ShipCells(Ar6dofFleet f, int k)
+        {
+            var l = new List<int>();
+            if (k >= 0) for (int j = 0; j < f.ship.Length; j++) if (f.ship[j] == k) l.Add(j);
+            return l.ToArray();
+        }
+
+        void ResolveMine(int i)
+        {
             int sunk;
             int res = theirs.Shoot(i, out sunk);
             myShot = ShotText(res, sunk);
             if (theirs.AllSunk) { phase = 2; iWon = true; }
-            else { playerTurn = false; pcAt = Time.unscaledTime + 0.7f; }
+            else { playerTurn = false; pcAt = Time.unscaledTime + (fx != null ? 1.1f : 0.7f); }
+            if (fx != null) fx.Impact(true, i, res, res == 2 ? ShipCells(theirs, sunk) : null);
+            Draw();
+        }
+
+        void ResolvePc(int i)
+        {
+            int sunk;
+            int res = mine.Shoot(i, out sunk);
+            ai.Report(i, res, mine, sunk);
+            pcShot = ShotText(res, sunk);
+            if (mine.AllSunk) { phase = 2; iWon = false; }
+            else playerTurn = true;
+            if (fx != null) fx.Impact(false, i, res, res == 2 ? ShipCells(mine, sunk) : null);
             Draw();
         }
 
@@ -864,13 +954,15 @@ namespace AR6DoF
                 if (phase != 1) return;
                 int i = ai.Next();
                 if (i < 0) return;
-                int sunk;
-                int res = mine.Shoot(i, out sunk);
-                ai.Report(i, res, mine, sunk);
-                pcShot = ShotText(res, sunk);
-                if (mine.AllSunk) { phase = 2; iWon = false; }
-                else playerTurn = true;
-                Draw();
+                if (fx != null)
+                {
+                    flying = true;
+                    pending = () => ResolvePc(i);
+                    fx.Launch(false, i, () => { var a = pending; pending = null; flying = false; if (a != null) a(); });
+                    Draw();
+                    return;
+                }
+                ResolvePc(i);
             }
         }
 
@@ -900,10 +992,22 @@ namespace AR6DoF
                 }
                 else { ownView.Bg(i, m >= 0 ? Hull : Water); ownView.Token(i, m >= 0 ? Ar6dofShapes.TokShip : 0); ownView.Mark(i, Color.clear, 0f); }
             }
+            if (fx != null)
+            {
+                for (int i = 0; i < 100; i++)
+                {
+                    int k = theirs.ship[i];
+                    lvEnemy[i] = theirs.shot[i] && k >= 0 ? (theirs.left[k] == 0 ? 2 : 1) : 0;
+                    int m = mine.ship[i];
+                    lvOwn[i] = mine.shot[i] && m >= 0 ? (mine.left[m] == 0 ? 2 : 1) : 0;
+                }
+                fx.SetBurning(lvEnemy, lvOwn);
+            }
             Result(phase == 2 ? (iWon ? 1 : 2) : 0);
             string s;
             if (phase == 0) s = "Place ta flotte : melange-la jusqu'a ce qu'elle te plaise, puis commence.";
             else if (phase == 2) s = iWon ? "Victoire ! Toute la flotte ennemie est coulee." : "Defaite : ta flotte est coulee.";
+            else if (flying) s = "Tir en cours...";
             else s = playerTurn ? "A toi de tirer !" : "Le PC vise...";
             status.text = Ar6dofLoc.T(s);
             string line = "";

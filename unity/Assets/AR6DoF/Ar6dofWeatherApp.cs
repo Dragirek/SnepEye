@@ -56,6 +56,7 @@ namespace AR6DoF
         Ar6dofWeatherScene scene;
         Ar6dofSkyGraphic sky;
         Color skyTop, skyBot;
+        float stageOverflow;
         float lastFlash = -1f;
         Text ageText, tTemp, tFeels, tCond, tWindT;
 
@@ -476,14 +477,17 @@ namespace AR6DoF
             float sh = FrameH[FrameLevel];
             float sy = RowY(sh);
             var stage = Ar6dofVrUi.Rect(content, "Scene", new Vector2(0f, sy), new Vector2(IW, sh));
-            sky = stage.gameObject.AddComponent<Ar6dofSkyGraphic>();
+            float drop = DropBy[DropLevel];
+            float s = Mathf.Min(IW / 4.6f, sh / 2.98f);   // la scène occupe de -1,4 à +1,65 en hauteur ; descendre l'île ne rétrécit plus la scène (la pointe peut sortir du cadre)
+            // la pointe de l'île peut descendre sous le cadre : le ciel se prolonge jusqu'en dessous d'elle (+ une marge) et la suite de la fenetre commence apres
+            stageOverflow = Mathf.Max(0f, (1.49f + drop) * s - sh * 0.5f) + 14f;
+            var skyRt = Ar6dofVrUi.Rect(stage, "Ciel", new Vector2(0f, -stageOverflow * 0.5f), new Vector2(IW, sh + stageOverflow));
+            skyRt.SetAsFirstSibling();
+            sky = skyRt.gameObject.AddComponent<Ar6dofSkyGraphic>();
             sky.raycastTarget = false;
             SkyColors(n.cond, n.day, out skyTop, out skyBot, n.temp);
             sky.SetColors(skyTop, skyBot, 26f);
-            sky.enabled = false;                          // plus de cadre : la 3D est posee directement sur la fenetre, sans bordure ni decoupe
             scene = Ar6dofWeatherScene.Create(stage);
-            float drop = DropBy[DropLevel];
-            float s = Mathf.Min(IW / 4.6f, sh / 2.98f);   // la scène occupe de -1,4 à +1,65 en hauteur ; descendre l'île ne rétrécit plus la scène (la pointe peut sortir du cadre)
             scene.transform.localPosition = new Vector3(0f, -(0.09f + drop) * s, -0.75f * s);
             scene.transform.localScale = Vector3.one * s;
             // haut du cadre en unites de la scene ; soleil, lune et etoiles gardent leur hauteur d'avant dans le cadre ; tout ce qui sort du cadre est coupe (relief 3D gardé dedans)
@@ -536,6 +540,7 @@ namespace AR6DoF
             Now n;
             if (!GetNow(out n)) { NoData(); return; }
             BuildStage(n);
+            Space(stageOverflow);
             if (!Hidden(OptScrub)) BuildScrub();
             BuildTiles(n);
             Space(2f);
@@ -904,6 +909,7 @@ namespace AR6DoF
             Now n;
             GetNow(out n);
             BuildStage(n);
+            Space(stageOverflow);
 
             Section("Type de temps");
             const int Cols = 3;

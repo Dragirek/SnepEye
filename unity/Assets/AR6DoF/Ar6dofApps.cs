@@ -50,7 +50,7 @@ namespace AR6DoF
                 desc = "Evenements avec rappel avant leur debut. Scanne une affiche, le programme d'une convention ou un QR code devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
                 make = d => new Ar6dofCalendarApp(d) },
             new Ar6dofAppEntry { id = "memes", title = "Memes", glyph = "memes", yaw = 125f,
-                desc = "Aucun meme pour le moment : de nouveaux arrivent.",
+                desc = "Un logo DVD qui rebondit sur un ecran statique pose dans le monde : plat, ultra-large, incurve, ancien ou portrait.",
                 make = d => new Ar6dofMemesApp(d) },
 
             // ---- jeux (onglet Jeux du Hub)
@@ -72,6 +72,12 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "checkers", title = "Dames", glyph = "checkers", yaw = 89f, game = true,
                 desc = "Jeu de dames contre le PC (8 x 8, prise obligatoire) : trois niveaux.",
                 make = d => new Ar6dofCheckersApp(d) },
+            new Ar6dofAppEntry { id = "connect4", title = "Puissance 4", glyph = "connect4", yaw = -89f, game = true,
+                desc = "Puissance 4 contre le PC : aligne quatre jetons avant lui, trois niveaux.",
+                make = d => new Ar6dofConnect4App(d) },
+            new Ar6dofAppEntry { id = "mines", title = "Demineur", glyph = "mines", yaw = -125f, game = true,
+                desc = "Demineur : ouvre toutes les cases sans mine et pose des drapeaux sur les autres. Trois tailles.",
+                make = d => new Ar6dofMinesApp(d) },
         };
 
         public static Ar6dofAppEntry Find(string id)

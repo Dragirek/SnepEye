@@ -9,7 +9,7 @@ namespace AR6DoF
     /// </summary>
     public sealed class Ar6dofGameSound
     {
-        public enum Id { Lever, Clack, Ping, Whirr, Win1, Win2, Win3, Win4, Lose }
+        public enum Id { Lever, Clack, Ping, Whirr, Win1, Win2, Win3, Win4, Lose, Whoosh, Boom, BigBoom, Splash, Cannon }
 
         const int SR = 22050;
         static readonly AudioClip[] cache = new AudioClip[16];
@@ -125,6 +125,68 @@ namespace AR6DoF
                         for (int k = 0; k < up.Length; k++) Tone(d, 3.2f + k * 0.04f, up[k], 1.7f, 0.17f, 1.9f, 0.6f);
                         for (int k = 0; k < 40; k++) Tone(d, 0.5f + k * 0.1f, 1800f + (float)r.NextDouble() * 3200f, 0.3f, 0.09f, 12f, 0f);
                         return Make("Ar6dofWin4", d);
+                    }
+                case Id.Whoosh:
+                    {
+                        float dur = 0.9f;
+                        var d = new float[(int)(dur * SR)];
+                        float lp = 0f;
+                        for (int i = 0; i < d.Length; i++)
+                        {
+                            float t = (float)i / SR;
+                            float env = Mathf.Pow(Mathf.Sin(Mathf.PI * t / dur), 1.5f);
+                            float n = (float)(r.NextDouble() * 2.0 - 1.0);
+                            lp += (n - lp) * (0.04f + 0.22f * env);
+                            d[i] = lp * env * 2.2f;
+                        }
+                        return Make("Ar6dofWhoosh", d);
+                    }
+                case Id.Boom:
+                case Id.BigBoom:
+                    {
+                        bool big = id == Id.BigBoom;
+                        float dur = big ? 2.6f : 1.3f;
+                        var d = new float[(int)(dur * SR)];
+                        float ph = 0f, lp = 0f;
+                        for (int i = 0; i < d.Length; i++)
+                        {
+                            float t = (float)i / SR;
+                            float f = (big ? 62f : 78f) * Mathf.Exp(-t * 2.2f) + 26f;
+                            ph += 2f * Mathf.PI * f / SR;
+                            float n = (float)(r.NextDouble() * 2.0 - 1.0);
+                            lp += (n - lp) * (0.12f + 0.4f * Mathf.Exp(-t * 8f));
+                            float v = Mathf.Sin(ph) * Mathf.Exp(-t * (big ? 1.5f : 3.2f)) * 0.95f + lp * Mathf.Exp(-t * (big ? 2.2f : 6f)) * 0.9f;
+                            if (big && t > 0.28f) { float t2 = t - 0.28f; v += Mathf.Sin(2f * Mathf.PI * 48f * t2) * Mathf.Exp(-t2 * 2.4f) * 0.5f; }
+                            d[i] = v;
+                        }
+                        return Make(big ? "Ar6dofBigBoom" : "Ar6dofBoom", d);
+                    }
+                case Id.Splash:
+                    {
+                        var d = new float[(int)(0.7f * SR)];
+                        float lp = 0f;
+                        for (int i = 0; i < d.Length; i++)
+                        {
+                            float t = (float)i / SR;
+                            float n = (float)(r.NextDouble() * 2.0 - 1.0);
+                            lp += (n - lp) * 0.25f;
+                            d[i] = (n - lp) * Mathf.Exp(-t * 8f) * 0.55f;
+                        }
+                        for (int k = 0; k < 5; k++) Tone(d, 0.06f + k * 0.07f, 650f + (float)r.NextDouble() * 800f, 0.08f, 0.12f, 38f, 0f);
+                        return Make("Ar6dofSplash", d);
+                    }
+                case Id.Cannon:
+                    {
+                        var d = new float[(int)(0.8f * SR)];
+                        float lp = 0f;
+                        for (int i = 0; i < d.Length; i++)
+                        {
+                            float t = (float)i / SR;
+                            float n = (float)(r.NextDouble() * 2.0 - 1.0);
+                            lp += (n - lp) * 0.3f;
+                            d[i] = n * Mathf.Exp(-t * 32f) * 0.8f + Mathf.Sin(2f * Mathf.PI * 88f * t) * Mathf.Exp(-t * 9f) * 0.8f + lp * Mathf.Exp(-t * 7f) * 0.45f;
+                        }
+                        return Make("Ar6dofCannon", d);
                     }
                 default:
                     {

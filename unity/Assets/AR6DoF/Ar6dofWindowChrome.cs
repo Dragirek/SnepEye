@@ -635,8 +635,12 @@ namespace AR6DoF
             if (!hasClose) bMin.transform.localPosition = new Vector3(x0, cy, 0f);
             // poignée de taille : SOUS la fenêtre, dans son aplomb (jamais à droite : elle tomberait sur l'écran voisin)
             bResize.transform.localPosition = new Vector3(hs.x - S * 0.5f, row1, 0f);
-            // remise a la taille d'origine : juste sous la poignee de taille (jamais a cote : elle tombait sur la roue ou sur « fermer »)
-            bReset.transform.localPosition = new Vector3(hs.x - S * 0.5f, row2, 0f);
+            // remise a la taille d'origine : a GAUCHE de la poignee de taille, sur la meme rangee (et a gauche de « fermer / reduire » s'ils sont aussi sur cette rangee) ;
+            // s'il n'y a pas la place (fenetre etroite : elle tomberait sur la roue ou la barre), elle passe sous la poignee comme avant
+            int before = (corner == 3 && cy == row1) ? nBtn : 0;
+            float resetX = hs.x - S * 0.5f - step * (1 + before);
+            bool fits = resetX - S * 0.5f > gearRight + Gap;
+            bReset.transform.localPosition = fits ? new Vector3(resetX, row1, 0f) : new Vector3(hs.x - S * 0.5f, row2, 0f);
             // barre de déplacement : sous la fenêtre, au milieu
             bMove.gameObject.SetActive(canMove);
             float barY = -hs.y - Gap - S * MoveThick * 0.5f;

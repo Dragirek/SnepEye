@@ -10,7 +10,7 @@ namespace AR6DoF
     /// </summary>
     public abstract class Ar6dofGameWindow : Ar6dofAppWindow
     {
-        const string Pref = "ar6dof_games_3d", PrefSound = "ar6dof_games_sound", PrefVol = "ar6dof_games_volume", PrefFloor = "ar6dof_floor_drop";
+        const string Pref = "ar6dof_games_3d", PrefSound = "ar6dof_games_sound", PrefVol = "ar6dof_games_volume";
         protected Ar6dofTable3D table;
         protected readonly Ar6dofGameSound snd = new Ar6dofGameSound();
         bool failed;
@@ -30,11 +30,15 @@ namespace AR6DoF
             set { try { PlayerPrefs.SetFloat(PrefVol, Mathf.Clamp01(value)); } catch (Exception) { } }
         }
 
-        /// <summary>De combien de metres sous ta tete se trouve le sol, pour les pieces qui tombent.</summary>
-        public static float FloorDrop
+        /// <summary>De combien de metres sous ta tete se trouve le sol : la hauteur des yeux connue du suivi (sol detecte / verrouille), sinon celle des reglages.</summary>
+        protected float FloorDrop
         {
-            get { try { return Mathf.Clamp(PlayerPrefs.GetFloat(PrefFloor, 1.5f), 0.6f, 2.4f); } catch (Exception) { return 1.5f; } }
-            set { try { PlayerPrefs.SetFloat(PrefFloor, Mathf.Clamp(value, 0.6f, 2.4f)); } catch (Exception) { } }
+            get
+            {
+                var r = dock != null ? dock.rig : null;
+                if (r != null && r.HasPose && r.HeadHeight > 0.3f) return Mathf.Clamp(r.HeadHeight, 0.4f, 2.6f);
+                return Ar6dofHeadRig.ConfiguredEyeHeight(Ar6dofSettings.Current.seated);
+            }
         }
 
         protected Ar6dofGameWindow(Ar6dofDock d, string id, string name, string glyph, string desc, float width) : base(d, id, name, glyph, desc, width) { }
@@ -164,6 +168,18 @@ namespace AR6DoF
                 catch (Exception e) { Fail3D(e); }
             }
             return Ar6dofBoardView.Make(content, cx, top, cell, n, click, text);
+        }
+
+        /// <summary>Plateau rectangulaire (lignes x colonnes), meme principe que NewBoard.</summary>
+        protected Ar6dofBoardView NewBoard(float cx, float top, float cell, int rows, int cols, Action<int> click, bool text, float x3, float cell3, Color slab)
+        {
+            var tb = EnsureTable(slab);
+            if (tb != null)
+            {
+                try { return Ar6dofBoardView.Make3D(tb, rows, cols, cell3, x3, 0f, click); }
+                catch (Exception e) { Fail3D(e); }
+            }
+            return Ar6dofBoardView.Make(content, cx, top, cell, rows, cols, click, text);
         }
 
         protected sealed override void OnRebuildStart()

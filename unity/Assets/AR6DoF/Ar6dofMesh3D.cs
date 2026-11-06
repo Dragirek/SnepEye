@@ -144,6 +144,8 @@ namespace AR6DoF
     {
         // jetons des pieces : 100 + type * 2 + blanc (echecs : 0 pion, 1 tour, 2 cavalier, 3 fou, 4 dame, 5 roi) ; 200 + 2 * dame + blanc (dames) ; 300 X ; 301 O ; 400 a 402 bateaux
         public const int TokX = 300, TokO = 301, TokShip = 400, TokShipHit = 401, TokShipSunk = 402;
+        // puissance 4 : 500 rouge, 501 jaune ; demineur : 600 case cachee, 601 a 608 chiffres, 610 mine, 611 drapeau
+        public const int TokRed = 500, TokYellow = 501, TokHidden = 600, TokMine = 610, TokFlag = 611;
         public static int Chess(int kind, bool white) { return 100 + kind * 2 + (white ? 1 : 0); }
         public static int Checker(bool king, bool white) { return 200 + (king ? 2 : 0) + (white ? 1 : 0); }
 
@@ -158,6 +160,11 @@ namespace AR6DoF
                 switch ((tok - 100) >> 1) { case 0: return 0.6f; case 1: return 0.72f; case 2: return 0.8f; case 3: return 0.88f; case 4: return 0.98f; default: return 1.12f; }
             }
             if (tok >= 200 && tok < 300) return tok >= 202 ? 0.32f : 0.16f;
+            if (tok == TokRed || tok == TokYellow) return 0.12f;
+            if (tok == TokHidden) return 0.14f;
+            if (tok > TokHidden && tok < TokMine) return 0.03f;
+            if (tok == TokMine) return 0.52f;
+            if (tok == TokFlag) return 0.5f;
             if (tok == TokX || tok == TokO) return 0.1f;
             if (tok >= 400) return 0.2f;
             return 0.1f;
@@ -167,6 +174,25 @@ namespace AR6DoF
         {
             bool white = (tok & 1) == 1;
             if ((tok >= 100 && tok < 300)) return white ? new Color(0.95f, 0.92f, 0.85f) : new Color(0.16f, 0.16f, 0.2f);
+            if (tok == TokRed) return new Color(0.9f, 0.14f, 0.16f);
+            if (tok == TokYellow) return new Color(1f, 0.85f, 0.15f);
+            if (tok == TokHidden) return new Color(0.58f, 0.66f, 0.8f);
+            if (tok == TokMine) return new Color(0.08f, 0.08f, 0.1f);
+            if (tok == TokFlag) return new Color(0.95f, 0.2f, 0.18f);
+            if (tok > TokHidden && tok < TokMine)
+            {
+                switch (tok - 600)
+                {
+                    case 1: return new Color(0.3f, 0.5f, 1f);
+                    case 2: return new Color(0.2f, 0.78f, 0.3f);
+                    case 3: return new Color(1f, 0.3f, 0.3f);
+                    case 4: return new Color(0.55f, 0.4f, 1f);
+                    case 5: return new Color(0.95f, 0.5f, 0.2f);
+                    case 6: return new Color(0.2f, 0.8f, 0.8f);
+                    case 7: return new Color(0.95f, 0.95f, 0.95f);
+                    default: return new Color(0.7f, 0.7f, 0.74f);
+                }
+            }
             if (tok == TokX) return new Color(1f, 0.45f, 0.4f);
             if (tok == TokO) return new Color(0.5f, 0.78f, 1f);
             if (tok == TokShip) return new Color(0.58f, 0.62f, 0.7f);
@@ -209,12 +235,12 @@ namespace AR6DoF
                         for (int k = 0; k < 4; k++)
                         {
                             float a = k * Mathf.PI * 0.5f;
-                            b.Box(new Vector3(Mathf.Cos(a) * 0.2f, 0.67f, Mathf.Sin(a) * 0.2f), new Vector3(0.13f, 0.1f, 0.13f), Quaternion.Euler(0f, -a * Mathf.Rad2Deg, 0f));
+                            b.Box(new Vector3(Mathf.Cos(a) * 0.2f, 0.665f, Mathf.Sin(a) * 0.2f), new Vector3(0.13f, 0.11f, 0.13f), Quaternion.Euler(0f, -a * Mathf.Rad2Deg, 0f));
                         }
                         break;
                     case 2:   // cavalier : tourne vers +z
-                        b.Lathe(Join(Base, 0.27f, 0.12f), 14, Vector3.zero);
-                        b.Box(new Vector3(0f, 0.32f, -0.02f), new Vector3(0.24f, 0.4f, 0.3f));
+                        b.Lathe(Join(Base, 0.27f, 0.12f, 0f, 0.12f), 14, Vector3.zero);   // plateau ferme : sinon on voit le fond de la base a travers (z-fighting avec la case)
+                        b.Box(new Vector3(0f, 0.31f, -0.02f), new Vector3(0.24f, 0.42f, 0.3f));
                         b.Box(new Vector3(0f, 0.56f, 0.1f), new Vector3(0.2f, 0.2f, 0.38f), Quaternion.Euler(25f, 0f, 0f));
                         b.Box(new Vector3(0f, 0.5f, 0.3f), new Vector3(0.16f, 0.14f, 0.2f), Quaternion.Euler(15f, 0f, 0f));
                         b.Box(new Vector3(-0.06f, 0.72f, -0.02f), new Vector3(0.05f, 0.1f, 0.05f));
@@ -235,8 +261,8 @@ namespace AR6DoF
                         break;
                     default:  // roi
                         b.Lathe(Join(Base, 0.13f, 0.24f, 0.11f, 0.4f, 0.17f, 0.5f, 0.23f, 0.64f, 0.25f, 0.8f, 0.17f, 0.88f, 0f, 0.88f), 18, Vector3.zero);
-                        b.Box(new Vector3(0f, 1f, 0f), new Vector3(0.07f, 0.24f, 0.07f));
-                        b.Box(new Vector3(0f, 1.03f, 0f), new Vector3(0.2f, 0.07f, 0.07f));
+                        b.Box(new Vector3(0f, 0.99f, 0f), new Vector3(0.07f, 0.26f, 0.07f));
+                        b.Box(new Vector3(0f, 1.03f, 0f), new Vector3(0.2f, 0.07f, 0.056f));
                         break;
                 }
             }
@@ -244,12 +270,42 @@ namespace AR6DoF
             {
                 bool king = tok >= 202;
                 b.Lathe(new[] { 0f, 0f, 0.36f, 0f, 0.37f, 0.03f, 0.37f, 0.13f, 0.3f, 0.16f, 0f, 0.16f }, 20, Vector3.zero);
-                if (king) b.Lathe(new[] { 0f, 0f, 0.36f, 0f, 0.37f, 0.03f, 0.37f, 0.13f, 0.3f, 0.16f, 0f, 0.16f }, 20, new Vector3(0f, 0.16f, 0f));
+                if (king) b.Lathe(new[] { 0f, 0f, 0.36f, 0f, 0.37f, 0.03f, 0.37f, 0.13f, 0.3f, 0.16f, 0f, 0.16f }, 20, new Vector3(0f, 0.158f, 0f));
+            }
+            else if (tok == TokRed || tok == TokYellow)
+            {
+                b.Lathe(new[] { 0f, 0f, 0.4f, 0f, 0.42f, 0.03f, 0.42f, 0.09f, 0.4f, 0.12f, 0.3f, 0.12f, 0.3f, 0.105f, 0f, 0.105f }, 24, Vector3.zero);   // jeton avec un creux au milieu
+            }
+            else if (tok == TokHidden)
+            {
+                b.Box(new Vector3(0f, 0.07f, 0f), new Vector3(0.92f, 0.14f, 0.92f));
+            }
+            else if (tok > TokHidden && tok < TokMine)
+            {
+                Digit(b, tok - 600);
+            }
+            else if (tok == TokMine)
+            {
+                b.Sphere(new Vector3(0f, 0.27f, 0f), 0.2f, 7, 12);
+                for (int k = 0; k < 3; k++)   // des tailles legerement differentes : deux barres ne partagent jamais le meme plan (pas de scintillement)
+                {
+                    float th = 0.07f - 0.003f * k;
+                    b.Box(new Vector3(0f, 0.27f, 0f), new Vector3(0.5f, th, th), Quaternion.Euler(0f, k * 60f, 0f));
+                }
+                b.Box(new Vector3(0f, 0.27f, 0f), new Vector3(0.058f, 0.5f, 0.058f), Quaternion.identity);
+                b.Box(new Vector3(0f, 0.27f, 0f), new Vector3(0.061f, 0.061f, 0.5f), Quaternion.identity);
+            }
+            else if (tok == TokFlag)
+            {
+                b.Lathe(new[] { 0f, 0f, 0.2f, 0f, 0.2f, 0.04f, 0f, 0.06f }, 12, Vector3.zero);
+                b.Box(new Vector3(0f, 0.27f, 0f), new Vector3(0.04f, 0.46f, 0.04f));
+                b.Face(new[] { new Vector3(0.02f, 0.5f, 0f), new Vector3(0.02f, 0.28f, 0f), new Vector3(0.3f, 0.39f, 0f) });
+                b.Face(new[] { new Vector3(-0.02f, 0.5f, 0f), new Vector3(-0.02f, 0.28f, 0f), new Vector3(-0.3f, 0.39f, 0f) });
             }
             else if (tok == TokX)
             {
                 b.Box(new Vector3(0f, 0.05f, 0f), new Vector3(0.72f, 0.1f, 0.14f), Quaternion.Euler(0f, 45f, 0f));
-                b.Box(new Vector3(0f, 0.05f, 0f), new Vector3(0.72f, 0.1f, 0.14f), Quaternion.Euler(0f, -45f, 0f));
+                b.Box(new Vector3(0f, 0.048f, 0f), new Vector3(0.72f, 0.096f, 0.14f), Quaternion.Euler(0f, -45f, 0f));   // un peu plus bas : sinon les deux dessus sont au meme niveau et scintillent
             }
             else if (tok == TokO)
             {
@@ -260,6 +316,21 @@ namespace AR6DoF
                 b.Box(new Vector3(0f, 0.1f, 0f), new Vector3(0.88f, 0.2f, 0.88f));
             }
             return b.ToMesh(name);
+        }
+
+        // chiffre a segments, a plat sur la case (haut du chiffre vers le fond du plateau)
+        static readonly int[] Seg = { 0, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F };   // bits : a b c d e f g
+        static void Digit(Ar6dofMeshBuilder b, int d)
+        {
+            int m = Seg[Mathf.Clamp(d, 0, 8)];
+            const float y = 0.015f, th = 0.03f;
+            if ((m & 1) != 0) b.Box(new Vector3(0f, y, 0.28f), new Vector3(0.3f, th, 0.08f));        // a haut
+            if ((m & 2) != 0) b.Box(new Vector3(0.17f, y, 0.14f), new Vector3(0.08f, th, 0.2f));     // b haut droite
+            if ((m & 4) != 0) b.Box(new Vector3(0.17f, y, -0.14f), new Vector3(0.08f, th, 0.2f));    // c bas droite
+            if ((m & 8) != 0) b.Box(new Vector3(0f, y, -0.28f), new Vector3(0.3f, th, 0.08f));       // d bas
+            if ((m & 16) != 0) b.Box(new Vector3(-0.17f, y, -0.14f), new Vector3(0.08f, th, 0.2f));  // e bas gauche
+            if ((m & 32) != 0) b.Box(new Vector3(-0.17f, y, 0.14f), new Vector3(0.08f, th, 0.2f));   // f haut gauche
+            if ((m & 64) != 0) b.Box(new Vector3(0f, y, 0f), new Vector3(0.3f, th, 0.08f));          // g milieu
         }
 
         // ---------------------------------------------------------------- des

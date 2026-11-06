@@ -26,7 +26,7 @@ namespace AR6DoF
         Transform lever, machine;
         float leverPull = -1f;
         float shakeStart, shakeUntil, shakeAmp;
-        static readonly Vector3 MachinePos = new Vector3(0f, 0f, 0.07f);
+        static readonly Vector3 MachinePos = new Vector3(0f, 0f, 0.045f);
         const float MachineScale = 0.7f;      // la machine fait 70 % de sa taille d'origine
 
         /// <summary>Appele quand un rouleau finit de s'arreter (0, 1, 2) : sert au bruit sec.</summary>
@@ -34,8 +34,8 @@ namespace AR6DoF
 
         /// <summary>D'ou sortent les pieces (bac devant la machine) et les canons a confettis, dans le repere de la table.</summary>
         public Vector3 Chute { get { return MachinePos + new Vector3(0f, 0.075f, -0.115f) * MachineScale; } }
-        public Vector3 CannonL { get { return new Vector3(-0.17f, 0.02f, -0.02f); } }
-        public Vector3 CannonR { get { return new Vector3(0.17f, 0.02f, -0.02f); } }
+        public Vector3 CannonL { get { return new Vector3(-0.125f, 0.02f, -0.03f); } }
+        public Vector3 CannonR { get { return new Vector3(0.125f, 0.02f, -0.03f); } }
         public Vector3 SignPos { get { return MachinePos + new Vector3(0f, 0.52f, -0.11f) * MachineScale; } }
 
         /// <summary>La machine tremble (gain) pendant 'seconds' secondes.</summary>
@@ -50,7 +50,7 @@ namespace AR6DoF
         public Ar6dofSlots3D(Ar6dofTable3D table, Action onLever, int[] symbols)
         {
             t = table;
-            t.SetSlab(0f, 0f, 0.42f, 0.38f);
+            t.SetSlab(0f, 0f, 0.37f, 0.27f);
             var mg = new GameObject("Machine");
             mg.transform.SetParent(t.content, false);
             mg.transform.localPosition = MachinePos;
