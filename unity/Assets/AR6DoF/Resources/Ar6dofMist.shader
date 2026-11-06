@@ -37,8 +37,18 @@ Shader "AR6DoF/Mist"
             {
                 if (_ClipHalf.z > 0.5)
                 {
+                    // fenetre : on coupe selon ce que l'oeil VOIT du cadre. Le rayon oeil -> point est prolonge jusqu'au plan du cadre et c'est ce point-la
+                    // qui est teste (un test droit sur x, y laissait le relief 3D depasser visuellement du cadre des qu'on regarde en biais)
                     float3 q = mul(_ClipM, float4(i.wpos, 1.0)).xyz;
-                    float2 dd = max(abs(q.xy) - (_ClipHalf.xy - _ClipHalf.w), 0.0);
+                    float3 qc = mul(_ClipM, float4(_WorldSpaceCameraPos, 1.0)).xyz;
+                    float dz = qc.z - q.z;
+                    float2 pq = q.xy;
+                    if (abs(dz) > 1e-3)
+                    {
+                        float tt = qc.z / dz;
+                        if (tt > 0.0) pq = qc.xy + tt * (q.xy - qc.xy);
+                    }
+                    float2 dd = max(abs(pq) - (_ClipHalf.xy - _ClipHalf.w), 0.0);
                     clip(_ClipHalf.w - length(dd));
                 }
                 float3 n = normalize(i.n);
