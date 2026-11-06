@@ -118,6 +118,7 @@ namespace AR6DoF
         public float perfRenderScale = 1f; // 0.5 .. 1 : résolution de l'interface des yeux (appliqué au lancement suivant)
         public float eyeHeightCm = 165f;   // hauteur de tes yeux debout (cm) : sert quand le sol n'est pas detecte, et au bouton « Sol ici »
         public float eyeHeightSeatedCm = 120f;   // idem assis
+        public float windowDistance = 1.2f;   // distance (m) a laquelle s'ouvrent les fenetres et menus (un objet reel plus pres de toi que la fenetre semble se decaler quand tu bouges : c'est la parallaxe)
         public bool menusFollow = false;   // « Suivi actif » : tous les menus te suivent quand tu te deplaces ; sinon ils restent ancres dans la piece
         public float moveScale = 1f;       // échelle des déplacements de la tête (0,25 .. 4) : corrige un suivi qui sous- ou sur-estime les pas (base entre les objectifs mal réglée)
 

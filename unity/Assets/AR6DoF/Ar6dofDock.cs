@@ -1111,8 +1111,9 @@ namespace AR6DoF
             var taken = new List<Taken>();
             CollectTaken(taken, t, eye, f);
 
-            float bestYaw = 0f, bestDist = 1.2f, bestCost = float.MaxValue;
-            float[] dists = { 1.2f, 1.6f };
+            float wd = Mathf.Clamp(Ar6dofSettings.Current.windowDistance, 0.5f, 2f);
+            float bestYaw = 0f, bestDist = wd, bestCost = float.MaxValue;
+            float[] dists = { wd, wd * 1.33f };
             for (int di = 0; di < dists.Length && bestCost > 0f; di++)
             {
                 float D = dists[di];

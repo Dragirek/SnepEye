@@ -594,7 +594,7 @@ namespace AR6DoF
         static readonly string[] LookFields = { "global", "dock", "menus", "keyboard", "screens", "laser", "customStyles" };
         static readonly string[] ChromeFields = { "chromeStyle", "chromeCorner", "chromeScale" };
         static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
-        static readonly string[] HeadFields = { "moveScale", "eyeHeightCm", "eyeHeightSeatedCm", "menusFollow" };
+        static readonly string[] HeadFields = { "moveScale", "eyeHeightCm", "eyeHeightSeatedCm", "menusFollow", "windowDistance" };
         static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
         static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
@@ -1147,6 +1147,7 @@ namespace AR6DoF
             ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "Sol ici : mes yeux sont a cette hauteur", () => { if (dock.rig != null && dock.rig.HasPose) dock.rig.SetFloorFromEyeHeight(); }, 20);
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Suivi actif : les menus me suivent (non = ancres dans la piece)", () => Ar6dofSettings.Current.menusFollow, v => { Ar6dofSettings.Current.menusFollow = v; Touch(); }, 600f);
             // échelle des déplacements : si les menus "reculent" quand tu avances, le suivi sous-estime tes pas ; on la mesure avec un pas connu
+            StepRow(page, ref c, "Distance d'ouverture des fenetres (cm, a la prochaine ouverture)", 50f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.windowDistance * 100f), v => { Ar6dofSettings.Current.windowDistance = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Echelle des deplacements (%, 100 = exact)", 40f, 400f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.moveScale * 100f), v => { Ar6dofSettings.Current.moveScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Distance que tu vas parcourir (cm)", 30f, 300f, 1f, 10f, 50f, () => scaleDistCm, v => { scaleDistCm = Mathf.Round(v); UpdateScaleBtn(); }, "0");
             scaleBtnText = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", ScaleMeasure, 20);
