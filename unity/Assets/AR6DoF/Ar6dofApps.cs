@@ -50,7 +50,7 @@ namespace AR6DoF
                 desc = "Evenements avec rappel avant leur debut. Scanne une affiche, le programme d'une convention ou un QR code devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
                 make = d => new Ar6dofCalendarApp(d) },
             new Ar6dofAppEntry { id = "memes", title = "Memes", glyph = "memes", yaw = 125f,
-                desc = "Pose dans le monde un chat toupie, un escargot immortel ou un cafard dansant. Touche-les au laser : ils reagissent. Rien ne tourne sans meme pose.",
+                desc = "Aucun meme pour le moment : de nouveaux arrivent.",
                 make = d => new Ar6dofMemesApp(d) },
 
             // ---- jeux (onglet Jeux du Hub)

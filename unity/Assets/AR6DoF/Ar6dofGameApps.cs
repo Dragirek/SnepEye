@@ -262,6 +262,7 @@ namespace AR6DoF
                 view.Bg(i, win ? Ar6dofGameUi.C(0.22f, 0.5f, 0.28f) : ((i & 1) == 0 ? Ar6dofGameUi.C(0.24f, 0.28f, 0.36f) : Ar6dofGameUi.C(0.3f, 0.34f, 0.43f)));
                 view.Caption(i, cells[i] == 1 ? "X" : (cells[i] == 2 ? "O" : ""), cells[i] == 1 ? Ar6dofGameUi.C(1f, 0.45f, 0.4f) : Ar6dofGameUi.C(0.5f, 0.78f, 1f));
             }
+            Result(result);
             string s;
             if (result == 1) s = "Tu as gagne !";
             else if (result == 2) s = "Le PC a gagne.";
@@ -316,7 +317,7 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
-            ViewBar();
+            ViewBar(false);
             Section("Type de de");
             for (int row = 0; row < 2; row++)
             {
@@ -470,7 +471,7 @@ namespace AR6DoF
         int credits = 100, betIdx;
         bool spinning;
         float spinStart, winUntil, leverUntil;
-        int lastWin;
+        int lastWin, bannerId;
         string message = "";
         Image[][] syms;
         Image[] bulbs;
@@ -488,7 +489,15 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { machineTop = -1f; s3 = null; syms = null; bulbs = null; ball = null; creditText = null; msgText = null; rechargeBtn = null; betBtns.Clear(); }
 
-        public override void OnClosed() { spinning = false; }
+        public override void OnClosed() { spinning = false; snd.StopWhirr(); }
+
+        static readonly Color Gold = new Color(1f, 0.86f, 0.25f);
+
+        protected override void OnVisible(bool on)
+        {
+            base.OnVisible(on);
+            if (!on) spinning = false;
+        }
 
         int RandSymbol()
         {
@@ -559,6 +568,9 @@ namespace AR6DoF
             rechargeBtn = bs[3];
             refreshers.Add(() => { if (rechargeBtn != null) rechargeBtn.interactable = credits < Bets[betIdx]; });
             Btn("Lancer", Spin, 66f, 32);
+            if (s3 != null)
+                SliderRow("Sol sous la tete", 0.6f, 2.4f, () => FloorDrop, v => FloorDrop = v, v => Fmt("{0:0.00} m", v), 50f);
+            SliderRow("Volume", 0f, 1f, () => SoundVolume, v => SoundVolume = v, Pct, 50f);
 
             // table des gains
             Section("Gains (trois identiques au milieu)");
@@ -589,6 +601,10 @@ namespace AR6DoF
             spinStart = Time.unscaledTime;
             leverUntil = spinStart + 0.35f;
             if (s3 != null) s3.Spin(result, StopAt, spinStart);
+            ClearBanner();
+            Play(Ar6dofGameSound.Id.Lever);
+            snd.on = SoundOn; snd.volume = SoundVolume;
+            snd.StartWhirr();
             message = "";
             winUntil = 0f;
             Draw();
@@ -615,7 +631,7 @@ namespace AR6DoF
                 bool all = true;
                 for (int r = 0; r < 3; r++)
                 {
-                    if (!stopped[r] && t >= StopAt[r]) { stopped[r] = true; rows[r][1] = result[r]; rows[r][0] = RandSymbol(); rows[r][2] = RandSymbol(); }
+                    if (!stopped[r] && t >= StopAt[r]) { stopped[r] = true; rows[r][1] = result[r]; rows[r][0] = RandSymbol(); rows[r][2] = RandSymbol(); Play(Ar6dofGameSound.Id.Clack, 0.9f); }
                     if (!stopped[r]) all = false;
                 }
                 if (all) EndSpin(now);
@@ -642,6 +658,7 @@ namespace AR6DoF
                         rows[r][0] = RandSymbol();
                         rows[r][2] = RandSymbol();
                         popAt[r] = now;
+                        Play(Ar6dofGameSound.Id.Clack, 0.9f);
                         ShowReel(r);
                         continue;
                     }
@@ -710,10 +727,38 @@ namespace AR6DoF
                 Save();
                 message = Ar6dofLoc.F("Gagne ! +{0} jetons", lastWin);
                 winUntil = now + 2f;
+                Celebrate(mult, now);
             }
-            else message = "Perdu... retente ta chance !";
+            else
+            {
+                message = "Perdu... retente ta chance !";
+                snd.StopWhirr();
+                Play(Ar6dofGameSound.Id.Lose, 0.8f);
+                if (s3 != null) Banner(++bannerId, Ar6dofLoc.T("Perdu"), new Color(0.72f, 0.8f, 0.97f), new Vector3(0f, 0.5f, 0.02f), 0.2f);
+            }
             Draw();
             Refresh();
+        }
+
+        /// <summary>Gain : jingle, jet de pieces, confettis, machine qui tremble et banniere. Plus le gain est gros, plus c'est long et fourni (niveau 1 a 4).</summary>
+        void Celebrate(int mult, float now)
+        {
+            int tier = mult >= 150 ? 4 : (mult >= 60 ? 3 : (mult >= 16 ? 2 : 1));
+            if (Bets[betIdx] == 10 && tier < 4) tier++;       // gros pari : plus gros spectacle
+            snd.StopWhirr();
+            Play(tier == 1 ? Ar6dofGameSound.Id.Win1 : (tier == 2 ? Ar6dofGameSound.Id.Win2 : (tier == 3 ? Ar6dofGameSound.Id.Win3 : Ar6dofGameSound.Id.Win4)));
+            winUntil = now + 1.5f + tier * 1.2f;
+            if (s3 == null || table == null) return;
+            try
+            {
+                var f = table.Festive;
+                f.OnCoins = snd.Coins;
+                f.Show(tier, s3.Chute, s3.CannonL, s3.CannonR, now, FloorDrop);
+                s3.Shake(0.6f + tier * 0.5f, 0.004f + tier * 0.0015f, now);
+                string head = tier >= 4 ? "JACKPOT !" : (tier == 3 ? "SUPER GAIN !" : "Gagne !");
+                Banner(++bannerId, Ar6dofLoc.T(head) + "  +" + lastWin, Gold, new Vector3(0f, 0.56f, 0.02f), 0.2f + tier * 0.06f);
+            }
+            catch (Exception e) { Debug.LogWarning("AR6DoF : spectacle impossible : " + e.Message); }
         }
 
         void Draw()
@@ -855,6 +900,7 @@ namespace AR6DoF
                 }
                 else { ownView.Bg(i, m >= 0 ? Hull : Water); ownView.Token(i, m >= 0 ? Ar6dofShapes.TokShip : 0); ownView.Mark(i, Color.clear, 0f); }
             }
+            Result(phase == 2 ? (iWon ? 1 : 2) : 0);
             string s;
             if (phase == 0) s = "Place ta flotte : melange-la jusqu'a ce qu'elle te plaise, puis commence.";
             else if (phase == 2) s = iWon ? "Victoire ! Toute la flotte ennemie est coulee." : "Defaite : ta flotte est coulee.";
@@ -1018,6 +1064,7 @@ namespace AR6DoF
                     }
                 view.Mark(vi, dest ? new Color(0.1f, 0.45f, 0.15f, 0.65f) : Color.clear, p != 0 ? 0.5f : 0.3f);
             }
+            Result(status == 0 ? 0 : (status == 1 ? (game.side == playerSide ? 2 : 1) : 3));
             string s;
             if (status == 1) s = game.side == playerSide ? "Echec et mat : le PC gagne." : "Echec et mat : tu gagnes !";
             else if (status == 2) s = "Pat : partie nulle.";
@@ -1172,6 +1219,7 @@ namespace AR6DoF
                         if (moves[k].path[0] == selected && moves[k].path[moves[k].path.Length - 1] == sq) { dest = true; break; }
                 view.Mark(vi, dest ? new Color(0.4f, 0.95f, 0.45f, 0.8f) : Color.clear, 0.34f);
             }
+            Result(status == 0 ? 0 : (status == 1 ? (game.side == playerSide ? 2 : 1) : 3));
             string s;
             if (status == 1) s = game.side == playerSide ? "Plus de coup : le PC gagne." : "Le PC n'a plus de coup : tu gagnes !";
             else if (status == 2) s = "Partie nulle.";

@@ -1382,6 +1382,15 @@ namespace AR6DoF
             "Confirmer : tout retirer => Confirm: remove all",
             "Ramener le plateau => Bring the board back",
             "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => The game is placed in front of you: aim at it with the laser. Hold the button on the base to move it.",
+            "Aucun meme pour le moment : de nouveaux arrivent. => No memes for now: new ones are coming.",
+            "Aucun meme pour le moment. De nouveaux memes a poser dans le monde arriveront bientot. => No memes for now. New memes to place in the world are coming soon.",
+            "Son => Sound",
+            "Sol sous la tete => Floor below head",
+            "Gagne ! => You win!",
+            "Perdu => You lose",
+            "Egalite => Draw",
+            "SUPER GAIN ! => SUPER WIN!",
+            "JACKPOT ! => JACKPOT!",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2754,6 +2763,15 @@ namespace AR6DoF
             "Confirmer : tout retirer => Confirmar: quitar todo",
             "Ramener le plateau => Traer el tablero de vuelta",
             "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => El juego esta colocado delante de ti: apuntalo con el laser. Manten el boton pulsado sobre la base para moverlo.",
+            "Aucun meme pour le moment : de nouveaux arrivent. => Ningun meme por ahora: llegaran nuevos.",
+            "Aucun meme pour le moment. De nouveaux memes a poser dans le monde arriveront bientot. => Ningun meme por ahora. Pronto llegaran nuevos memes para colocar en el mundo.",
+            "Son => Sonido",
+            "Sol sous la tete => Suelo bajo la cabeza",
+            "Gagne ! => Has ganado!",
+            "Perdu => Has perdido",
+            "Egalite => Empate",
+            "SUPER GAIN ! => SUPER PREMIO!",
+            "JACKPOT ! => JACKPOT!",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4133,6 +4151,15 @@ namespace AR6DoF
             "Confirmer : tout retirer => Bestaetigen: alle entfernen",
             "Ramener le plateau => Spielfeld zurueckholen",
             "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => Das Spiel steht vor dir: ziele mit dem Laser darauf. Halte die Taste auf dem Sockel gedrueckt, um es zu verschieben.",
+            "Aucun meme pour le moment : de nouveaux arrivent. => Vorerst keine Memes: neue kommen.",
+            "Aucun meme pour le moment. De nouveaux memes a poser dans le monde arriveront bientot. => Vorerst keine Memes. Bald kommen neue Memes zum Platzieren in der Welt.",
+            "Son => Ton",
+            "Sol sous la tete => Boden unter dem Kopf",
+            "Gagne ! => Gewonnen!",
+            "Perdu => Verloren",
+            "Egalite => Unentschieden",
+            "SUPER GAIN ! => SUPER GEWINN!",
+            "JACKPOT ! => JACKPOT!",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -5512,6 +5539,15 @@ namespace AR6DoF
             "Confirmer : tout retirer => Conferma: rimuovi tutto",
             "Ramener le plateau => Riporta il tavolo",
             "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => Il gioco e posato davanti a te: puntalo con il laser. Tieni premuto il pulsante sulla base per spostarlo.",
+            "Aucun meme pour le moment : de nouveaux arrivent. => Nessun meme per ora: ne arriveranno di nuovi.",
+            "Aucun meme pour le moment. De nouveaux memes a poser dans le monde arriveront bientot. => Nessun meme per ora. Presto arriveranno nuovi meme da posare nel mondo.",
+            "Son => Suono",
+            "Sol sous la tete => Pavimento sotto la testa",
+            "Gagne ! => Hai vinto!",
+            "Perdu => Hai perso",
+            "Egalite => Pareggio",
+            "SUPER GAIN ! => SUPER VINCITA!",
+            "JACKPOT ! => JACKPOT!",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -6890,6 +6926,15 @@ namespace AR6DoF
             "Confirmer : tout retirer => Confirmar: remover tudo",
             "Ramener le plateau => Trazer o tabuleiro de volta",
             "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => O jogo esta colocado a sua frente: aponte o laser para ele. Mantenha o botao pressionado na base para move-lo.",
+            "Aucun meme pour le moment : de nouveaux arrivent. => Nenhum meme por enquanto: novos estao chegando.",
+            "Aucun meme pour le moment. De nouveaux memes a poser dans le monde arriveront bientot. => Nenhum meme por enquanto. Em breve chegarao novos memes para colocar no mundo.",
+            "Son => Som",
+            "Sol sous la tete => Chao abaixo da cabeca",
+            "Gagne ! => Voce ganhou!",
+            "Perdu => Voce perdeu",
+            "Egalite => Empate",
+            "SUPER GAIN ! => SUPER GANHO!",
+            "JACKPOT ! => JACKPOT!",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

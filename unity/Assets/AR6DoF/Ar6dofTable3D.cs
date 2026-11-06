@@ -29,6 +29,24 @@ namespace AR6DoF
         readonly Color slabCol;
         float minX, maxX, minZ, maxZ;
         bool hasBounds;
+        Ar6dofFestive fest;
+
+        /// <summary>Pieces d'or et confettis (cree au premier gain seulement).</summary>
+        public Ar6dofFestive Festive { get { if (fest == null) fest = new Ar6dofFestive(this); return fest; } }
+
+        /// <summary>Limites du socle dans le repere de la table : x min, x max, z min, z max.</summary>
+        public bool TryGetSlab(out Vector4 b)
+        {
+            b = new Vector4(minX, maxX, minZ, maxZ);
+            return hasBounds;
+        }
+
+        /// <summary>Hauteur de ta tete (pour placer le sol des pieces qui tombent).</summary>
+        public float HeadY()
+        {
+            Transform h = HeadT();
+            return h != null ? h.position.y : root.transform.position.y + 1.2f;
+        }
 
         public static Shader Sh()
         {
@@ -200,6 +218,7 @@ namespace AR6DoF
                 p.tr.localScale = p.scale * e;
             }
             for (int i = 0; i < ticks.Count; i++) ticks[i](now);
+            if (fest != null) fest.Tick(now);
             if (labels.Count > 0)
             {
                 Transform h = HeadT();
@@ -220,6 +239,7 @@ namespace AR6DoF
             if (root != null) UnityEngine.Object.Destroy(root);
             for (int i = 0; i < owned.Count; i++) if (owned[i] != null) UnityEngine.Object.Destroy(owned[i]);
             owned.Clear(); ticks.Clear(); labels.Clear(); pops.Clear();
+            fest = null;
         }
     }
 
