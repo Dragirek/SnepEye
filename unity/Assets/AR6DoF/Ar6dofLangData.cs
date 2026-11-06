@@ -1380,6 +1380,8 @@ namespace AR6DoF
             "Touche un nom pour le ramener devant toi. Les memes ne sont pas gardes a la fermeture du casque. => Touch a name to bring it back in front of you. Memes are not kept when the headset is closed.",
             "Tout retirer => Remove all",
             "Confirmer : tout retirer => Confirm: remove all",
+            "Ramener le plateau => Bring the board back",
+            "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => The game is placed in front of you: aim at it with the laser. Hold the button on the base to move it.",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2750,6 +2752,8 @@ namespace AR6DoF
             "Touche un nom pour le ramener devant toi. Les memes ne sont pas gardes a la fermeture du casque. => Toca un nombre para traerlo delante de ti. Los memes no se guardan al cerrar el casco.",
             "Tout retirer => Quitar todo",
             "Confirmer : tout retirer => Confirmar: quitar todo",
+            "Ramener le plateau => Traer el tablero de vuelta",
+            "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => El juego esta colocado delante de ti: apuntalo con el laser. Manten el boton pulsado sobre la base para moverlo.",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4127,6 +4131,8 @@ namespace AR6DoF
             "Touche un nom pour le ramener devant toi. Les memes ne sont pas gardes a la fermeture du casque. => Beruehre einen Namen, um es vor dich zu holen. Memes werden beim Schliessen des Headsets nicht gespeichert.",
             "Tout retirer => Alle entfernen",
             "Confirmer : tout retirer => Bestaetigen: alle entfernen",
+            "Ramener le plateau => Spielfeld zurueckholen",
+            "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => Das Spiel steht vor dir: ziele mit dem Laser darauf. Halte die Taste auf dem Sockel gedrueckt, um es zu verschieben.",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -5504,6 +5510,8 @@ namespace AR6DoF
             "Touche un nom pour le ramener devant toi. Les memes ne sont pas gardes a la fermeture du casque. => Tocca un nome per riportarlo davanti a te. I meme non vengono conservati alla chiusura del visore.",
             "Tout retirer => Rimuovi tutto",
             "Confirmer : tout retirer => Conferma: rimuovi tutto",
+            "Ramener le plateau => Riporta il tavolo",
+            "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => Il gioco e posato davanti a te: puntalo con il laser. Tieni premuto il pulsante sulla base per spostarlo.",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -6880,6 +6888,8 @@ namespace AR6DoF
             "Touche un nom pour le ramener devant toi. Les memes ne sont pas gardes a la fermeture du casque. => Toque em um nome para traze-lo a sua frente. Os memes nao sao guardados ao fechar o headset.",
             "Tout retirer => Remover tudo",
             "Confirmer : tout retirer => Confirmar: remover tudo",
+            "Ramener le plateau => Trazer o tabuleiro de volta",
+            "Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer. => O jogo esta colocado a sua frente: aponte o laser para ele. Mantenha o botao pressionado na base para move-lo.",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

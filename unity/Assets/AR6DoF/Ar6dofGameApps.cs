@@ -68,17 +68,33 @@ namespace AR6DoF
     }
 
     /// <summary>Un plateau de n x n cases cliquables, avec pour chaque case : fond, piece, marque (point) et texte facultatif. Se met a jour sans rien reconstruire.</summary>
-    sealed class Ar6dofBoardView
+    public sealed class Ar6dofBoardView
     {
         public readonly int n;
         readonly Image[] bg, pc, mk;
         readonly Text[] tx;
+        Ar6dofBoard3D b3;     // non nul : le plateau est en 3D sur la table (aucun element 2D n'existe alors)
 
         Ar6dofBoardView(int n)
         {
             this.n = n;
             bg = new Image[n * n]; pc = new Image[n * n]; mk = new Image[n * n]; tx = new Text[n * n];
         }
+
+        public bool Is3D { get { return b3 != null; } }
+
+        /// <summary>Hauteur prise dans la fenetre par le plateau (rien en 3D).</summary>
+        public float Space(float cell) { return b3 != null ? 0f : n * cell + 8f; }
+
+        public static Ar6dofBoardView Make3D(Ar6dofTable3D table, int n, float cell, float cx, float cz, Action<int> click)
+        {
+            var v = new Ar6dofBoardView(n);
+            v.b3 = table.AddBoard(n, cell, cx, cz, click);
+            return v;
+        }
+
+        /// <summary>3D : vrai si les pieces du joueur sont du cote blanc (oriente les cavaliers).</summary>
+        public void Facing(bool whiteNear) { if (b3 != null) b3.whiteNear = whiteNear; }
 
         /// <summary>'cx' : centre horizontal ; 'top' : distance depuis le haut du contenu ; la case 0 est en haut a gauche.</summary>
         public static Ar6dofBoardView Make(Transform parent, float cx, float top, float cell, int n, Action<int> click, bool text)
@@ -118,7 +134,21 @@ namespace AR6DoF
             return v;
         }
 
-        public void Bg(int i, Color c) { bg[i].color = c; }
+        public void Bg(int i, Color c)
+        {
+            if (b3 != null) { b3.Bg(i, c); return; }
+            bg[i].color = c;
+        }
+
+        /// <summary>'token' : la piece en 3D (Ar6dofShapes), 0 pour une case vide.</summary>
+        public void Piece(int i, Sprite s, int token)
+        {
+            if (b3 != null) { b3.Piece(i, s == null ? 0 : token); return; }
+            Piece(i, s);
+        }
+
+        /// <summary>Piece qui n'existe qu'en 3D (bateaux) : rien en 2D.</summary>
+        public void Token(int i, int token) { if (b3 != null) b3.Piece(i, token); }
 
         public void Piece(int i, Sprite s)
         {
@@ -131,6 +161,7 @@ namespace AR6DoF
         /// <summary>Petit disque pose sur la case (coup possible, tir manque...). 'scale' : taille relative a la case.</summary>
         public void Mark(int i, Color c, float scale)
         {
+            if (b3 != null) { b3.Mark(i, c, scale); return; }
             var im = mk[i];
             if (c.a <= 0f) { if (im.enabled) im.enabled = false; return; }
             im.color = c;
@@ -142,6 +173,7 @@ namespace AR6DoF
 
         public void Caption(int i, string s, Color c)
         {
+            if (b3 != null) { b3.Caption(i, s); return; }
             if (tx[i] == null) return;
             if (tx[i].text != s) tx[i].text = s;
             tx[i].color = c;
@@ -149,7 +181,7 @@ namespace AR6DoF
     }
 
     // ======================================================================== MORPION
-    public sealed class Ar6dofTicTacToeApp : Ar6dofAppWindow
+    public sealed class Ar6dofTicTacToeApp : Ar6dofGameWindow
     {
         static readonly string[] Levels = { "Facile", "Moyen", "Imbattable" };
         readonly int[] cells = new int[9];
@@ -162,7 +194,7 @@ namespace AR6DoF
 
         public Ar6dofTicTacToeApp(Ar6dofDock d) : base(d, "tictactoe", "Morpion", "tictactoe", "Morpion contre le PC : trois niveaux, du facile a l'imbattable.", 540f) { }
 
-        protected override void OnRebuildStart() { view = null; status = null; score = null; }
+        protected override void GameRebuildStart() { view = null; status = null; score = null; }
 
         public override void OnClosed() { pcAt = -1f; }
 
@@ -176,6 +208,7 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
+            ViewBar();
             BtnRow(48f, 20,
                 Ar6dofLoc.T("Niveau") + " : " + Ar6dofLoc.T(Levels[level]), (Action)(() => { level = (level + 1) % 3; NewGame(); }),
                 Ar6dofLoc.T("Commence") + " : " + Ar6dofLoc.T(pcFirst ? "PC" : "Moi"), (Action)(() => { pcFirst = !pcFirst; NewGame(); }),
@@ -183,8 +216,8 @@ namespace AR6DoF
             status = Lbl("", 40, 26, TextAnchor.MiddleCenter);
             status.fontStyle = FontStyle.Bold;
             Space(4f);
-            view = Ar6dofBoardView.Make(content, 0f, y, 130f, 3, OnCell, true);
-            y += 3 * 130f + Gap;
+            view = NewBoard(0f, y, 130f, 3, OnCell, true, 0f, 0.07f, new Color(0.22f, 0.15f, 0.1f));
+            y += view.Space(130f);
             score = Lbl("", 34, 21, TextAnchor.MiddleCenter);
             Draw();
         }
@@ -198,7 +231,7 @@ namespace AR6DoF
             Draw();
         }
 
-        protected override void OnTick()
+        protected override void GameTick()
         {
             if (pcAt > 0f && Time.unscaledTime >= pcAt)
             {
@@ -240,7 +273,7 @@ namespace AR6DoF
     }
 
     // ======================================================================== DES
-    public sealed class Ar6dofDiceApp : Ar6dofAppWindow
+    public sealed class Ar6dofDiceApp : Ar6dofGameWindow
     {
         static readonly int[] Kinds = { 2, 4, 6, 8, 10, 12, 20, 100 };
         static readonly string[] Pips = { "000010000", "100000001", "100010001", "101000101", "101010101", "101101101" };
@@ -255,11 +288,12 @@ namespace AR6DoF
         Text[] nums;
         Image[][] pips;
         Text totalText;
+        Ar6dofDice3D d3;
         readonly List<Button> kindBtns = new List<Button>();
 
         public Ar6dofDiceApp(Ar6dofDock d) : base(d, "dice", "Des", "dice", "Lance de 1 a 6 des : pile ou face, d4, d6, d8, d10, d12, d20 ou d100.", 600f) { }
 
-        protected override void OnRebuildStart() { face = null; nums = null; pips = null; totalText = null; kindBtns.Clear(); }
+        protected override void GameRebuildStart() { face = null; nums = null; pips = null; totalText = null; d3 = null; kindBtns.Clear(); }
 
         public override void OnClosed() { rolling = false; }
 
@@ -282,6 +316,7 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
+            ViewBar();
             Section("Type de de");
             for (int row = 0; row < 2; row++)
             {
@@ -298,8 +333,16 @@ namespace AR6DoF
             SliderRow("Nombre de des", 1, 6, () => count, v => { int c = Mathf.RoundToInt(v); if (c != count) { count = c; rolled = false; rolling = false; Layout(); } }, v => Mathf.RoundToInt(v).ToString(), 50f, true);
             Space(4f);
 
-            face = new Image[6]; nums = new Text[6]; pips = new Image[6][];
             float areaTop = y;
+            var tb = EnsureTable(new Color(0.07f, 0.33f, 0.18f));
+            if (tb != null)
+            {
+                try { d3 = new Ar6dofDice3D(tb, Roll); }
+                catch (Exception e) { Fail3D(e); d3 = null; }
+            }
+            if (d3 == null)
+            {
+            face = new Image[6]; nums = new Text[6]; pips = new Image[6][];
             for (int i = 0; i < 6; i++)
             {
                 face[i] = Ar6dofGameUi.Panel(content, Vector2.zero, new Vector2(Tile, Tile), Color.white);
@@ -314,6 +357,7 @@ namespace AR6DoF
                 }
             }
             y += 2 * Tile + 10f + Gap;
+            }
             totalText = Lbl("", 40, 28, TextAnchor.MiddleCenter);
             totalText.fontStyle = FontStyle.Bold;
             Btn("Lancer", Roll, 66f, 32);
@@ -326,7 +370,8 @@ namespace AR6DoF
         /// <summary>Place et montre seulement les des utilises, centres ligne par ligne (3 par ligne).</summary>
         void Layout()
         {
-            if (face == null) return;
+            if (d3 != null) d3.Setup(sides, count, vals, Tint(sides));
+            if (face == null) { Faces(); return; }
             for (int i = 0; i < 6; i++)
             {
                 bool on = i < count;
@@ -342,7 +387,17 @@ namespace AR6DoF
 
         void Faces()
         {
-            if (face == null) return;
+            if (face != null) FaceTiles();
+            if (totalText == null) return;
+            if (!rolled || rolling) { totalText.text = ""; return; }
+            int sum = 0, piles = 0;
+            for (int i = 0; i < count; i++) { sum += vals[i]; if (vals[i] == 1) piles++; }
+            if (sides == 2) totalText.text = Ar6dofLoc.T("Pile") + " : " + piles + "   " + Ar6dofLoc.T("Face") + " : " + (count - piles);
+            else totalText.text = count > 1 ? Ar6dofLoc.T("Total") + " : " + sum : "";
+        }
+
+        void FaceTiles()
+        {
             for (int i = 0; i < count; i++)
             {
                 face[i].color = Tint(sides);
@@ -362,33 +417,28 @@ namespace AR6DoF
                     nums[i].fontSize = sides == 2 ? 40 : (sides == 100 ? 56 : 68);
                 }
             }
-            if (totalText == null) return;
-            if (!rolled || rolling) { totalText.text = ""; return; }
-            int sum = 0, piles = 0;
-            for (int i = 0; i < count; i++) { sum += vals[i]; if (vals[i] == 1) piles++; }
-            if (sides == 2) totalText.text = Ar6dofLoc.T("Pile") + " : " + piles + "   " + Ar6dofLoc.T("Face") + " : " + (count - piles);
-            else totalText.text = count > 1 ? Ar6dofLoc.T("Total") + " : " + sum : "";
         }
 
         void Roll()
         {
             for (int i = 0; i < count; i++) fin[i] = rnd.Next(1, sides + 1);
             rolling = true; rolled = true;
-            rollEnd = Time.unscaledTime + 0.85f;
+            rollEnd = Time.unscaledTime + (d3 != null ? 1.12f : 0.85f);
             nextFlick = 0f;
+            if (d3 != null) { d3.Roll(fin, Time.unscaledTime, 1.1f); Faces(); }
         }
 
-        protected override void OnTick()
+        protected override void GameTick()
         {
-            if (!rolling || face == null) return;
+            if (!rolling) return;
             float now = Time.unscaledTime;
             if (now >= rollEnd)
             {
                 rolling = false;
-                for (int i = 0; i < count; i++) { vals[i] = fin[i]; face[i].rectTransform.localRotation = Quaternion.identity; }
+                for (int i = 0; i < count; i++) { vals[i] = fin[i]; if (face != null) face[i].rectTransform.localRotation = Quaternion.identity; }
                 Faces();
             }
-            else if (now >= nextFlick)
+            else if (face != null && now >= nextFlick)
             {
                 nextFlick = now + 0.07f;
                 for (int i = 0; i < count; i++)
@@ -402,7 +452,7 @@ namespace AR6DoF
     }
 
     // ======================================================================== MACHINE A SOUS
-    public sealed class Ar6dofSlotsApp : Ar6dofAppWindow
+    public sealed class Ar6dofSlotsApp : Ar6dofGameWindow
     {
         // cerise, citron, cloche, etoile, diamant, sept
         static readonly int[] Weight = { 30, 25, 18, 12, 9, 6 };
@@ -425,6 +475,7 @@ namespace AR6DoF
         Image[][] syms;
         Image[] bulbs;
         Image ball;
+        Ar6dofSlots3D s3;
         Text creditText, msgText;
         Button rechargeBtn;
         readonly List<Button> betBtns = new List<Button>();
@@ -435,7 +486,7 @@ namespace AR6DoF
             for (int r = 0; r < 3; r++) for (int k = 0; k < 3; k++) rows[r][k] = RandSymbol();
         }
 
-        protected override void OnRebuildStart() { machineTop = -1f; syms = null; bulbs = null; ball = null; creditText = null; msgText = null; rechargeBtn = null; betBtns.Clear(); }
+        protected override void GameRebuildStart() { machineTop = -1f; s3 = null; syms = null; bulbs = null; ball = null; creditText = null; msgText = null; rechargeBtn = null; betBtns.Clear(); }
 
         public override void OnClosed() { spinning = false; }
 
@@ -449,6 +500,24 @@ namespace AR6DoF
         }
 
         protected override void BuildMain()
+        {
+            ViewBar();
+            var tb = EnsureTable(new Color(0.15f, 0.15f, 0.18f));
+            if (tb != null)
+            {
+                try
+                {
+                    var mid = new int[3];
+                    for (int r = 0; r < 3; r++) mid[r] = rows[r][1];
+                    s3 = new Ar6dofSlots3D(tb, Spin, mid);
+                }
+                catch (Exception e) { Fail3D(e); s3 = null; }
+            }
+            if (s3 == null) BuildMachine2D();
+            BuildControls();
+        }
+
+        void BuildMachine2D()
         {
             var gold = Ar6dofGameUi.C(0.96f, 0.74f, 0.16f);
             float top = y, cx = -30f;
@@ -474,7 +543,10 @@ namespace AR6DoF
             Ar6dofGameUi.Panel(content, new Vector2(255f, -(top + 330f)), new Vector2(40f, 30f), Ar6dofGameUi.C(0.45f, 0.45f, 0.5f));
             ball = Ar6dofGameUi.Pic(content, new Vector2(255f, -(top + 160f)), new Vector2(46f, 46f), Ar6dofGameArt.Disc(), Ar6dofGameUi.C(0.9f, 0.12f, 0.16f));
             y += 430f + Gap;
+        }
 
+        void BuildControls()
+        {
             msgText = Lbl("", 44, 28, TextAnchor.MiddleCenter);
             msgText.fontStyle = FontStyle.Bold;
             creditText = Lbl("", 34, 24, TextAnchor.MiddleCenter);
@@ -516,6 +588,7 @@ namespace AR6DoF
             spinning = true;
             spinStart = Time.unscaledTime;
             leverUntil = spinStart + 0.35f;
+            if (s3 != null) s3.Spin(result, StopAt, spinStart);
             message = "";
             winUntil = 0f;
             Draw();
@@ -533,8 +606,26 @@ namespace AR6DoF
             }
         }
 
-        protected override void OnTick()
+        void Tick3D()
         {
+            float now = Time.unscaledTime;
+            if (spinning)
+            {
+                float t = now - spinStart;
+                bool all = true;
+                for (int r = 0; r < 3; r++)
+                {
+                    if (!stopped[r] && t >= StopAt[r]) { stopped[r] = true; rows[r][1] = result[r]; rows[r][0] = RandSymbol(); rows[r][2] = RandSymbol(); }
+                    if (!stopped[r]) all = false;
+                }
+                if (all) EndSpin(now);
+            }
+            s3.Blink = spinning || winUntil > now;
+        }
+
+        protected override void GameTick()
+        {
+            if (s3 != null) { Tick3D(); return; }
             if (syms == null) return;
             float now = Time.unscaledTime;
             if (spinning)
@@ -635,7 +726,7 @@ namespace AR6DoF
     }
 
     // ======================================================================== BATAILLE NAVALE
-    public sealed class Ar6dofBattleshipApp : Ar6dofAppWindow
+    public sealed class Ar6dofBattleshipApp : Ar6dofGameWindow
     {
         const float Cell = 36f;
         readonly System.Random rnd = new System.Random();
@@ -653,7 +744,7 @@ namespace AR6DoF
             Shuffle();
         }
 
-        protected override void OnRebuildStart() { enemyView = null; ownView = null; status = null; shots = null; count = null; }
+        protected override void GameRebuildStart() { enemyView = null; ownView = null; status = null; shots = null; count = null; }
 
         public override void OnClosed() { pcAt = -1f; }
 
@@ -679,18 +770,25 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
+            ViewBar();
             BtnRow(48f, 20, "Nouvelle partie", (Action)NewGame, "Melanger ma flotte", (Action)(() => { if (phase == 0) { Shuffle(); Draw(); } }), "Commencer", (Action)Start);
             status = Lbl("", 40, 26, TextAnchor.MiddleCenter);
             status.fontStyle = FontStyle.Bold;
             shots = Lbl("", 30, 20, TextAnchor.MiddleCenter);
             Space(4f);
             float labY = y;
-            Ar6dofVrUi.Label(content, Ar6dofLoc.T("Flotte ennemie") + "  (" + Ar6dofLoc.T("touche pour tirer") + ")", new Vector2(-210f, -(labY + 15f)), new Vector2(390f, 30f), 20, TextAnchor.MiddleCenter);
-            Ar6dofVrUi.Label(content, Ar6dofLoc.T("Ma flotte"), new Vector2(210f, -(labY + 15f)), new Vector2(390f, 30f), 20, TextAnchor.MiddleCenter);
-            y += 34f;
-            enemyView = Ar6dofBoardView.Make(content, -210f, y, Cell, 10, OnEnemyCell, false);
-            ownView = Ar6dofBoardView.Make(content, 210f, y, Cell, 10, null, false);
-            y += 10 * Cell + Gap;
+            if (!Is3D) Ar6dofVrUi.Label(content, Ar6dofLoc.T("Flotte ennemie") + "  (" + Ar6dofLoc.T("touche pour tirer") + ")", new Vector2(-210f, -(labY + 15f)), new Vector2(390f, 30f), 20, TextAnchor.MiddleCenter);
+            if (!Is3D) Ar6dofVrUi.Label(content, Ar6dofLoc.T("Ma flotte"), new Vector2(210f, -(labY + 15f)), new Vector2(390f, 30f), 20, TextAnchor.MiddleCenter);
+            if (!Is3D) y += 34f;
+            var sea = new Color(0.1f, 0.14f, 0.2f);
+            enemyView = NewBoard(-210f, y, Cell, 10, OnEnemyCell, false, -0.12f, 0.032f, sea);
+            ownView = NewBoard(210f, y, Cell, 10, null, false, 0.2f, 0.022f, sea);
+            if (enemyView.Is3D && table != null)
+            {
+                table.AddLabel(null, new Vector3(-0.12f, 0.03f, 0.19f), 0.16f, 44, Color.white, false).Set(Ar6dofLoc.T("Flotte ennemie"), Color.white);
+                table.AddLabel(null, new Vector3(0.2f, 0.03f, 0.14f), 0.12f, 44, Color.white, false).Set(Ar6dofLoc.T("Ma flotte"), Color.white);
+            }
+            y += enemyView.Space(Cell);
             count = Lbl("", 32, 20, TextAnchor.MiddleCenter);
             Draw();
         }
@@ -713,7 +811,7 @@ namespace AR6DoF
             return Ar6dofLoc.F("coule : {0} !", Ar6dofLoc.T(Ar6dofFleet.Names[Mathf.Clamp(sunk, 0, 4)]));
         }
 
-        protected override void OnTick()
+        protected override void GameTick()
         {
             if (pcAt > 0f && Time.unscaledTime >= pcAt)
             {
@@ -742,20 +840,20 @@ namespace AR6DoF
                 if (theirs.shot[i])
                 {
                     int k = theirs.ship[i];
-                    if (k < 0) { enemyView.Bg(i, Water); enemyView.Mark(i, Splash, 0.3f); }
-                    else if (theirs.left[k] == 0) { enemyView.Bg(i, Sunk); enemyView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
-                    else { enemyView.Bg(i, Hit); enemyView.Mark(i, Fire, 0.45f); }
+                    if (k < 0) { enemyView.Bg(i, Water); enemyView.Token(i, 0); enemyView.Mark(i, Splash, 0.3f); }
+                    else if (theirs.left[k] == 0) { enemyView.Bg(i, Sunk); enemyView.Token(i, Ar6dofShapes.TokShipSunk); enemyView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
+                    else { enemyView.Bg(i, Hit); enemyView.Token(i, Ar6dofShapes.TokShipHit); enemyView.Mark(i, Fire, 0.45f); }
                 }
-                else { enemyView.Bg(i, Water); enemyView.Mark(i, Color.clear, 0f); }
+                else { enemyView.Bg(i, Water); enemyView.Token(i, 0); enemyView.Mark(i, Color.clear, 0f); }
                 // ma flotte : tout est visible
                 int m = mine.ship[i];
                 if (mine.shot[i])
                 {
-                    if (m < 0) { ownView.Bg(i, Water); ownView.Mark(i, Splash, 0.3f); }
-                    else if (mine.left[m] == 0) { ownView.Bg(i, Sunk); ownView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
-                    else { ownView.Bg(i, Hit); ownView.Mark(i, Fire, 0.45f); }
+                    if (m < 0) { ownView.Bg(i, Water); ownView.Token(i, 0); ownView.Mark(i, Splash, 0.3f); }
+                    else if (mine.left[m] == 0) { ownView.Bg(i, Sunk); ownView.Token(i, Ar6dofShapes.TokShipSunk); ownView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
+                    else { ownView.Bg(i, Hit); ownView.Token(i, Ar6dofShapes.TokShipHit); ownView.Mark(i, Fire, 0.45f); }
                 }
-                else { ownView.Bg(i, m >= 0 ? Hull : Water); ownView.Mark(i, Color.clear, 0f); }
+                else { ownView.Bg(i, m >= 0 ? Hull : Water); ownView.Token(i, m >= 0 ? Ar6dofShapes.TokShip : 0); ownView.Mark(i, Color.clear, 0f); }
             }
             string s;
             if (phase == 0) s = "Place ta flotte : melange-la jusqu'a ce qu'elle te plaise, puis commence.";
@@ -771,7 +869,7 @@ namespace AR6DoF
     }
 
     // ======================================================================== ECHECS
-    public sealed class Ar6dofChessApp : Ar6dofAppWindow
+    public sealed class Ar6dofChessApp : Ar6dofGameWindow
     {
         static readonly string[] Levels = { "Facile", "Moyen", "Fort" };
         static readonly int[] SpriteOf = { 0, 0, 2, 3, 1, 4, 5 };    // code du moteur -> dessin (pion, tour, cavalier, fou, dame, roi)
@@ -791,7 +889,7 @@ namespace AR6DoF
             nLegal = game.LegalMoves(legal);
         }
 
-        protected override void OnRebuildStart() { view = null; statusText = null; }
+        protected override void GameRebuildStart() { view = null; statusText = null; }
 
         public override void OnClosed() { Cancel(); }
 
@@ -822,6 +920,7 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
+            ViewBar();
             BtnRow(48f, 20,
                 Ar6dofLoc.T("Niveau") + " : " + Ar6dofLoc.T(Levels[level]), (Action)(() => { level = (level + 1) % 3; Rebuild(); }),
                 Ar6dofLoc.T("Je joue") + " : " + Ar6dofLoc.T(playerSide == 1 ? "Blancs" : "Noirs"), (Action)(() => { playerSide = -playerSide; NewGame(); }),
@@ -829,8 +928,9 @@ namespace AR6DoF
             statusText = Lbl("", 40, 25, TextAnchor.MiddleCenter);
             statusText.fontStyle = FontStyle.Bold;
             Space(2f);
-            view = Ar6dofBoardView.Make(content, 0f, y, Cell, 8, OnCell, false);
-            y += 8 * Cell + Gap;
+            view = NewBoard(0f, y, Cell, 8, OnCell, false, 0f, 0.05f, new Color(0.22f, 0.15f, 0.1f));
+            view.Facing(playerSide == 1);
+            y += view.Space(Cell);
             BtnRow(46f, 20, "Annuler mon dernier coup", (Action)Undo);
             Draw();
         }
@@ -882,7 +982,7 @@ namespace AR6DoF
             Draw();
         }
 
-        protected override void OnTick()
+        protected override void GameTick()
         {
             if (job != null && job.Done && Time.unscaledTime > aiStart + 0.35f)
             {
@@ -908,7 +1008,7 @@ namespace AR6DoF
                 if (sq == selected) bg = Color.Lerp(bg, new Color(0.35f, 0.8f, 0.4f), 0.65f);
                 if (sq == kingInCheck) bg = Color.Lerp(bg, new Color(0.9f, 0.2f, 0.2f), 0.7f);
                 view.Bg(vi, bg);
-                view.Piece(vi, p == 0 ? null : Ar6dofGameArt.Piece(SpriteOf[p < 0 ? -p : p], p > 0));
+                view.Piece(vi, p == 0 ? null : Ar6dofGameArt.Piece(SpriteOf[p < 0 ? -p : p], p > 0), p == 0 ? 0 : Ar6dofShapes.Chess(SpriteOf[p < 0 ? -p : p], p > 0));
                 bool dest = false;
                 if (selected >= 0)
                     for (int k = 0; k < nLegal; k++)
@@ -930,7 +1030,7 @@ namespace AR6DoF
     }
 
     // ======================================================================== DAMES
-    public sealed class Ar6dofCheckersApp : Ar6dofAppWindow
+    public sealed class Ar6dofCheckersApp : Ar6dofGameWindow
     {
         static readonly string[] Levels = { "Facile", "Moyen", "Fort" };
         const float Cell = 62f;
@@ -949,7 +1049,7 @@ namespace AR6DoF
             moves = game.Moves();
         }
 
-        protected override void OnRebuildStart() { view = null; statusText = null; }
+        protected override void GameRebuildStart() { view = null; statusText = null; }
 
         public override void OnClosed() { Cancel(); }
 
@@ -980,6 +1080,7 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
+            ViewBar();
             BtnRow(48f, 20,
                 Ar6dofLoc.T("Niveau") + " : " + Ar6dofLoc.T(Levels[level]), (Action)(() => { level = (level + 1) % 3; Rebuild(); }),
                 Ar6dofLoc.T("Je joue") + " : " + Ar6dofLoc.T(playerSide == 1 ? "Blancs" : "Noirs"), (Action)(() => { playerSide = -playerSide; NewGame(); }),
@@ -987,8 +1088,8 @@ namespace AR6DoF
             statusText = Lbl("", 40, 25, TextAnchor.MiddleCenter);
             statusText.fontStyle = FontStyle.Bold;
             Space(2f);
-            view = Ar6dofBoardView.Make(content, 0f, y, Cell, 8, OnCell, false);
-            y += 8 * Cell + Gap;
+            view = NewBoard(0f, y, Cell, 8, OnCell, false, 0f, 0.05f, new Color(0.22f, 0.15f, 0.1f));
+            y += view.Space(Cell);
             BtnRow(46f, 20, "Annuler mon dernier coup", (Action)Undo);
             Draw();
         }
@@ -1039,7 +1140,7 @@ namespace AR6DoF
             Draw();
         }
 
-        protected override void OnTick()
+        protected override void GameTick()
         {
             if (job != null && job.Done && Time.unscaledTime > aiStart + 0.4f)
             {
@@ -1064,7 +1165,7 @@ namespace AR6DoF
                 if (sq == lastFrom || sq == lastTo) bg = Color.Lerp(bg, new Color(0.9f, 0.85f, 0.25f), 0.45f);
                 if (sq == selected) bg = Color.Lerp(bg, new Color(0.35f, 0.8f, 0.4f), 0.65f);
                 view.Bg(vi, bg);
-                view.Piece(vi, p == 0 ? null : Ar6dofGameArt.Checker(p == 2 || p == -2, p > 0));
+                view.Piece(vi, p == 0 ? null : Ar6dofGameArt.Checker(p == 2 || p == -2, p > 0), p == 0 ? 0 : Ar6dofShapes.Checker(p == 2 || p == -2, p > 0));
                 bool dest = false;
                 if (selected >= 0)
                     for (int k = 0; k < moves.Count; k++)
