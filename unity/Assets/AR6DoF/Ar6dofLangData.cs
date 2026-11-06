@@ -1221,8 +1221,10 @@ namespace AR6DoF
             "Test d'ancrage du menu : depart => Menu anchor test: start",
             "Test d'ancrage : arrivee (j'ai bouge) => Anchor test: end (I moved)",
             "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Start noted: move about 50 cm, then click at the end",
-            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Anchor test: tracking {0} cm, Unity camera {1} cm, MENU {2} cm (must be 0), menu rotation {3} deg",
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Window opening distance (cm, next time a window opens)",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Anchor test: tracking {0} cm, Unity camera {1} cm, MENU {2} cm (must be 0), menu rotation {3} deg. Scene eye spacing: {4} mm (file {5})",
+            "Test sans relief (meme image aux deux yeux) => Flat test (same image in both eyes)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Interface size (%, 100 = windows about 40 cm wide)",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2434,8 +2436,10 @@ namespace AR6DoF
             "Test d'ancrage du menu : depart => Prueba de anclaje del menu: inicio",
             "Test d'ancrage : arrivee (j'ai bouge) => Prueba de anclaje: fin (me movi)",
             "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Inicio anotado: muevete unos 50 cm y pulsa al final",
-            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Prueba de anclaje: seguimiento {0} cm, camara de Unity {1} cm, MENU {2} cm (debe ser 0), rotacion del menu {3} grados",
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Distancia de apertura de ventanas (cm, en la proxima apertura)",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Prueba de anclaje: seguimiento {0} cm, camara de Unity {1} cm, MENU {2} cm (debe ser 0), rotacion del menu {3} grados. Separacion de ojos de la escena: {4} mm (archivo {5})",
+            "Test sans relief (meme image aux deux yeux) => Prueba sin relieve (misma imagen en ambos ojos)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Tamano de la interfaz (%, 100 = ventanas de unos 40 cm)",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -3654,8 +3658,10 @@ namespace AR6DoF
             "Test d'ancrage du menu : depart => Menue-Verankerungstest: Start",
             "Test d'ancrage : arrivee (j'ai bouge) => Verankerungstest: Ende (ich habe mich bewegt)",
             "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Start notiert: beweg dich etwa 50 cm, dann am Ende klicken",
-            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Verankerungstest: Tracking {0} cm, Unity-Kamera {1} cm, MENUE {2} cm (muss 0 sein), Menuerotation {3} Grad",
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Oeffnungsabstand der Fenster (cm, beim naechsten Oeffnen)",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Verankerungstest: Tracking {0} cm, Unity-Kamera {1} cm, MENUE {2} cm (muss 0 sein), Menuedrehung {3} Grad. Augenabstand der Szene: {4} mm (Datei {5})",
+            "Test sans relief (meme image aux deux yeux) => Test ohne Tiefe (gleiches Bild auf beiden Augen)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Groesse der Oberflaeche (%, 100 = Fenster von etwa 40 cm)",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -4874,8 +4880,10 @@ namespace AR6DoF
             "Test d'ancrage du menu : depart => Test di ancoraggio del menu: partenza",
             "Test d'ancrage : arrivee (j'ai bouge) => Test di ancoraggio: arrivo (mi sono mosso)",
             "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Partenza annotata: spostati di circa 50 cm, poi clicca all'arrivo",
-            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Test di ancoraggio: tracking {0} cm, camera di Unity {1} cm, MENU {2} cm (deve essere 0), rotazione del menu {3} gradi",
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Distanza di apertura delle finestre (cm, alla prossima apertura)",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Test di ancoraggio: tracciamento {0} cm, camera di Unity {1} cm, MENU {2} cm (deve essere 0), rotazione del menu {3} gradi. Distanza occhi della scena: {4} mm (file {5})",
+            "Test sans relief (meme image aux deux yeux) => Test senza rilievo (stessa immagine in entrambi gli occhi)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Dimensione dell'interfaccia (%, 100 = finestre di circa 40 cm)",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -6093,8 +6101,10 @@ namespace AR6DoF
             "Test d'ancrage du menu : depart => Teste de ancoragem do menu: inicio",
             "Test d'ancrage : arrivee (j'ai bouge) => Teste de ancoragem: chegada (me movi)",
             "Depart note : deplace-toi (50 cm), puis clique a l'arrivee => Inicio anotado: mova-se cerca de 50 cm e clique no final",
-            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg => Teste de ancoragem: rastreamento {0} cm, camera do Unity {1} cm, MENU {2} cm (deve ser 0), rotacao do menu {3} graus",
             "Distance d'ouverture des fenetres (cm, a la prochaine ouverture) => Distancia de abertura das janelas (cm, na proxima abertura)",
+            "Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5}) => Teste de ancoragem: rastreamento {0} cm, camera do Unity {1} cm, MENU {2} cm (deve ser 0), rotacao do menu {3} graus. Distancia dos olhos da cena: {4} mm (arquivo {5})",
+            "Test sans relief (meme image aux deux yeux) => Teste sem relevo (mesma imagem nos dois olhos)",
+            "Taille de l'interface (%, 100 = fenetres d'environ 40 cm) => Tamanho da interface (%, 100 = janelas de cerca de 40 cm)",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

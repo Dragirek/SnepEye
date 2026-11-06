@@ -90,7 +90,7 @@ namespace AR6DoF
             var fm = GetComponent<Ar6dofFloatingMenu>();
             if (fm == null) fm = gameObject.AddComponent<Ar6dofFloatingMenu>();
             fm.passthrough = passthrough;
-            fm.distance = 0.75f;
+            fm.distance = 0.6f;
             fm.heightOffset = -0.42f;
             fm.minHeightAboveFloor = 0.5f;
             fm.summonKey = summonKey;

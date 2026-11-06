@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -32,8 +33,35 @@ namespace AR6DoF
             return font;
         }
 
-        /// <summary>Canvas World Space de 'size' pixels ; 1000 pixels = 1 mètre. Pas encore actif dans la scène : à placer par l'appelant.</summary>
-        public static Canvas NewCanvas(string name, Vector2 size, Ar6dofElem elem = Ar6dofElem.Menus)
+        /// <summary>Taille d'un pixel d'interface en mètres : 1 mm x 0,5 x le réglage général "Taille de l'interface" (100 % = fenêtres d'environ 40 cm).</summary>
+        public const float UnitScale = 0.0005f;
+        public static float BaseScale { get { return UnitScale * Mathf.Clamp(Ar6dofSettings.Current.uiScale, 0.4f, 3f); } }
+
+        /// <summary>Annoncé quand la taille générale change : reçoit la nouvelle BaseScale.</summary>
+        public static event Action<float> UiScaleChanged;
+
+        static readonly Dictionary<Canvas, float> tracked = new Dictionary<Canvas, float>();   // canvas -> BaseScale avec laquelle il a été dimensionné
+
+        /// <summary>À appeler quand le réglage général change : met à l'échelle les fenêtres déjà ouvertes en gardant leur redimensionnement manuel.</summary>
+        public static void ApplyUiScale()
+        {
+            float now = BaseScale;
+            var keys = new List<Canvas>(tracked.Keys);
+            foreach (var k in keys)
+            {
+                if (k == null) { tracked.Remove(k); continue; }
+                float was = tracked[k];
+                if (Mathf.Abs(now - was) < 1e-8f) continue;
+                k.transform.localScale *= now / was;
+                tracked[k] = now;
+            }
+            var ev = UiScaleChanged;
+            if (ev != null) ev(now);
+        }
+
+        /// <summary>Canvas World Space de 'size' pixels ; 1 pixel = 0,5 mm x la taille générale. Pas encore actif dans la scène : à placer par l'appelant.
+        /// scaled = faux : garde 1 pixel = 1 mm (étalonnage, où la géométrie est calculée en pixels). Le dock gère lui-même son échelle.</summary>
+        public static Canvas NewCanvas(string name, Vector2 size, Ar6dofElem elem = Ar6dofElem.Menus, bool scaled = true)
         {
             var go = new GameObject(name);
             go.AddComponent<Ar6dofThemeScope>().elem = elem;
@@ -43,7 +71,8 @@ namespace AR6DoF
             go.AddComponent<Ar6dofBackFace>();   // le dos du menu est vide (pas de texte a l'envers)
             var rt = (RectTransform)go.transform;
             rt.sizeDelta = size;
-            rt.localScale = Vector3.one * 0.001f;
+            rt.localScale = Vector3.one * (scaled ? BaseScale : 0.001f);
+            if (scaled && elem != Ar6dofElem.Dock) tracked[c] = BaseScale;
             var bg = new GameObject("Fond", typeof(RectTransform));
             bg.transform.SetParent(go.transform, false);
             var brt = (RectTransform)bg.transform;

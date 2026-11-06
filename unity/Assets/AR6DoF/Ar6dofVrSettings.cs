@@ -460,30 +460,32 @@ namespace AR6DoF
         }
 
         /// <summary>
-        /// Réglage par pas, à la place d'un curseur : la valeur au-dessus et six boutons -grand -moyen -petit +petit +moyen +grand.
-        /// Un curseur qu'on fait glisser dans l'air bouge sans arrêt ce qu'on regarde (IPD, champ de vision...) : écœurant. Ici chaque touche change la valeur d'un pas précis.
+        /// Réglage précis : la valeur au-dessus, un curseur qui accroche sur des pas de s1, et deux petits boutons - et + pour l'ajustement fin (un pas à chaque clic).
+        /// s2 et s3 (anciens gros pas) ne servent plus : le curseur les remplace.
         /// </summary>
         void StepRow(RectTransform page, ref float c, string label, float min, float max, float s1, float s2, float s3, Func<float> get, Action<float> set, string fmt = "0")
         {
             float y = Next(ref c, 74f, 10f);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
             Text lbl = Ar6dofVrUi.Label(page, "", new Vector2(0f, y + 22f), new Vector2(CW, 30f), 22, TextAnchor.MiddleLeft);
-            Action upd = () => lbl.text = Ar6dofLoc.T(label) + " : " + get().ToString(fmt, System.Globalization.CultureInfo.InvariantCulture);
-            float[] d = { -s3, -s2, -s1, s1, s2, s3 };
-            const float gap = 6f;
-            float w = (CW - 5f * gap) / 6f;
-            for (int i = 0; i < 6; i++)
+            Action upd = () => lbl.text = Ar6dofLoc.T(label) + " : " + get().ToString(fmt, inv);
+            const float bw = 64f, gap = 10f;
+            float sw = CW - 2f * (bw + gap);
+            float step = Mathf.Max(1e-4f, s1);
+            Slider sl = null;
+            Action<float> apply = v =>
             {
-                float delta = d[i];
-                string t = (delta < 0f ? "-" : "+") + Mathf.Abs(delta).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-                Text bt;
-                Ar6dofVrUi.MakeButton(page, t, new Vector2(-CW * 0.5f + w * 0.5f + i * (w + gap), y - 16f), new Vector2(w, 42f), () =>
-                {
-                    float v = Mathf.Clamp(get() + delta, min, max);
-                    set(Mathf.Round(v * 1000f) / 1000f);
-                    upd();
-                }, out bt, 20);
-            }
-            refreshers.Add(upd);
+                float q = Mathf.Clamp(Mathf.Round(v / step) * step, min, max);
+                q = Mathf.Round(q * 1000f) / 1000f;
+                if (Mathf.Abs(q - get()) > 1e-5f) set(q);
+                if (sl != null) sl.SetValueWithoutNotify(q);
+                upd();
+            };
+            Text t1, t2;
+            Ar6dofVrUi.MakeButton(page, "-", new Vector2(-CW * 0.5f + bw * 0.5f, y - 16f), new Vector2(bw, 42f), () => apply(get() - step), out t1, 26);
+            Ar6dofVrUi.MakeButton(page, "+", new Vector2(CW * 0.5f - bw * 0.5f, y - 16f), new Vector2(bw, 42f), () => apply(get() + step), out t2, 26);
+            sl = Ar6dofVrUi.MakeSlider(page, new Vector2(0f, y - 16f), new Vector2(sw, 40f), min, max, get(), v => apply(v));
+            refreshers.Add(() => { sl.SetValueWithoutNotify(Mathf.Clamp(get(), min, max)); upd(); });
             upd();
         }
 
@@ -594,9 +596,9 @@ namespace AR6DoF
         static readonly string[] LookFields = { "global", "dock", "menus", "keyboard", "screens", "laser", "customStyles" };
         static readonly string[] ChromeFields = { "chromeStyle", "chromeCorner", "chromeScale" };
         static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
-        static readonly string[] HeadFields = { "moveScale", "eyeHeightCm", "eyeHeightSeatedCm", "menusFollow", "windowDistance" };
+        static readonly string[] HeadFields = { "moveScale", "eyeHeightCm", "eyeHeightSeatedCm", "menusFollow", "openDistance" };
         static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
-        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
+        static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "uiScale", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
         static readonly string[] PerfFields = { "perfFps", "perfAa", "perfRenderScale" };
         static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite" };
@@ -1045,8 +1047,10 @@ namespace AR6DoF
                 Vector3 dm = canvas.transform.position - anchorMenu;
                 float rot = Quaternion.Angle(canvas.transform.rotation, anchorMenuRot);
                 anchorStep = 0;
-                statusMsg = Ar6dofLoc.F("Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg",
-                    Mathf.RoundToInt(dr.magnitude * 100f), Mathf.RoundToInt(dc.magnitude * 100f), Mathf.RoundToInt(dm.magnitude * 100f), Mathf.RoundToInt(rot));
+                var ptd = dock.passthrough;
+                statusMsg = Ar6dofLoc.F("Test d'ancrage : suivi {0} cm, camera d'Unity {1} cm, MENU {2} cm (doit etre 0), rotation du menu {3} deg. Ecart des yeux de la scene : {4} mm (fichier {5})",
+                    Mathf.RoundToInt(dr.magnitude * 100f), Mathf.RoundToInt(dc.magnitude * 100f), Mathf.RoundToInt(dm.magnitude * 100f), Mathf.RoundToInt(rot),
+                    ptd != null ? Mathf.RoundToInt(ptd.SceneBaselineMm) : 0, ptd != null && ptd.ModelFileShort.Length > 0 ? ptd.ModelFileShort : "aucun");
                 statusUntil = Time.unscaledTime + 15f;
                 UpdateStatus();
             }
@@ -1147,13 +1151,15 @@ namespace AR6DoF
             ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "Sol ici : mes yeux sont a cette hauteur", () => { if (dock.rig != null && dock.rig.HasPose) dock.rig.SetFloorFromEyeHeight(); }, 20);
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Suivi actif : les menus me suivent (non = ancres dans la piece)", () => Ar6dofSettings.Current.menusFollow, v => { Ar6dofSettings.Current.menusFollow = v; Touch(); }, 600f);
             // échelle des déplacements : si les menus "reculent" quand tu avances, le suivi sous-estime tes pas ; on la mesure avec un pas connu
-            StepRow(page, ref c, "Distance d'ouverture des fenetres (cm, a la prochaine ouverture)", 50f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.windowDistance * 100f), v => { Ar6dofSettings.Current.windowDistance = v / 100f; Touch(); }, "0");
+            StepRow(page, ref c, "Distance d'ouverture des fenetres (cm, a la prochaine ouverture)", 30f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.openDistance * 100f), v => { Ar6dofSettings.Current.openDistance = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Echelle des deplacements (%, 100 = exact)", 40f, 400f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.moveScale * 100f), v => { Ar6dofSettings.Current.moveScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Distance que tu vas parcourir (cm)", 30f, 300f, 1f, 10f, 50f, () => scaleDistCm, v => { scaleDistCm = Mathf.Round(v); UpdateScaleBtn(); }, "0");
             scaleBtnText = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", ScaleMeasure, 20);
             refreshers.Add(UpdateScaleBtn);
             anchorBtnText = ButtonText(page, 0f, Next(ref c, 48f, 12f), 520f, "", AnchorTest, 20);
             refreshers.Add(UpdateAnchorBtn);
+            if (dock.passthrough != null)
+                Toggle(page, 0f, Next(ref c, 48f, 12f), "Test sans relief (meme image aux deux yeux)", () => dock.passthrough.settings.monoTest, v => dock.passthrough.settings.monoTest = v, 520f);
             CloseCard(page, top, ref c);
 
             Finish(PgHead, c);
@@ -2625,6 +2631,7 @@ namespace AR6DoF
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Taille");
+            StepRow(page, ref c, "Taille de l'interface (%, 100 = fenetres d'environ 40 cm)", 40f, 300f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.uiScale * 100f), v => { Ar6dofSettings.Current.uiScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Taille du dock (%)", 50f, 200f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockScale * 100f), v => { Ar6dofSettings.Current.dockScale = v / 100f; Touch(); }, "0");
             StepRow(page, ref c, "Inclinaison supplementaire (deg)", -30f, 30f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.dockTilt), v => { Ar6dofSettings.Current.dockTilt = v; Touch(); }, "0");
             StepRow(page, ref c, "Taille du clavier (%)", 50f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.keyboardScale * 100f), v => { Ar6dofSettings.Current.keyboardScale = v / 100f; Touch(); }, "0");

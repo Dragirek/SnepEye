@@ -15,7 +15,7 @@ namespace AR6DoF
         public Transform head;                    // la caméra de la tête (laisse vide si tu utilises Ar6dofPassthrough)
         public Ar6dofPassthrough passthrough;     // la vue réelle (centre de l'affichage) sert de "tête"
         public Ar6dofHeadRig rig;                 // optionnel : vide = trouvé automatiquement
-        public float distance = 0.9f;             // distance d'apparition devant toi (m)
+        public float distance = 0.6f;             // distance d'apparition devant toi (m)
         public float heightOffset = -0.05f;       // par rapport aux yeux (m)
         public float minHeightAboveFloor = 0.9f;  // le menu ne descend pas plus bas (m, y = 0 = sol)
         public bool summonOnStart = true;

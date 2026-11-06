@@ -614,7 +614,7 @@ namespace AR6DoF
             addWinMode = false;
             FillAddDialog();
             Transform hd = Head;
-            Vector3 pos = hd != null ? hd.position + FlatForward(hd) * 0.9f : transform.position;
+            Vector3 pos = hd != null ? hd.position + FlatForward(hd) * Mathf.Clamp(Ar6dofSettings.Current.openDistance, 0.3f, 2f) : transform.position;
             if (hd != null) pos.y = hd.position.y - 0.05f;
             Vector3 toHead = hd != null ? hd.position - pos : Vector3.back;
             toHead.y = 0f;

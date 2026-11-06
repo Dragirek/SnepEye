@@ -298,7 +298,7 @@ namespace AR6DoF
             Vector3 dir = feetPos - h.position;
             if (dir.sqrMagnitude < 1e-4f) dir = Vector3.down + lastFlat;
             canvas.transform.SetPositionAndRotation(feetPos, Quaternion.LookRotation(dir.normalized) * Quaternion.Euler(d.dockTilt, 0f, 0f));
-            canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
+            canvas.transform.localScale = Vector3.one * Ar6dofVrUi.BaseScale * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
         }
 
         void OnStyleChanged()
@@ -309,7 +309,7 @@ namespace AR6DoF
             if (kbMenu != null) kbMenu.follow = d.menusFollow;
             if (d.dockAtFeet != lastFeetMode) { lastFeetMode = d.dockAtFeet; feetInit = false; Place(); }
             else if (d.dockAtFeet) { feetInit = false; FollowFeet(true); }
-            else canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
+            else canvas.transform.localScale = Vector3.one * Ar6dofVrUi.BaseScale * Mathf.Clamp(d.dockScale, 0.4f, 2.5f);
             foreach (var a in apps) SetIndicator(a);
             SetIndicator(settingsApp);
             if (appsApp != null) SetIndicator(appsApp);
@@ -893,7 +893,7 @@ namespace AR6DoF
             Transform h = Head;
             if (h == null || canvas == null) return;
             if (Ar6dofSettings.Current.dockAtFeet) { feetInit = false; FollowFeet(true); return; }
-            canvas.transform.localScale = Vector3.one * 0.001f * Mathf.Clamp(Ar6dofSettings.Current.dockScale, 0.4f, 2.5f);
+            canvas.transform.localScale = Vector3.one * Ar6dofVrUi.BaseScale * Mathf.Clamp(Ar6dofSettings.Current.dockScale, 0.4f, 2.5f);
             Vector3 dir = Vector3.zero;
             float lowest = h.position.y - 0.45f;
             var sc = Ar6dofScreens.Instance;
@@ -1098,20 +1098,20 @@ namespace AR6DoF
             float pref = Mathf.Repeat(yawDeg + 180f, 360f) - 180f;
             float side = pref >= 0f ? 1f : -1f;
 
-            // taille de la fenêtre à placer, en mètres (au moins 75 cm de haut : elle grandit vers le bas quand on la remplit)
-            float wm = 0.8f, hm = 0.8f, pivY = 1f;
+            // taille de la fenêtre à placer, en mètres (au moins 30 cm de haut : elle grandit vers le bas quand on la remplit)
+            float wm = 0.4f, hm = 0.4f, pivY = 1f;
             var rt = t as RectTransform;
             if (rt != null)
             {
-                wm = Mathf.Max(0.2f, rt.sizeDelta.x * Mathf.Abs(rt.lossyScale.x));
-                hm = Mathf.Max(0.75f, rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y));
+                wm = Mathf.Max(0.1f, rt.sizeDelta.x * Mathf.Abs(rt.lossyScale.x));
+                hm = Mathf.Max(0.3f, rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y));
                 pivY = rt.pivot.y;
             }
 
             var taken = new List<Taken>();
             CollectTaken(taken, t, eye, f);
 
-            float wd = Mathf.Clamp(Ar6dofSettings.Current.windowDistance, 0.5f, 2f);
+            float wd = Mathf.Clamp(Ar6dofSettings.Current.openDistance, 0.3f, 2f);
             float bestYaw = 0f, bestDist = wd, bestCost = float.MaxValue;
             float[] dists = { wd, wd * 1.33f };
             for (int di = 0; di < dists.Length && bestCost > 0f; di++)

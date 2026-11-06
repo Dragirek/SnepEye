@@ -202,7 +202,7 @@ namespace AR6DoF
             if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
             f.Normalize();
             var tr = countCanvas.transform;
-            tr.position = head.position + f * 1.3f;
+            tr.position = head.position + f * Mathf.Clamp(Ar6dofSettings.Current.openDistance + 0.2f, 0.5f, 2f);
             tr.rotation = Quaternion.LookRotation(tr.position - head.position, Vector3.up);
             SetLayer(countCanvas.gameObject, PreviewLayer);
         }

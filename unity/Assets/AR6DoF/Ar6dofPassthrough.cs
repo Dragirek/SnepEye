@@ -27,6 +27,7 @@ namespace AR6DoF
         public float ipdShift = 0f;            // écarte (+) ou rapproche (-) les deux images (IPD logiciel)
         public bool linkEyes = true;           // l'oeil droit est le miroir de l'oeil gauche
         public bool swapEyes = false;          // échange gauche / droite
+        [NonSerialized] public bool monoTest = false;          // TEST : la même image (caméra gauche) aux deux yeux et caméras de scène au même endroit : plus aucun relief
         public Ar6dofStereoLayout layout = Ar6dofStereoLayout.SideBySide;
         public bool useCalibration = true;     // corrige la distorsion de la caméra avec camera_model.json
         public bool centerOnImage = false;     // false (conseillé) : le centre de l'écran = l'axe de la caméra = devant toi.
@@ -80,6 +81,17 @@ namespace AR6DoF
         public double ReprojDeg { get; private set; }
         public bool HasFrames { get; private set; }
         public bool HasCalibration => model != null;
+        /// <summary>Ecart (mm) entre les deux caméras virtuelles de la scène, tel que lu dans camera_model.json (63 sans calibration).</summary>
+        public float SceneBaselineMm => model != null ? (float)(model.right_offset_x_m * 1000.0) : 63f;
+        /// <summary>Nom du dossier et du fichier camera_model.json lu en dernier ("" si aucun).</summary>
+        public string ModelFileShort
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(modelFile)) return "";
+                try { return Path.GetFileName(Path.GetDirectoryName(modelFile)) + "/" + Path.GetFileName(modelFile); } catch (Exception) { return modelFile; }
+            }
+        }
 
         /// <summary>Transform de ta vue réelle (caméra de l'oeil gauche, orientée vers le centre affiché). Null tant qu'elle n'existe pas.</summary>
         public Transform HeadView => eyeCams[0] != null ? eyeCams[0].transform : null;
@@ -653,6 +665,7 @@ namespace AR6DoF
             for (int disp = 0; disp < 2; disp++)
             {
                 int feed = (alt != null ? ac.swapEyes : settings.swapEyes) ? 1 - disp : disp;     // quelle moitié du flux va sur quel oeil
+                if (settings.monoTest) feed = 0;                                                   // test sans relief : image gauche aux deux yeux, caméras de scène confondues
                 var es = EyeSettingsFor(disp);
                 if (alt != null)   // autre caméra : seules les lentilles de l'afficheur restent ; décalage, miroir et rotation sont ceux de cette caméra
                     es = new Ar6dofEyeSettings { lensCenterX = es.lensCenterX, lensCenterY = es.lensCenterY, k1 = es.k1, k2 = es.k2, k3 = es.k3 };

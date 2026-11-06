@@ -556,7 +556,7 @@ namespace AR6DoF
                 Vector3 f = h.forward; f.y = 0f;
                 if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
                 f.Normalize();
-                Vector3 pos = h.position + f * 0.85f;
+                Vector3 pos = h.position + f * Mathf.Clamp(Ar6dofSettings.Current.openDistance, 0.3f, 2f);
                 pos.y = h.position.y - 0.05f;
                 canvas.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(f));
                 placedOnce = true;

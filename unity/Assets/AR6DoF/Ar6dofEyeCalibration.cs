@@ -72,7 +72,7 @@ namespace AR6DoF
         void BuildCanvas()
         {
             if (canvas != null) return;
-            canvas = Ar6dofVrUi.NewCanvas("Etalonnage des yeux", new Vector2(1400f, 900f));
+            canvas = Ar6dofVrUi.NewCanvas("Etalonnage des yeux", new Vector2(1400f, 900f), Ar6dofElem.Menus, false);
             var fond = canvas.transform.Find("Fond");
             if (fond != null) { var fi = fond.GetComponent<Image>(); if (fi != null) fi.color = new Color(0.03f, 0.03f, 0.05f, 0.7f); }
             title = Ar6dofVrUi.Label(canvas.transform, "", new Vector2(0f, 395f), new Vector2(1300f, 60f), 38);

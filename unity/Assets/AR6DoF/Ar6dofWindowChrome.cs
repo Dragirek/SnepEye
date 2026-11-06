@@ -441,8 +441,8 @@ namespace AR6DoF
 
         const float Gap = 0.008f;
         const float MoveLen = 4.2f, MoveThick = 0.7f;   // barre de déplacement : en multiples de S
-        /// <summary>Taille d'un bouton en mètres : 4,5 cm x le réglage global "Taille des boutons de fenêtre".</summary>
-        static float S { get { return 0.045f * Mathf.Clamp(Ar6dofSettings.Current.chromeScale, 0.5f, 3f); } }
+        /// <summary>Taille d'un bouton en mètres : 3,6 cm x le réglage global "Taille des boutons de fenêtre".</summary>
+        static float S { get { return 0.036f * Mathf.Clamp(Ar6dofSettings.Current.chromeScale, 0.5f, 3f); } }
         /// <summary>Taille d'un bouton de fenêtre en mètres, et dimensions de la barre de déplacement (pour aligner d'autres poignées).</summary>
         public static float ButtonSize { get { return S; } }
         public static float MoveBarLength { get { return S * MoveLen; } }
@@ -456,6 +456,7 @@ namespace AR6DoF
         Vector3 grabOffset;
         GameObject group;
         float baseScale = 1f, startRadius = 0.1f, startScale = 1f, armedUntil;
+        float uiBase = 0f;     // taille generale de l'interface avec laquelle baseScale a ete mesuree (fenetres Canvas seulement)
         bool dirty = true;
         int lastStyle = -1;
 
@@ -479,12 +480,21 @@ namespace AR6DoF
             c.onMinimize = onMinimize;
             c.onClose = onClose;
             c.baseScale = target != null ? target.localScale.x : 1f;
+            if (target != null && target.GetComponent<Canvas>() != null) c.uiBase = Ar6dofVrUi.BaseScale;
             c.Build();
             return c;
         }
 
-        void OnEnable() { Ar6dofSettings.Changed += MarkDirty; }
-        void OnDisable() { Ar6dofSettings.Changed -= MarkDirty; }
+        void OnEnable() { Ar6dofSettings.Changed += MarkDirty; Ar6dofVrUi.UiScaleChanged += OnUiScale; }
+        void OnDisable() { Ar6dofSettings.Changed -= MarkDirty; Ar6dofVrUi.UiScaleChanged -= OnUiScale; }
+        // la taille generale de l'interface change : « taille d'origine » et limites de redimensionnement suivent
+        void OnUiScale(float now)
+        {
+            if (uiBase <= 0f) return;
+            baseScale *= now / uiBase;
+            startScale *= now / uiBase;
+            uiBase = now;
+        }
         void MarkDirty() { dirty = true; }
 
         void Build()
@@ -591,21 +601,41 @@ namespace AR6DoF
             int corner = Mathf.Clamp(d.chromeCorner, 0, 3);
             bool right = corner == 1 || corner == 3;
             bool top = corner == 0 || corner == 1;
-            float yy = top ? hs.y + Gap + S * 0.5f : -hs.y - Gap - S * 0.5f;
             float sign = right ? 1f : -1f;
             float step = (S + Gap) * (mac ? 0.9f : 1f);
-            float x0 = sign * (hs.x - S * 0.5f);
-            if (corner == 3) x0 -= step;                 // en bas à droite : la poignée de taille occupe le coin, les boutons se décalent d'un cran
-            bClose.gameObject.SetActive(onClose != null);
-            bMin.gameObject.SetActive(onMinimize != null);
-            bClose.transform.localPosition = new Vector3(x0, yy, 0f);                     // fermer = le plus près du coin
-            bMin.transform.localPosition = new Vector3(x0 - sign * step, yy, 0f);
-            // poignée de taille : SOUS la fenêtre, dans son aplomb (jamais à droite : elle tomberait sur l'écran voisin)
-            bResize.transform.localPosition = new Vector3(hs.x - S * 0.5f, -hs.y - Gap - S * 0.5f, 0f);
-            // remise a la taille d'origine : juste a gauche de la poignee de taille
+            bool hasClose = onClose != null, hasMin = onMinimize != null;
+            int nBtn = (hasClose ? 1 : 0) + (hasMin ? 1 : 0);
+            bClose.gameObject.SetActive(hasClose);
+            bMin.gameObject.SetActive(hasMin);
             bool canReset = onResetSize != null || resizeBegin == null;
             bReset.gameObject.SetActive(canReset);
-            bReset.transform.localPosition = new Vector3(hs.x - S * 0.5f - (S + Gap), -hs.y - Gap - S * 0.5f, 0f);
+
+            float row1 = -hs.y - Gap - S * 0.5f;          // premiere rangee sous la fenetre : barre de deplacement, roue, poignee de taille
+            float row2 = row1 - (S + Gap);                // deuxieme rangee : remise a la taille d'origine, et fermer / reduire quand la premiere est trop pleine
+            float barHalf = canMove ? S * MoveLen * 0.5f : 0f;
+            float gearRight = onSettings != null ? barHalf + Gap + S : barHalf;     // bord droit de la roue (ou de la barre)
+
+            float cy = top ? hs.y + Gap + S * 0.5f : row1;
+            if (!top)
+            {
+                // en bas : la place entre le coin et le reste de la premiere rangee suffit-elle pour fermer / reduire ?
+                float avail = right ? hs.x - S - Gap - gearRight : hs.x - barHalf - Gap;
+                if (avail < nBtn * step) cy = row2;
+            }
+            float x0 = sign * (hs.x - S * 0.5f);
+            if (corner == 3)
+            {
+                // en bas a droite : la poignee de taille occupe le coin de la premiere rangee, la remise a la taille d'origine celui de la deuxieme
+                bool onRow2 = cy == row2;
+                if (!onRow2 || canReset) x0 -= step;
+            }
+            bClose.transform.localPosition = new Vector3(x0, cy, 0f);                     // fermer = le plus pres du coin
+            bMin.transform.localPosition = new Vector3(x0 - sign * step, cy, 0f);
+            if (!hasClose) bMin.transform.localPosition = new Vector3(x0, cy, 0f);
+            // poignée de taille : SOUS la fenêtre, dans son aplomb (jamais à droite : elle tomberait sur l'écran voisin)
+            bResize.transform.localPosition = new Vector3(hs.x - S * 0.5f, row1, 0f);
+            // remise a la taille d'origine : juste sous la poignee de taille (jamais a cote : elle tombait sur la roue ou sur « fermer »)
+            bReset.transform.localPosition = new Vector3(hs.x - S * 0.5f, row2, 0f);
             // barre de déplacement : sous la fenêtre, au milieu
             bMove.gameObject.SetActive(canMove);
             float barY = -hs.y - Gap - S * MoveThick * 0.5f;
