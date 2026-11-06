@@ -1217,6 +1217,7 @@ namespace AR6DoF
             "Calibration de la camera : dans ar6dof_app.exe, page Calibration => Camera calibration: in ar6dof_app.exe, Calibration page",
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Mode zoom not measured yet: move your head for a few seconds so the IMU can measure it",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Camera mode {0} x {1} at {2} fps, different from the calibration ({3} x {4}): adapted automatically (mode zoom x{5})",
+            "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Scale set to {0} (tracking saw {1} cm, Unity camera {2} cm)",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -2424,6 +2425,7 @@ namespace AR6DoF
             "Calibration de la camera : dans ar6dof_app.exe, page Calibration => Calibracion de la camara: en ar6dof_app.exe, pagina Calibracion",
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Zoom del modo aun sin medir: mueve la cabeza unos segundos para que la IMU lo mida",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Modo de camara {0} x {1} a {2} fps, distinto de la calibracion ({3} x {4}): adaptado automaticamente (zoom del modo x{5})",
+            "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Escala ajustada a {0} (el seguimiento veia {1} cm, la camara de Unity {2} cm)",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -3638,6 +3640,7 @@ namespace AR6DoF
             "Calibration de la camera : dans ar6dof_app.exe, page Calibration => Kamerakalibrierung: in ar6dof_app.exe, Seite Kalibrierung",
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Modus-Zoom noch nicht gemessen: Beweg den Kopf ein paar Sekunden, damit die IMU ihn misst",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Kameramodus {0} x {1} mit {2} B/s, anders als die Kalibrierung ({3} x {4}): automatisch angepasst (Modus-Zoom x{5})",
+            "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Skala auf {0} gestellt (Tracking sah {1} cm, Unity-Kamera {2} cm)",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -4852,6 +4855,7 @@ namespace AR6DoF
             "Calibration de la camera : dans ar6dof_app.exe, page Calibration => Calibrazione della camera: in ar6dof_app.exe, pagina Calibrazione",
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Zoom della modalita non ancora misurato: muovi la testa per qualche secondo cosi l'IMU lo misura",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Modalita camera {0} x {1} a {2} fps, diversa dalla calibrazione ({3} x {4}): adattata automaticamente (zoom della modalita x{5})",
+            "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Scala impostata a {0} (il tracking vedeva {1} cm, camera di Unity {2} cm)",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -6065,6 +6069,7 @@ namespace AR6DoF
             "Calibration de la camera : dans ar6dof_app.exe, page Calibration => Calibracao da camera: em ar6dof_app.exe, pagina Calibracao",
             "Zoom du mode pas encore mesure : bouge la tete quelques secondes pour que l'IMU le mesure => Zoom do modo ainda nao medido: mexa a cabeca por alguns segundos para a IMU medir",
             "Mode camera {0} x {1} a {2} i/s, different de la calibration ({3} x {4}) : adapte automatiquement (zoom du mode x{5}) => Modo da camera {0} x {1} a {2} fps, diferente da calibracao ({3} x {4}): adaptado automaticamente (zoom do modo x{5})",
+            "Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm) => Escala ajustada para {0} (o rastreamento viu {1} cm, camera do Unity {2} cm)",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

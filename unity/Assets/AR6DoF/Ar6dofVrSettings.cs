@@ -994,7 +994,7 @@ namespace AR6DoF
         // mesure de l'échelle des déplacements : 1) point de départ, 2) avance en ligne droite de la distance indiquée, 3) arrivée
         float scaleDistCm = 100f;
         int scaleStep;
-        Vector3 scaleStart;
+        Vector3 scaleStart, scaleCamStart;
         Text scaleBtnText;
 
         Text lockFloorText;
@@ -1018,6 +1018,7 @@ namespace AR6DoF
             if (scaleStep == 0)
             {
                 scaleStart = rig.RawPosition;
+                scaleCamStart = dock.HeadTransform != null ? dock.HeadTransform.position : rig.CameraStep;
                 scaleStep = 1;
                 Say("Depart note : avance en ligne droite, puis clique a l'arrivee");
             }
@@ -1025,6 +1026,10 @@ namespace AR6DoF
             {
                 Vector3 d = rig.RawPosition - scaleStart;
                 d.y = 0f;
+                // ce que la camera d'Unity a vraiment parcouru (doit valoir la mesure du suivi x l'echelle actuelle : sinon la perte est dans Unity)
+                Vector3 dc = (dock.HeadTransform != null ? dock.HeadTransform.position : rig.CameraStep) - scaleCamStart;
+                dc.y = 0f;
+                float camCm = dc.magnitude * 100f;
                 scaleStep = 0;
                 if (d.magnitude < 0.15f) Say("Deplacement trop court : recommence");
                 else
@@ -1032,7 +1037,7 @@ namespace AR6DoF
                     float k = Mathf.Clamp(scaleDistCm * 0.01f / d.magnitude, 0.25f, 4f);
                     Ar6dofSettings.Current.moveScale = k;
                     Touch();
-                    statusMsg = Ar6dofLoc.F("Echelle reglee a {0} (le suivi voyait {1} cm)", k.ToString("0.00"), Mathf.RoundToInt(d.magnitude * 100f));
+                    statusMsg = Ar6dofLoc.F("Echelle reglee a {0} (le suivi voyait {1} cm, la camera d'Unity {2} cm)", k.ToString("0.00"), Mathf.RoundToInt(d.magnitude * 100f), Mathf.RoundToInt(camCm));
                     statusUntil = Time.unscaledTime + 5f;
                     UpdateStatus();
                 }

@@ -50,6 +50,8 @@ namespace AR6DoF
         public float HeadHeight { get; private set; }
         /// <summary>Position de la tête relative à l'origine, SANS l'échelle des déplacements (sert à la mesurer : x, hauteur au-dessus du sol, z).</summary>
         public Vector3 RawPosition { get; private set; }
+        /// <summary>Position réellement donnée au Rig dans Unity (avec l'échelle des déplacements) : sert à comparer avec RawPosition quand on mesure.</summary>
+        public Vector3 CameraStep { get; private set; }
         /// <summary>Orientation casque -> monde (repère G, matrice 3x3 en ligne) prédite à l'instant du rendu. Sert à la reprojection de l'image.</summary>
         public double[] RenderRotationG { get; private set; }
 
@@ -189,11 +191,12 @@ namespace AR6DoF
 
             Vector3 flat = new Vector3(posU.x - originU.x, 0f, posU.z - originU.z);
             RawPosition = new Vector3(flat.x, posU.y, flat.z);
-            // échelle des déplacements : si le suivi sous-estime les pas (menus qui "reculent" quand tu avances), elle les remet à la bonne taille
+            // échelle des déplacements : agrandit les pas SUR LE SOL (avancer, reculer, côté). La hauteur n'est jamais multipliée : elle reste la hauteur mesurée.
             float ms = Mathf.Clamp(Ar6dofSettings.Current.moveScale, 0.25f, 4f);
-            Vector3 world = yawFix * (flat * ms) + new Vector3(0f, posU.y * ms, 0f);
+            Vector3 world = yawFix * (flat * ms) + new Vector3(0f, posU.y, 0f);
             transform.SetPositionAndRotation(world, yawFix * rotU);
-            HeadHeight = posU.y * ms;
+            HeadHeight = posU.y;
+            CameraStep = world;
         }
     }
 }
