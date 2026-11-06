@@ -51,6 +51,7 @@ namespace AR6DoF
             { "ship",      "#fff; p 6 30 58 30 49 17 15 17; r 32 37 12 6 1.5; r 32 47 5 4 1; s 32 50 32 58 1.8; s 22 33 22 42 1.8; -s 14 24 50 24 1" },
             { "chess",     "#fff; r 32 14 18 4.5 3; p 20 18 46 18 46 34 42 46 34 54 30 58 26 52 12 38 14 33 24 35 30 30 22 24; -c 31 47 2.2" },
             { "checkers",  "#fff; c 32 32 26; -o 32 32 17 2.2; -c 32 32 9" },
+            { "memes",     "#fff; c 32 27 21; p 12 36 11 62 29 46; p 52 36 53 62 35 46; -e 24 29 3 4.2; -e 40 29 3 4.2; -t 29.5 20 34.5 20 32 17" },
         };
 
         public static bool HasIcon(string name) { return IconSpec.ContainsKey(name); }

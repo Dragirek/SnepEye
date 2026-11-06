@@ -32,7 +32,7 @@ namespace AR6DoF
                 desc = "Volumes, muets et niveaux de la voix, des sons et de la musique, spectre, et lecteur de musique avec liste de lecture.",
                 make = d => new Ar6dofMixerApp(d) },
             new Ar6dofAppEntry { id = "camera", title = "Appareil photo", glyph = "camera", yaw = 71f,
-                desc = "Apercu en direct de ce que tu vois, et photo a la resolution de la camera, avec ou sans les interfaces. Minuteur, 3D. Les photos vont dans Images\\AR6DoF\\Photos.",
+                desc = "Apercu en direct de ce que tu vois, photo a la resolution de la camera (minuteur, avec ou sans les interfaces) et Scanner : QR code, texte, traduction. Les photos vont dans Images\\AR6DoF\\Photos.",
                 make = d => new Ar6dofCameraApp(d) },
             new Ar6dofAppEntry { id = "objects", title = "Objets 3D", glyph = "cube", yaw = 107f,
                 desc = "Pose des modeles 3D (.obj), des stickers et des formes dans le monde. Deplacement au laser, reglages, suppression.",
@@ -47,8 +47,11 @@ namespace AR6DoF
                 desc = "Heure avec plein de cadrans, chronometre, minuteur et alarmes (a renommer, AM / PM). Les alarmes sonnent meme application fermee.",
                 make = d => new Ar6dofClockApp(d) },
             new Ar6dofAppEntry { id = "calendar", title = "Calendrier", glyph = "calendar", yaw = 36f,
-                desc = "Evenements avec rappel avant leur debut. Scanne une affiche ou le programme d'une convention devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
+                desc = "Evenements avec rappel avant leur debut. Scanne une affiche, le programme d'une convention ou un QR code devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
                 make = d => new Ar6dofCalendarApp(d) },
+            new Ar6dofAppEntry { id = "memes", title = "Memes", glyph = "memes", yaw = 125f,
+                desc = "Pose dans le monde un chat toupie, un escargot immortel ou un cafard dansant. Touche-les au laser : ils reagissent. Rien ne tourne sans meme pose.",
+                make = d => new Ar6dofMemesApp(d) },
 
             // ---- jeux (onglet Jeux du Hub)
             new Ar6dofAppEntry { id = "slots", title = "Machine a sous", glyph = "slots", yaw = -143f, game = true,
