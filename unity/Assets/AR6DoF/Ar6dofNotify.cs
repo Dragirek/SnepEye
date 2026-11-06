@@ -134,7 +134,7 @@ namespace AR6DoF
                 if (failed != audioFailed)
                 {
                     audioFailed = failed;
-                    if (failed) Add(Ar6dofNoteKind.Error, "Moteur audio", string.IsNullOrEmpty(a.Message) ? Ar6dofLoc.T("Erreur") : a.Message, "audio", "audio");
+                    if (failed) Add(Ar6dofNoteKind.Error, "Moteur audio", string.IsNullOrEmpty(a.Message) ? Ar6dofLoc.T("Erreur") : a.Message, "mixer", "audio");
                     else RemoveKey("audio");
                 }
                 string me = a.musicError ?? "";

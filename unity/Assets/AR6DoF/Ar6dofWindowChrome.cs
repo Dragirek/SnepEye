@@ -532,7 +532,7 @@ namespace AR6DoF
             var imc = ig.GetComponent<MeshCollider>();
             if (imc != null) Destroy(imc);
             ig.transform.SetParent(go.transform, false);
-            ig.transform.localPosition = new Vector3(0f, 0f, -0.02f);
+            ig.transform.localPosition = new Vector3(0f, 0f, -0.01f);   // l'icone est a moitie moins devant le fond du bouton
             ig.transform.localScale = new Vector3(0.62f, 0.62f, 1f);
             var ir = ig.GetComponent<Renderer>();
             var ish = Shader.Find("Sprites/Default");

@@ -146,6 +146,22 @@ namespace AR6DoF
         enum View { Main, Pick, Browse }
         View view = View.Main;
 
+        // ---- reglages audio propres a l'application (roue de la fenetre) : micro et / ou enceintes, seulement si l'application s'en sert
+        /// <summary>Vrai si l'application utilise le micro : la roue propose alors de choisir le micro.</summary>
+        public virtual bool UsesMic { get { return false; } }
+        /// <summary>Vrai si l'application joue du son sur les enceintes : la roue propose alors de choisir la sortie.</summary>
+        public virtual bool UsesOutput { get { return false; } }
+        public bool HasSettings { get { return UsesMic || UsesOutput; } }
+        bool settingsOpen;
+        public bool SettingsOpen { get { return settingsOpen; } }
+        public void ToggleSettings()
+        {
+            if (!HasSettings || canvas == null) return;
+            settingsOpen = !settingsOpen;
+            view = View.Main;
+            Rebuild();
+        }
+
         protected Ar6dofAppWindow(Ar6dofDock d, string id, string name, string glyph, string desc, float width)
         {
             dock = d;
@@ -180,7 +196,7 @@ namespace AR6DoF
         {
             if (canvas == null) return;
             canvas.gameObject.SetActive(on);
-            if (on) { view = View.Main; Rebuild(); }
+            if (on) { view = View.Main; settingsOpen = false; Rebuild(); }
             OnVisible(on);
         }
 
@@ -223,7 +239,8 @@ namespace AR6DoF
                     var t = Ar6dofVrUi.Label(content, title, new Vector2(0f, -(y + 24f)), new Vector2(IW, 48f), 32, TextAnchor.MiddleLeft);
                     t.fontStyle = FontStyle.Bold;
                     y += 48f + Gap;
-                    BuildMain();
+                    if (settingsOpen && HasSettings) BuildAudioSettings();
+                    else BuildMain();
                     break;
             }
             Ar6dofVrUi.FitHeight(canvas, y + 10f);
@@ -395,6 +412,54 @@ namespace AR6DoF
                 case Ar6dofAudio.EngineState.Online: return Ar6dofLoc.T("Actif");
                 default: return string.IsNullOrEmpty(a.Message) ? Ar6dofLoc.T("Erreur") : a.Message;
             }
+        }
+
+        // ------------------------------------------------------------------ reglages audio de l'application
+        void BuildAudioSettings()
+        {
+            var a = Ar6dofAudio.Instance;
+            if (a == null) { Lbl("Audio indisponible", 40, 22); return; }
+            Section("Audio de cette application");
+            EngineRow();
+            Text t1 = null, t2 = null;
+            if (UsesMic) BtnT("", () => PickAudioDevice(a, true), out t1, 52f, 22);
+            if (UsesOutput) BtnT("", () => PickAudioDevice(a, false), out t2, 52f, 22);
+            refreshers.Add(() =>
+            {
+                if (t1 != null) t1.text = Ar6dofLoc.T("Micro : ") + a.InputLabel();
+                if (t2 != null) t2.text = Ar6dofLoc.T("Enceintes : ") + a.OutputLabel();
+            });
+            var st = Lbl("", 30, 18);
+            refreshers.Add(() => st.text = (UsesMic ? Ar6dofLoc.T("Micro ") + StatusWord(a.InStatus) : "") + (UsesMic && UsesOutput ? "  -  " : "") + (UsesOutput ? Ar6dofLoc.T("Enceintes ") + StatusWord(a.OutStatus) : ""));
+            Para(Ar6dofLoc.T(a.Online ? "Le casque garde le son de Windows et de la realite augmentee : seuls ta voix, les sons et la musique sortent sur l'appareil choisi." : "Active le moteur audio pour lister tes micros et tes enceintes."), 56, 18);
+            Btn("Retour", ToggleSettings, 50f, 22);
+        }
+
+        public static string StatusWord(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "...";
+            if (s == "ok") return Ar6dofLoc.T("ok");
+            return Ar6dofLoc.T("erreur ") + s.Replace("err ", "");
+        }
+
+        void PickAudioDevice(Ar6dofAudio a, bool input)
+        {
+            a.RequestDevices();
+            var items = new List<string> { Ar6dofLoc.T("Desactive"), Ar6dofLoc.T("Par defaut de Windows") };
+            var list = input ? a.inputs : a.outputs;
+            foreach (var d in list) items.Add(d.name + (d.isDefault ? "  (" + Ar6dofLoc.T("defaut") + ")" : ""));
+            string cur = input ? a.data.inDev : a.data.outDev;
+            int ci = cur == "off" ? 0 : cur == "default" ? 1 : -1;
+            if (ci < 0) for (int i = 0; i < list.Count; i++) if (list[i].id == cur) ci = i + 2;
+            var snapshot = new List<AudioDevice>(list);
+            Pick(input ? "Choisir le micro" : "Choisir les enceintes externes", items, ci, i =>
+            {
+                string id = i == 0 ? "off" : i == 1 ? "default" : snapshot[i - 2].id;
+                string name = i < 2 ? "" : snapshot[i - 2].name;
+                if (input) a.SetInput(id, name); else a.SetOutput(id, name);
+                if (id != "off" && !a.Enabled) a.SetEnabled(true);
+                Refresh();
+            });
         }
 
         // ------------------------------------------------------------------ liste de choix

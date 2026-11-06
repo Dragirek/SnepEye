@@ -125,6 +125,8 @@ namespace AR6DoF
         public float moveScale = 1f;       // échelle des déplacements de la tête (0,25 .. 4) : corrige un suivi qui sous- ou sur-estime les pas (base entre les objectifs mal réglée)
 
         // Télécommande
+        public int rayOrigin = 0;               // d'ou part le rayon : 0 main droite, 1 main gauche, 2 entre les yeux (la telecommande n'a pas de position : la "main" est virtuelle)
+        public bool rayShow = true;             // faux : le trait du rayon n'est plus dessine (la visee marche pareil) ; un peu moins de calcul
         public float remoteMinCutoff = 2f;
         public float remoteBeta = 0.15f;
         public float remotePredictMs = 10f;

@@ -181,7 +181,11 @@ namespace AR6DoF
                 aim = ang <= clickDeadzoneDeg ? pressDir : Vector3.Slerp(pressDir, dirSmooth, 1f - clickDeadzoneDeg / ang).normalized;
             }
 
-            Vector3 origin = head.position + Quaternion.Euler(0f, Yaw(headFwd), 0f) * originOffset;
+            var gs = Ar6dofSettings.Current;
+            Vector3 off = originOffset;
+            if (gs.rayOrigin == 1) off.x = -off.x;                          // main gauche
+            else if (gs.rayOrigin == 2) off = new Vector3(0f, -0.06f, 0.12f);   // entre les yeux, juste devant
+            Vector3 origin = head.position + Quaternion.Euler(0f, Yaw(headFwd), 0f) * off;
             var ray = new Ray(origin, aim);
             LastRay = ray;
 
@@ -189,10 +193,13 @@ namespace AR6DoF
             eventCam = ec;
             Hit hit = Resolve(ray, ec);
 
-            laser.enabled = true;
+            laser.enabled = gs.rayShow;
             Vector3 end = (hit.ui != null || hit.blocked) ? hit.uiPoint : (hit.target != null ? hit.point : origin + aim * 2f);
-            laser.SetPosition(0, origin);
-            laser.SetPosition(1, end);
+            if (gs.rayShow)
+            {
+                laser.SetPosition(0, origin);
+                laser.SetPosition(1, end);
+            }
 
             // ---- survol ----
             if (hit.target != hovered)

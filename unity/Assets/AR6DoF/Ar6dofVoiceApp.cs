@@ -7,7 +7,7 @@ namespace AR6DoF
 {
     /// <summary>
     /// Application « Changeur de voix » : modifie ta voix (hauteur, robot, écho, réverbération, filtres, porte de bruit, compresseur) avec des présélections
-    /// et la visualisation du son. Le micro, les enceintes et le moteur se choisissent dans l'application Audio. Tout le traitement est fait par
+    /// et la visualisation du son. Le micro, les enceintes et le moteur se choisissent avec la roue de la fenêtre. Tout le traitement est fait par
     /// ar6dof_audio.exe, lancé seulement quand une application de son est ouverte.
     /// </summary>
     public class Ar6dofVoiceApp : Ar6dofAppWindow
@@ -19,6 +19,9 @@ namespace AR6DoF
         Ar6dofMeterBar barIn, barOut;
 
         public Ar6dofVoiceApp(Ar6dofDock d) : base(d, "voice", "Changeur de voix", "mic", "Voix modifiee (hauteur, robot, echo, filtres...) avec presets et vision du son", 680f) { }
+
+        public override bool UsesMic { get { return true; } }
+        public override bool UsesOutput { get { return true; } }
 
         protected override void OnRebuildStart() { specIn = specOut = null; barIn = barOut = null; }
 
@@ -45,9 +48,9 @@ namespace AR6DoF
 
         void Presets(Ar6dofAudio a)
         {
-            if (!a.Enabled) EngineRow();   // le micro et les enceintes se choisissent dans l'application Audio
+            if (!a.Enabled) EngineRow();   // le micro et les enceintes se choisissent avec la roue de la fenetre
             ToggleRow("Effets de voix", () => a.GetVoice("on", 1f) > 0.5f, v => a.SetVoice("on", v ? 1f : 0f));
-            if (a.data.inDev == "off") Para("Choisis ton micro dans l'application Audio.", 30, 19);
+            if (a.data.inDev == "off") Para("Choisis ton micro avec la roue de cette fenetre.", 30, 19);
             Section("Preselections");
             var items = new List<object>();
             for (int i = 0; i < 4; i++) { int k = i; items.Add(Ar6dofAudio.PresetNames[i]); items.Add((Action)(() => { a.ApplyPreset(k); Refresh(); })); }

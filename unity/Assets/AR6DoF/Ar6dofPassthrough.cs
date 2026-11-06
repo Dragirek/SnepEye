@@ -38,6 +38,8 @@ namespace AR6DoF
         public bool autoDelay = true;          // délai mesuré automatiquement par ar6dof_probe (comparaison caméra / gyro) : tourne la tête quelques secondes
         public float captureDelayMs = 40f;     // délai manuel (utilisé si autoDelay est décoché ou tant que la mesure n'est pas disponible)
         public bool clampEdges = false;        // étire les bords de l'image au lieu de les laisser noirs
+        public float denoise = 0f;             // 0..1 : débruitage de l'image de la caméra (0 = aucun calcul de plus)
+        public float sharpen = 0f;             // 0..1 : netteté de l'image de la caméra (0 = aucun calcul de plus)
     }
 
     [Serializable] class EyeModelJson { public double[] K; public double[] D; public double[] R; }
@@ -683,6 +685,7 @@ namespace AR6DoF
             if (ac == null || ac.role == Ar6dofCamRole.Other) mat.SetVector("_Look", Vector4.zero);
             else if (ac.role == Ar6dofCamRole.Night) mat.SetVector("_Look", new Vector4(1f, ac.gain, ac.bright, ac.tint));
             else mat.SetVector("_Look", new Vector4(2f, ac.gain, ac.bright, ac.palette));
+            mat.SetVector("_Enh", new Vector4(Mathf.Clamp01(settings.denoise), Mathf.Clamp01(settings.sharpen), 0f, 0f));
             mat.SetTexture("_SceneL", rtL);
             mat.SetTexture("_SceneR", rtR);
             mat.SetFloat("_Flip", settings.flipComposite ? -1f : 1f);

@@ -124,7 +124,7 @@ namespace AR6DoF
         CanvasApp settingsApp;
         Ar6dofVrSettings vrSettings;
         readonly List<Ar6dofAppWindow> windows = new List<Ar6dofAppWindow>();     // toutes les applications du catalogue (Ar6dofCatalog) : dans la barre seulement quand elles sont ouvertes
-        Ar6dofAppsApp appsApp;
+        Ar6dofAppsApp appsApp;     // le Hub
         Ar6dofNotifyApp notifApp;          // cloche + panneau des notifications : liee au dock, hors du catalogue
         Ar6dofNotifyService notify;
         Ar6dofCalendarService calendar;
@@ -445,6 +445,12 @@ namespace AR6DoF
             Action close = app != null ? (Action)(() => CloseApp(app)) : stow;
             var ch = Ar6dofWindowChrome.Create(name, c.transform, Ar6dofElem.Menus, Ar6dofWindowChrome.CanvasHalf(c), stow, close);
             ch.canMove = true;
+            var aw = app as Ar6dofAppWindow;
+            if (aw != null && aw.HasSettings)
+            {
+                ch.onSettings = aw.ToggleSettings;            // roue : micro / enceintes de cette application
+                ch.settingsOn = () => aw.SettingsOpen;
+            }
         }
 
         /// <summary>Range un menu dans la barre (comme un second clic sur son icône).</summary>

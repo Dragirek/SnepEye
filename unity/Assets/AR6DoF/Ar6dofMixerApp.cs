@@ -9,10 +9,12 @@ namespace AR6DoF
     /// <summary>
     /// Table de mixage : volumes, muets et niveaux de la voix, du soundboard et de la musique, volume général, visualisation de la sortie (17 au choix, un clic l'agrandit au-dessus de la fenêtre),
     /// un onglet DJ à deux platines (formes d'onde, boucles, hot cues, tempo, synchro, crossfader), une console avancée (faders, solo, balance, égaliseur 3 bandes, limiteur : tout visible d'un coup, sans défiler) et un lecteur de musique
-    /// avec liste de lecture (pour un fursuiter qui joue de la musique sur ses enceintes). Tout sort sur les enceintes choisies dans l'application Audio.
+    /// avec liste de lecture (pour un fursuiter qui joue de la musique sur ses enceintes). Tout sort sur les enceintes choisies avec la roue de la fenêtre.
     /// </summary>
     public partial class Ar6dofMixerApp : Ar6dofAppWindow
     {
+        public override bool UsesMic { get { return true; } }
+        public override bool UsesOutput { get { return true; } }
         static readonly string[] AudioExt = { ".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac", ".mp4" };
         int tab;
         int plPage;

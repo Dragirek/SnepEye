@@ -9,6 +9,7 @@ namespace AR6DoF
     public class Ar6dofAppEntry
     {
         public string id, title, desc, glyph;
+        public bool game;     // vrai : affichee dans l'onglet Jeux du Hub
         public float yaw;
         public Func<Ar6dofDock, Ar6dofAppWindow> make;
     }
@@ -24,9 +25,6 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "voice", title = "Changeur de voix", glyph = "mic", yaw = -35f,
                 desc = "Voix modifiee (hauteur, robot, echo, filtres...) avec presets et vision du son.",
                 make = d => new Ar6dofVoiceApp(d) },
-            new Ar6dofAppEntry { id = "audio", title = "Audio", glyph = "speaker", yaw = -143f,
-                desc = "Moteur audio, micro et enceintes externes, pour toutes les applications de son.",
-                make = d => new Ar6dofAudioDevicesApp(d) },
             new Ar6dofAppEntry { id = "soundboard", title = "Soundboard", glyph = "pads", yaw = -71f,
                 desc = "Des boutons pour lancer des sons et des effets sur les enceintes, sans couper les precedents. Grille, liste, flux ou cercle.",
                 make = d => new Ar6dofSoundboardApp(d) },
@@ -61,15 +59,17 @@ namespace AR6DoF
     }
 
     /// <summary>
-    /// Apps : toutes les applications, avec leur icône et leur nom comme dans la barre de tâches. Toucher une icône ouvre l'application (elle apparaît alors dans
-    /// la barre) ; la toucher de nouveau la range. Placé juste à gauche de la roue des réglages.
+    /// Hub : deux onglets, Applications et Jeux, avec l'icône et le nom de chacune comme dans la barre de tâches. Toucher une icône ouvre l'application
+    /// (elle apparaît alors dans la barre) ; la toucher de nouveau la range. Placé juste à gauche de la roue des réglages.
     /// </summary>
     public class Ar6dofAppsApp : Ar6dofAppWindow
     {
         const int Cols = 4;
         const float TileH = 132f, TileGap = 10f;
 
-        public Ar6dofAppsApp(Ar6dofDock d) : base(d, "apps", "Apps", "apps", "Toutes les applications : touche-en une pour l'ouvrir ou la ranger", 720f) { }
+        int tab;     // 0 Applications, 1 Jeux
+
+        public Ar6dofAppsApp(Ar6dofDock d) : base(d, "apps", "Hub", "apps", "Applications et jeux : touche-en un pour l'ouvrir ou le ranger", 720f) { }
 
         string deviceSig = "";
 
@@ -89,14 +89,23 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
-            Para("Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien.", 56, 18);
+            Tabs(new[] { "Applications", "Jeux" }, tab, t => tab = t);
+            Para(tab == 0
+                ? "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien."
+                : "Touche un jeu pour l'ouvrir ; il prend sa place dans la barre. Un jeu range ou ferme ne consomme rien.", 56, 18);
             float tileW = (IW - (Cols - 1) * TileGap) / Cols;
-            int n = Ar6dofCatalog.Entries.Count;
-            for (int i = 0; i < n; i++)
+            int shown = 0;
+            for (int i = 0; i < Ar6dofCatalog.Entries.Count; i++)
             {
                 var e = Ar6dofCatalog.Entries[i];
+                if (e.game != (tab == 1)) continue;
                 string id = e.id;
-                Tile(i, tileW, e.glyph, e.title, e.desc, () => dock.ToggleApp(id), () => dock.IsOpen(id));
+                Tile(shown++, tileW, e.glyph, e.title, e.desc, () => dock.ToggleApp(id), () => dock.IsOpen(id));
+            }
+            if (tab == 1)
+            {
+                if (shown == 0) Para("Les jeux arrivent bientot.", 40, 20);
+                return;
             }
 
             Section("Appareils Bluetooth");

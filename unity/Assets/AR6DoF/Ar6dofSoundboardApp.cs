@@ -12,6 +12,7 @@ namespace AR6DoF
     /// </summary>
     public class Ar6dofSoundboardApp : Ar6dofAppWindow
     {
+        public override bool UsesOutput { get { return true; } }
         static readonly string[] AudioExt = { ".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac", ".mp4" };
         static readonly string[] LayoutNames = { "Grille", "Liste", "Flux", "Cercle" };
         bool edit, confirmDel;
@@ -34,7 +35,7 @@ namespace AR6DoF
             editing = null;
 
             if (!a.Enabled) EngineRow();
-            else if (a.data.outDev == "off") Para("Choisis tes enceintes externes dans l'application Audio.", 30, 19);
+            else if (a.data.outDev == "off") Para("Choisis tes enceintes externes avec la roue de cette fenetre.", 30, 19);
 
             var bar = new List<object>();
             bar.Add("Edition"); bar.Add((Action)(() => { edit = !edit; Rebuild(); }));

@@ -597,11 +597,11 @@ namespace AR6DoF
         static readonly string[] ChromeFields = { "chromeStyle", "chromeCorner", "chromeScale" };
         static readonly string[] KbFields = { "kbAzerty", "kbNumpad", "kbAnim", "kbAnimDir", "kbAnimPalette", "kbAnimSpeed", "kbAnimStrength" };
         static readonly string[] HeadFields = { "moveScale", "eyeHeightCm", "eyeHeightSeatedCm", "menusFollow", "openDistance" };
-        static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs" };
+        static readonly string[] RemoteFields = { "remoteMinCutoff", "remoteBeta", "remotePredictMs", "rayOrigin", "rayShow" };
         static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "uiScale", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
         static readonly string[] PerfFields = { "perfFps", "perfAa", "perfRenderScale" };
-        static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite" };
+        static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite", "denoise", "sharpen" };
         static readonly string[] OpticsImgFields = { "left", "right", "linkEyes", "swapEyes", "layout", "centerOnImage" };
 
         /// <summary>Champs d'Ar6dofSettings (settings.json) que contrôle cette page ; null si la page n'en a pas.</summary>
@@ -825,6 +825,8 @@ namespace AR6DoF
             Toggle(page, 164f, y, "Etirer les bords", () => pt.settings.clampEdges, v => pt.settings.clampEdges = v);
             y = Next(ref c, 48f, 16f);
             Toggle(page, -164f, y, "Rendu a l'envers", () => pt.settings.flipComposite, v => pt.settings.flipComposite = v);
+            StepRow(page, ref c, "Debruitage de l'image (%, 0 = aucun calcul)", 0f, 100f, 1f, 5f, 10f, () => Mathf.Round(pt.settings.denoise * 100f), v => pt.settings.denoise = v / 100f, "0");
+            StepRow(page, ref c, "Nettete de l'image (%, 0 = aucun calcul)", 0f, 100f, 1f, 5f, 10f, () => Mathf.Round(pt.settings.sharpen * 100f), v => pt.settings.sharpen = v / 100f, "0");
             CloseCard(page, top, ref c);
             Finish(PgView, c);
         }
@@ -1186,6 +1188,13 @@ namespace AR6DoF
             calMsg = Ar6dofVrUi.Label(page, "", new Vector2(0f, Next(ref c, 52f, 12f)), new Vector2(CW, 52f), 19, TextAnchor.UpperLeft);
             calMsg.horizontalOverflow = HorizontalWrapMode.Wrap;
             refreshers.Add(UpdateCalMsg);
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Origine du rayon");
+            Ar6dofVrUi.Label(page, "La telecommande n'a pas de position : le rayon part d'une main virtuelle (utile en costume, ou la vraie ne se voit pas).", new Vector2(0f, Next(ref c, 60f, 6f)), new Vector2(CW, 60f), 19, TextAnchor.UpperLeft).horizontalOverflow = HorizontalWrapMode.Wrap;
+            Text rayBtn = ButtonText(page, 0f, Next(ref c, 48f, 8f), 520f, "", () => { Ar6dofSettings.Current.rayOrigin = (Ar6dofSettings.Current.rayOrigin + 1) % 3; Touch(); }, 22);
+            refreshers.Add(() => rayBtn.text = Ar6dofLoc.T(Ar6dofSettings.Current.rayOrigin == 0 ? "Le rayon part de : main droite" : Ar6dofSettings.Current.rayOrigin == 1 ? "Le rayon part de : main gauche" : "Le rayon part de : entre les yeux"));
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Dessiner le rayon (decoche : invisible, la visee marche pareil)", () => Ar6dofSettings.Current.rayShow, v => { Ar6dofSettings.Current.rayShow = v; Touch(); }, 620f);
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Filtre du rayon");

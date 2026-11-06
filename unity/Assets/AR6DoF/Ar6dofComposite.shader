@@ -32,6 +32,7 @@ Shader "AR6DoF/Composite"
             float4 _Misc;      // x : marge de la scene (overscan), y : 1 = etirer les bords de l'image
             float4 _U[20];     // 10 vecteurs par oeil (voir Ar6dofPassthrough.cs)
             float4 _Look;      // effet sur l'image de la camera : x 0 aucun, 1 vision nocturne, 2 thermique ; y gain / contraste ; z luminosite ; w teinte / palette
+            float4 _Enh;       // amelioration de l'image : x debruitage 0..1, y nettete 0..1 (0 et 0 : aucun calcul de plus)
 
             struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
             struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -72,6 +73,45 @@ Shader "AR6DoF/Composite"
                     return float3(saturate(t * 3.0), saturate(t * 3.0 - 1.0), saturate(bl));
                 }
                 return HueRgb((1.0 - t) * 0.68) * saturate(t * 6.0 + 0.15);
+            }
+
+            // debruitage (moyenne des voisins qui ressemblent au pixel : les contours restent nets) puis nettete (masque flou), sur l'image brute de la camera
+            float3 Enhance (float2 uvT, float3 c0)
+            {
+                float2 t = float2(1.0 / _TexSize.x, 1.0 / _TexSize.y);
+                float3 n0 = tex2Dlod(_Cam, float4(uvT + float2(t.x, 0.0), 0.0, 0.0)).rgb;
+                float3 n1 = tex2Dlod(_Cam, float4(uvT - float2(t.x, 0.0), 0.0, 0.0)).rgb;
+                float3 n2 = tex2Dlod(_Cam, float4(uvT + float2(0.0, t.y), 0.0, 0.0)).rgb;
+                float3 n3 = tex2Dlod(_Cam, float4(uvT - float2(0.0, t.y), 0.0, 0.0)).rgb;
+                float3 c = c0;
+                if (_Enh.x > 0.001)
+                {
+                    float3 n4 = tex2Dlod(_Cam, float4(uvT + t, 0.0, 0.0)).rgb;
+                    float3 n5 = tex2Dlod(_Cam, float4(uvT - t, 0.0, 0.0)).rgb;
+                    float3 n6 = tex2Dlod(_Cam, float4(uvT + float2(t.x, -t.y), 0.0, 0.0)).rgb;
+                    float3 n7 = tex2Dlod(_Cam, float4(uvT + float2(-t.x, t.y), 0.0, 0.0)).rgb;
+                    float inv = 1.0 / (2.0 * (0.03 + 0.10 * _Enh.x) * (0.03 + 0.10 * _Enh.x));
+                    float3 lw = float3(0.299, 0.587, 0.114);
+                    float l0 = dot(c0, lw);
+                    float3 acc = c0;
+                    float wsum = 1.0;
+                    float d, w;
+                    d = dot(n0, lw) - l0; w = exp(-d * d * inv); acc += n0 * w; wsum += w;
+                    d = dot(n1, lw) - l0; w = exp(-d * d * inv); acc += n1 * w; wsum += w;
+                    d = dot(n2, lw) - l0; w = exp(-d * d * inv); acc += n2 * w; wsum += w;
+                    d = dot(n3, lw) - l0; w = exp(-d * d * inv); acc += n3 * w; wsum += w;
+                    d = dot(n4, lw) - l0; w = exp(-d * d * inv); acc += n4 * w; wsum += w;
+                    d = dot(n5, lw) - l0; w = exp(-d * d * inv); acc += n5 * w; wsum += w;
+                    d = dot(n6, lw) - l0; w = exp(-d * d * inv); acc += n6 * w; wsum += w;
+                    d = dot(n7, lw) - l0; w = exp(-d * d * inv); acc += n7 * w; wsum += w;
+                    c = lerp(c0, acc / wsum, saturate(_Enh.x * 1.25));
+                }
+                if (_Enh.y > 0.001)
+                {
+                    float3 blur = (n0 + n1 + n2 + n3) * 0.25;
+                    c = saturate(c + (c - blur) * (_Enh.y * 2.0));
+                }
+                return c;
             }
 
             float4 frag (v2f i) : SV_Target
@@ -136,6 +176,7 @@ Shader "AR6DoF/Composite"
                         // Unity : l'origine d'une texture est en BAS a gauche, nos lignes sont comptees depuis le HAUT
                         float2 uvT = float2((S9.y + us + 0.5) / _TexSize.x, 1.0 - (S9.z + vs + 0.5) / _TexSize.y);
                         col = tex2Dlod(_Cam, float4(uvT, 0.0, 0.0)).rgb;   // texture BGRA32 : l'ordre des canaux est déjà correct
+                        if (_Enh.x + _Enh.y > 0.001) col = Enhance(uvT, col);
                         if (_Look.x > 0.5) col = ApplyLook(col);
                     }
                 }
