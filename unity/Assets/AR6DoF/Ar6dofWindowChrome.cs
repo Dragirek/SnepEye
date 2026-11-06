@@ -18,6 +18,7 @@ namespace AR6DoF
                 var sp = Ar6dofVrUi.GearSprite();
                 t = sp != null ? sp.texture : null;
             }
+            else if (Ar6dofGameArt.HasIcon(name)) t = Ar6dofGameArt.Icon(name);   // icones des jeux
             else t = Draw(name);
             if (t != null) cache[name] = t;
             return t;

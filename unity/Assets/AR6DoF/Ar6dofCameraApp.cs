@@ -9,13 +9,15 @@ namespace AR6DoF
     /// <summary>
     /// Appareil photo : aperçu en direct de ce que voit le casque (image de la caméra corrigée, sans la déformation des lentilles) au format réel de la caméra,
     /// et photo à sa résolution, de la caméra gauche ou droite, avec ou sans les interfaces. Minuteur : le compte à rebours s'affiche sur l'aperçu (pas sur le PNG).
-    /// Les fichiers PNG vont dans Images\AR6DoF\Photos. Rien ne tourne tant que la fenêtre est fermée ou réduite.
+    /// Les fichiers PNG vont dans Images\AR6DoF\Photos. Onglet Scanner : photo temporaire, lecture d'un QR code (lien, Wi-Fi, contact, événement...) ou du texte (OCR Windows),
+    /// copie, ouverture d'un lien, traduction en ligne sur demande, ajout au calendrier ; le même scan que celui du calendrier (Ar6dofScanSession). Rien ne tourne tant que la fenêtre est fermée ou réduite.
     /// </summary>
-    public class Ar6dofCameraApp : Ar6dofAppWindow
+    public class Ar6dofCameraApp : Ar6dofScanWindow
     {
         static readonly int[] Timers = { 0, 3, 5, 10 };
         const int PreviewLayer = 30;   // la fenetre est sur cette couche : l'apercu en direct l'exclut (sinon il se filmerait lui-meme)
 
+        int mode;   // 0 photo, 1 scanner
         int ui, eye, timer, quality;   // quality : 0 normale, 1 accumulee (8 images), 2 accumulee sur grille x2
         string status = "";
         Text shootLabel;
@@ -27,7 +29,7 @@ namespace AR6DoF
         int lastCount = -1;
         bool shown;   // la fenetre est affichee (pas reduite, pas fermee) : HideUi la cache seulement pendant la prise
 
-        public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct et photo du passthrough", 700f)
+        public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct, photo et scanner (QR code, texte)", 700f)
         {
             ui = Get("ui", 1); eye = Get("eye", 0); timer = Get("timer", 1); quality = Get("quality", 0);
         }
@@ -35,7 +37,9 @@ namespace AR6DoF
         static int Get(string k, int def) { try { return PlayerPrefs.GetInt("ar6dof_cam_" + k, def); } catch (Exception) { return def; } }
         static void Put(string k, int v) { try { PlayerPrefs.SetInt("ar6dof_cam_" + k, v); } catch (Exception) { } }
 
-        protected override void OnRebuildStart() { shootLabel = null; countOverlay = null; }
+        protected override void OnRebuildStart() { base.OnRebuildStart(); shootLabel = null; countOverlay = null; }
+
+        public override void OnClosed() { mode = 0; base.OnClosed(); }
 
         protected override void OnRebuilt() { SetLayer(canvas != null ? canvas.gameObject : null, PreviewLayer); }
 
@@ -50,6 +54,7 @@ namespace AR6DoF
             shown = on;
             if (!on)
             {
+                AbortScan();
                 var pt = dock.passthrough;
                 if (pt != null) { if (pt.PhotoBusy) pt.CancelPhoto(); pt.ReleasePreviewScene(); }
                 DestroyCount();
@@ -59,6 +64,7 @@ namespace AR6DoF
 
         public override void Destroy()
         {
+            AbortScan();
             DestroyCount();
             ReleasePreview();
             base.Destroy();
@@ -89,6 +95,7 @@ namespace AR6DoF
         // apercu en direct : 30 images/s tant que la fenetre est affichee (rien quand elle est reduite ou fermee)
         protected override void OnTick()
         {
+            TickScan();
             var pt = Pt;
             if (pt == null || canvas == null || !canvas.gameObject.activeInHierarchy || pt.PhotoShooting) return;   // le minuteur ne fige pas l'apercu
             if (Time.unscaledTime - lastPreview < 1f / 30f) return;                                              // 30 images/s
@@ -101,6 +108,14 @@ namespace AR6DoF
         {
             var pt = Pt;
             if (pt == null) { Para("Le passthrough n'est pas disponible dans cette scene.", 40, 20); return; }
+
+            Tabs(new[] { "Photo", "Scanner" }, mode, t =>
+            {
+                if (t == mode) return;
+                if (pt.PhotoBusy) pt.CancelPhoto();
+                AbortScan();
+                mode = t;
+            });
 
             // apercu en direct : remplit la fenetre, au format reel de la camera
             EnsurePreview();
@@ -118,6 +133,8 @@ namespace AR6DoF
             var sh = countOverlay.gameObject.AddComponent<Shadow>();
             sh.effectColor = new Color(0f, 0f, 0f, 0.8f);
             sh.effectDistance = new Vector2(4f, -4f);
+
+            if (mode == 1) { BuildScanTab(); return; }
 
             var bb = BtnRow(52f, 21, "", (Action)(() => { ui = ui != 0 ? 0 : 1; Put("ui", ui); Refresh(); }),
                                       "", (Action)(() => { eye = eye != 0 ? 0 : 1; Put("eye", eye); Rebuild(); }));
@@ -152,6 +169,30 @@ namespace AR6DoF
             BtnRow(48f, 21, "Ouvrir le dossier", (Action)(() => OpenFolder()));
             Para("Photos dans Images\\AR6DoF\\Photos, a la resolution de la camera.", 28, 16);
             Para("Accumulation : reste immobile une seconde ; le calcul prend 1 a 3 s.", 28, 16);
+        }
+
+        // onglet Scanner : la photo est temporaire (supprimee des que la lecture est finie) ; le compte a rebours s'affiche sur l'apercu
+        void BuildScanTab()
+        {
+            refreshers.Add(() =>
+            {
+                if (countOverlay != null) countOverlay.text = scan.phase == Ar6dofScanSession.Phase.Countdown && scan.countSec > 0 ? scan.countSec.ToString() : "";
+            });
+            switch (scan.phase)
+            {
+                case Ar6dofScanSession.Phase.Idle:
+                    Para("Vise un QR code ou un texte, bien en face et bien eclaire, sans bouger. Touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. Rien ne tourne avant ton clic.", 100, 18);
+                    var go = Btn("Scanner", () => StartScan(true), 64f, 26);
+                    Ar6dofTheme.SetSelected(go, true);
+                    break;
+                case Ar6dofScanSession.Phase.Countdown:
+                case Ar6dofScanSession.Phase.Reading:
+                    BuildScanBusy();
+                    break;
+                default:
+                    BuildScanResult(true, true);
+                    break;
+            }
         }
 
         static void OpenFolder()

@@ -9,52 +9,61 @@ namespace AR6DoF
 {
     /// <summary>
     /// Calendrier : liste des evenements a venir, ajout / modification a la main, et SCAN d'une affiche ou d'un programme de convention devant toi.
-    /// Le scan ne demarre que quand tu touches « Lancer le scan » : photo apres 3 s avec la camera gauche (image corrigee, sans les interfaces), lecture du texte
-    /// par l'OCR de Windows (Ar6dofOcr, dans un autre fil), puis Ar6dofCalParser en tire des evenements que tu relis, corriges et enregistres. Chaque evenement
+    /// Le scan ne demarre que quand tu touches « Lancer le scan » ; c'est le MEME scan que celui de l'appareil photo (Ar6dofScanSession) : photo apres 3 s avec la camera
+    /// gauche (image corrigee, sans les interfaces), lecture d'un QR code (un QR iCalendar donne directement ses evenements), sinon lecture du texte par l'OCR de Windows
+    /// (Ar6dofOcr, dans un autre fil) puis Ar6dofCalParser en tire des evenements que tu relis, corriges et enregistres. Chaque evenement
     /// enregistre sonne quelques minutes avant son debut (10 par defaut, reglable) meme application fermee, et laisse une ligne dans les notifications.
     /// Fermee, la fenetre ne calcule rien ; la photo du scan est temporaire et supprimee des que le texte est lu.
     /// </summary>
-    public class Ar6dofCalendarApp : Ar6dofAppWindow
+    public class Ar6dofCalendarApp : Ar6dofScanWindow
     {
-        enum Phase { Idle, Countdown, Reading, Done }
         class ScanItem { public Ar6dofCalEvent ev; public bool keep; }
 
         const int PerPage = 5;
-        const float ScanDelay = 3f;
-        int tab, page, lastCount = -1;
+        int tab, page;
         Ar6dofCalEvent ed, edOrig;     // ed : copie en cours de modification ; edOrig : l'evenement d'origine (null = nouveau ou ligne du scan)
         ScanItem edScan;
-        Phase phase = Phase.Idle;
-        string status = "", scanMsg = "", agendaMsg = "", scanInfo = "";
-        readonly List<string> raw = new List<string>();
+        string agendaMsg = "";
         readonly List<ScanItem> found = new List<ScanItem>();
-        Ar6dofOcr.Job job;
-        bool showRaw, confirmClear;
+        bool builtFound, showRaw, confirmClear;
 
         public Ar6dofCalendarApp(Ar6dofDock d) : base(d, "calendar", "Calendrier", "calendar",
             "Evenements avec rappel avant leur debut, et scan d'une affiche ou d'un programme de convention.", 680f) { }
 
         static Ar6dofCalendarService Svc { get { return Ar6dofCalendarService.Instance; } }
-        static string TempFolder { get { return Path.Combine(Path.GetTempPath(), "AR6DoF_scan"); } }
 
         public override void OnClosed()
         {
-            var pt = dock.passthrough;
-            if (pt != null && pt.PhotoBusy) pt.CancelPhoto();
-            job = null;
-            phase = Phase.Idle;
-            found.Clear(); raw.Clear();
+            base.OnClosed();   // annule la photo et la lecture, supprime les images temporaires
+            found.Clear(); builtFound = false;
             ed = null; edOrig = null; edScan = null;
-            scanMsg = ""; agendaMsg = ""; status = "";
+            agendaMsg = "";
             confirmClear = false; showRaw = false; tab = 0; page = 0;
         }
 
-        protected override void OnTick()
+        protected override void OnTick() { TickScan(); }
+
+        // la lecture est finie : les evenements trouves (QR iCalendar ou texte lu) deviennent des lignes a relire
+        protected override void OnScanChanged()
         {
-            if (phase == Phase.Reading && job != null && job.done) FinishScan();
+            if (scan.phase != Ar6dofScanSession.Phase.Done) builtFound = false;   // nouveau scan ou annulation : l'ancienne liste ne vaut plus
+            else if (!builtFound) BuildFound();
+            base.OnScanChanged();
         }
 
-        bool Open { get { return canvas != null && canvas.gameObject.activeSelf; } }
+        void BuildFound()
+        {
+            builtFound = true;
+            found.Clear();
+            page = 0;
+            DateTime now = DateTime.Now;
+            foreach (var p in scan.Events(now))
+            {
+                var ev = new Ar6dofCalEvent { title = p.title, place = p.place, durMin = p.durMin, remind = true };
+                ev.Start = p.start;
+                found.Add(new ScanItem { ev = ev, keep = p.start > now });   // un horaire deja passe est decoche d'office
+            }
+        }
 
         // ------------------------------------------------------------------ fenetre
         protected override void BuildMain()
@@ -186,112 +195,35 @@ namespace AR6DoF
         // ------------------------------------------------------------------ scan
         void BuildScan(Ar6dofCalendarService svc)
         {
-            switch (phase)
+            switch (scan.phase)
             {
-                case Phase.Idle:
-                    Para("Tiens l'affiche ou le programme bien en face de toi, texte lisible et bien eclaire, sans bouger. Touche Lancer : photo dans 3 secondes, lecture du texte par Windows, puis tu relis les evenements avant de les enregistrer. Rien ne tourne avant ton clic.", 124, 18);
-                    var go = Btn("Lancer le scan", StartScan, 64f, 26);
+                case Ar6dofScanSession.Phase.Idle:
+                    Para("Tiens l'affiche, le programme ou un QR code bien en face de toi, lisible et bien eclaire, sans bouger. Touche Lancer : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows, puis tu relis les evenements avant de les enregistrer. Rien ne tourne avant ton clic.", 124, 18);
+                    var go = Btn("Lancer le scan", BeginScan, 64f, 26);
                     Ar6dofTheme.SetSelected(go, true);
                     break;
-                case Phase.Countdown:
-                case Phase.Reading:
-                    var st = Lbl("", 44, 24);
-                    refreshers.Add(() => st.text = status);
-                    Btn("Annuler", CancelScan, 52f, 22);
+                case Ar6dofScanSession.Phase.Countdown:
+                case Ar6dofScanSession.Phase.Reading:
+                    BuildScanBusy();
                     break;
                 default:
+                    if (!builtFound) BuildFound();
                     BuildReview(svc);
                     break;
             }
         }
 
-        void StartScan()
+        void BeginScan()
         {
-            var pt = dock.passthrough;
-            Ar6dofNotifyService.Resolve("scan");
-            found.Clear(); raw.Clear();
-            showRaw = false; scanMsg = ""; scanInfo = ""; page = 0; lastCount = -1;
-            if (pt == null || pt.PhotoBusy)
-            {
-                Fail("Camera indisponible : le passthrough n'est pas pret");
-                return;
-            }
-            phase = Phase.Countdown;
-            status = Ar6dofLoc.F("Scan dans {0} s...", Mathf.CeilToInt(ScanDelay));
-            var es = pt.EyeSize;
-            // 8 images accumulees (bruit reduit, grille x2), en niveaux de gris, contraste etire et image sombre relevee : la lecture de texte en profite
-            var o = new Ar6dofPassthrough.PhotoOptions { withUi = false, eye = 0, width = es.x, height = es.y, folder = TempFolder, burst = 8, upscale = 2, forText = true };
-            pt.TakePhoto(o, ScanDelay, OnCount, null, OnPhoto);
-            Rebuild();
-        }
-
-        void CancelScan()
-        {
-            var pt = dock.passthrough;
-            if (phase == Phase.Countdown && pt != null && pt.PhotoBusy) { pt.CancelPhoto(); return; }   // OnPhoto("Annule") remet tout a zero
-            job = null;   // lecture en cours : son resultat sera ignore
-            phase = Phase.Idle;
-            Rebuild();
-        }
-
-        void OnCount(int sec)
-        {
-            if (sec == lastCount) return;   // appele a chaque image : on ne touche au texte que quand le chiffre change
-            lastCount = sec;
-            status = sec > 0 ? Ar6dofLoc.F("Scan dans {0} s...", sec) : Ar6dofLoc.T("Photo...");
-            if (Open) Refresh();
-        }
-
-        void OnPhoto(List<string> files, Texture2D tex, string err)
-        {
-            if (tex != null) UnityEngine.Object.Destroy(tex);
-            if (!string.IsNullOrEmpty(err))
-            {
-                if (err == "Annule") { phase = Phase.Idle; if (Open) Rebuild(); }
-                else Fail(Ar6dofLoc.F("Photo impossible : {0}", err));
-                return;
-            }
-            if (files == null || files.Count == 0) { Fail("Photo impossible : rien n'a ete enregistre"); return; }
-            var pt0 = dock.passthrough;
-            phase = Phase.Reading;
-            status = Ar6dofLoc.T("Lecture du texte...");
-            scanInfo = pt0 != null ? pt0.LastStackInfo : "";
-            job = Ar6dofOcr.Start(files[0]);
-            if (Open) Rebuild();
-        }
-
-        void Fail(string msg)
-        {
-            scanMsg = msg;
-            phase = Phase.Done;
-            Ar6dofNotifyService.Post(Ar6dofNoteKind.Error, "Calendrier", Ar6dofLoc.T(msg), "calendar", "scan");
-            if (Open) Rebuild();
-        }
-
-        void FinishScan()
-        {
-            var j = job;
-            job = null;
-            raw.Clear(); found.Clear();
-            if (j.error.Length > 0) { Fail(j.error); return; }
-            raw.AddRange(j.lines);
-            if (j.info.Length > 0) scanInfo = (scanInfo.Length > 0 ? scanInfo + " ; " : "") + "OCR " + j.info;
-            DateTime now = DateTime.Now;
-            foreach (var p in Ar6dofCalParser.Parse(raw, now))
-            {
-                var ev = new Ar6dofCalEvent { title = p.title, place = p.place, durMin = p.durMin, remind = true };
-                ev.Start = p.start;
-                found.Add(new ScanItem { ev = ev, keep = p.start > now });   // un horaire deja passe est decoche d'office
-            }
-            scanMsg = "";
-            phase = Phase.Done;
-            page = 0;
-            Rebuild();
+            found.Clear(); builtFound = false;
+            showRaw = false; page = 0;
+            StartScan(true);
         }
 
         void BuildReview(Ar6dofCalendarService svc)
         {
-            if (scanMsg.Length > 0) Para(scanMsg, 80, 19);
+            if (scan.error.Length > 0) Para(scan.error, 80, 19);
+            else if (found.Count == 0 && scan.qr != null) { BuildScanResult(false, false); return; }   // un QR qui n'est pas un evenement : on le montre, tu peux le copier
             else if (found.Count == 0) Para("Aucun horaire reconnu. Rapproche-toi, ameliore la lumiere, ou regarde le texte lu ci-dessous.", 56, 19);
             else
             {
@@ -326,11 +258,12 @@ namespace AR6DoF
                     sl.text = Ar6dofLoc.F("Enregistrer ({0})", n);
                 });
             }
-            BtnRow(48f, 21, "Nouveau scan", (Action)StartScan,
+            BtnRow(48f, 21, "Nouveau scan", (Action)BeginScan,
                             showRaw ? "Cacher le texte lu" : "Voir le texte lu", (Action)(() => { showRaw = !showRaw; Rebuild(); }));
             if (showRaw)
             {
-                if (scanInfo.Length > 0) Para(scanInfo, 28, 15);
+                var raw = scan.qr != null ? new List<string>(scan.qr.Replace("\r", "").Split('\n')) : scan.lines;
+                if (scan.info.Length > 0) Para(scan.info, 28, 15);
                 if (raw.Count == 0) Para("Aucun texte lu.", 30, 18);
                 else
                 {
@@ -349,8 +282,8 @@ namespace AR6DoF
             foreach (var f in found) if (f.keep) list.Add(f.ev);
             int added = svc.AddRange(list);
             agendaMsg = added == 0 ? Ar6dofLoc.T("Rien de nouveau a enregistrer") : Ar6dofLoc.F("{0} evenement(s) ajoute(s)", added);
-            found.Clear(); raw.Clear();
-            phase = Phase.Idle;
+            found.Clear(); builtFound = false;
+            AbortScan();
             tab = 0; page = 0;
             Rebuild();
         }

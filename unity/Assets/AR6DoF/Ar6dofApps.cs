@@ -49,6 +49,26 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "calendar", title = "Calendrier", glyph = "calendar", yaw = 36f,
                 desc = "Evenements avec rappel avant leur debut. Scanne une affiche ou le programme d'une convention devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
                 make = d => new Ar6dofCalendarApp(d) },
+
+            // ---- jeux (onglet Jeux du Hub)
+            new Ar6dofAppEntry { id = "slots", title = "Machine a sous", glyph = "slots", yaw = -143f, game = true,
+                desc = "Une machine a sous cartoon avec des jetons virtuels : aucun argent, juste pour le fun.",
+                make = d => new Ar6dofSlotsApp(d) },
+            new Ar6dofAppEntry { id = "dice", title = "Des", glyph = "dice", yaw = -17f, game = true,
+                desc = "Lance de 1 a 6 des : pile ou face, d4, d6, d8, d10, d12, d20 ou d100.",
+                make = d => new Ar6dofDiceApp(d) },
+            new Ar6dofAppEntry { id = "tictactoe", title = "Morpion", glyph = "tictactoe", yaw = 17f, game = true,
+                desc = "Morpion contre le PC : trois niveaux, du facile a l'imbattable.",
+                make = d => new Ar6dofTicTacToeApp(d) },
+            new Ar6dofAppEntry { id = "battleship", title = "Bataille navale", glyph = "ship", yaw = -53f, game = true,
+                desc = "Bataille navale contre le PC : place ta flotte et coule la sienne.",
+                make = d => new Ar6dofBattleshipApp(d) },
+            new Ar6dofAppEntry { id = "chess", title = "Echecs", glyph = "chess", yaw = 53f, game = true,
+                desc = "Echecs contre le PC : toutes les regles, trois niveaux, tu peux jouer les blancs ou les noirs.",
+                make = d => new Ar6dofChessApp(d) },
+            new Ar6dofAppEntry { id = "checkers", title = "Dames", glyph = "checkers", yaw = 89f, game = true,
+                desc = "Jeu de dames contre le PC (8 x 8, prise obligatoire) : trois niveaux.",
+                make = d => new Ar6dofCheckersApp(d) },
         };
 
         public static Ar6dofAppEntry Find(string id)
@@ -104,7 +124,7 @@ namespace AR6DoF
             }
             if (tab == 1)
             {
-                if (shown == 0) Para("Les jeux arrivent bientot.", 40, 20);
+                Para("Les jeux se jouent au laser, comme le reste. Fermes ou ranges, ils ne consomment rien.", 40, 18);
                 return;
             }
 
