@@ -1629,6 +1629,9 @@ namespace AR6DoF
             "Rien n'a ete enregistre => Nothing was saved",
             "Rafale annulee : {0} photos gardees dans {1} => Burst cancelled: {0} photos kept in {1}",
             "Rafale enregistree : {0} photos dans {1} => Burst saved: {0} photos in {1}",
+            "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => Text read is too small (average height {0} px, at least 10 needed): move closer to the poster.",
+            "Premiere ligne => First row",
+            "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => The times on the poster are unreadable: they are counted from the first row. Set the time of this first row (the top of the time column).",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3248,6 +3251,9 @@ namespace AR6DoF
             "Rien n'a ete enregistre => No se guardo nada",
             "Rafale annulee : {0} photos gardees dans {1} => Rafaga cancelada: {0} fotos guardadas en {1}",
             "Rafale enregistree : {0} photos dans {1} => Rafaga guardada: {0} fotos en {1}",
+            "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => El texto leido es demasiado pequeno (altura media {0} px, hacen falta al menos 10): acercate mas al cartel.",
+            "Premiere ligne => Primera fila",
+            "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Las horas del cartel son ilegibles: se cuentan desde la primera fila. Ajusta la hora de esa primera fila (la parte superior de la columna de horas).",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4874,6 +4880,9 @@ namespace AR6DoF
             "Rien n'a ete enregistre => Nichts wurde gespeichert",
             "Rafale annulee : {0} photos gardees dans {1} => Serienbild abgebrochen: {0} Fotos behalten in {1}",
             "Rafale enregistree : {0} photos dans {1} => Serienbild gespeichert: {0} Fotos in {1}",
+            "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => Der gelesene Text ist zu klein (mittlere Hoehe {0} px, mindestens 10 noetig): geh naeher an das Plakat heran.",
+            "Premiere ligne => Erste Zeile",
+            "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Die Uhrzeiten des Plakats sind unlesbar: Sie werden ab der ersten Zeile gezaehlt. Stelle die Uhrzeit dieser ersten Zeile ein (oben in der Zeitspalte).",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6500,6 +6509,9 @@ namespace AR6DoF
             "Rien n'a ete enregistre => Non e stato salvato nulla",
             "Rafale annulee : {0} photos gardees dans {1} => Raffica annullata: {0} foto conservate in {1}",
             "Rafale enregistree : {0} photos dans {1} => Raffica salvata: {0} foto in {1}",
+            "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => Il testo letto e troppo piccolo (altezza media {0} px, ne servono almeno 10): avvicinati di piu al manifesto.",
+            "Premiere ligne => Prima riga",
+            "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Gli orari del manifesto sono illeggibili: vengono contati dalla prima riga. Imposta l'orario di questa prima riga (la parte alta della colonna degli orari).",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -8125,6 +8137,9 @@ namespace AR6DoF
             "Rien n'a ete enregistre => Nada foi salvo",
             "Rafale annulee : {0} photos gardees dans {1} => Rajada cancelada: {0} fotos mantidas em {1}",
             "Rafale enregistree : {0} photos dans {1} => Rajada salva: {0} fotos em {1}",
+            "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => O texto lido e pequeno demais (altura media {0} px, sao necessarios pelo menos 10): aproxime-se mais do cartaz.",
+            "Premiere ligne => Primeira linha",
+            "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Os horarios do cartaz estao ilegiveis: sao contados a partir da primeira linha. Ajuste o horario dessa primeira linha (o topo da coluna de horarios).",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

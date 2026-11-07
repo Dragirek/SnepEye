@@ -16,13 +16,13 @@ namespace AR6DoF
     public partial class Ar6dofCameraApp : Ar6dofScanWindow
     {
         static readonly int[] Timers = { 0, 3, 5, 10 };
-        static readonly string[] SModes = { "Auto", "QR code", "Texte", "Traduction", "Planning", "Carte" };
+        static readonly string[] SNames = { "QR code", "Texte", "Traduction", "Planning", "Carte" };   // le mode interne 0 (Auto) n'est plus propose : QR code est le mode de base
         const int PreviewLayer = 30;   // la fenetre est sur cette couche : l'apercu en direct l'exclut (sinon il se filmerait lui-meme)
         const float ShotSeconds = 4f;  // duree d'affichage de la miniature de la photo prise
 
         int mode;   // 0 photo, 1 scanner
         int pmode;  // onglet Photo : 0 photo, 1 panorama, 2 video, 3 rafale
-        int smode;  // onglet Scanner : 0 auto, 1 QR code, 2 texte, 3 traduction, 4 planning, 5 carte de visite
+        int smode;  // onglet Scanner : 1 QR code, 2 texte, 3 traduction, 4 planning, 5 carte de visite (0 = ancien mode Auto, plus propose)
         int ui, eye, timer, quality;   // quality : 0 normale, 1 accumulee (8 images), 2 accumulee sur grille x2
         string status = "";
         Text shootLabel;
@@ -67,7 +67,7 @@ namespace AR6DoF
         {
             ui = Get("ui", 1); eye = Get("eye", 0); timer = Get("timer", 1); quality = Get("quality", 0);
             pmode = Mathf.Clamp(Get("pmode", 0), 0, 3);
-            smode = Mathf.Clamp(Get("smode", 0), 0, 5);
+            smode = Mathf.Clamp(Get("smode", 1), 1, 5);   // l'ancien mode Auto (0) devient QR code
             vidRes = Mathf.Clamp(Get("vidres", 1), 0, 2);
             burstN = Mathf.Clamp(Get("burstn", 1), 0, BurstCounts.Length - 1);
             burstI = Mathf.Clamp(Get("bursti", 1), 0, BurstIntervals.Length - 1);
@@ -316,11 +316,12 @@ namespace AR6DoF
                     pmode = t; Put("pmode", t); status = "";
                 });
             else
-                TabsRow(SModes, smode, 19, t =>
+                TabsRow(SNames, smode - 1, 20, t =>
                 {
-                    if (t == smode) return;
+                    int m = t + 1;
+                    if (m == smode) return;
                     CancelAll();
-                    smode = t; Put("smode", t);
+                    smode = m; Put("smode", m);
                     autoTranslate = smode == 3;
                 });
 
@@ -518,6 +519,8 @@ namespace AR6DoF
             }
         }
 
+        int AnchorShift { get { return plan.result != null && plan.result.relative ? plan.anchor * 60 : 0; } }
+
         static string Hm(int minutes)
         {
             int m = ((minutes % 1440) + 1440) % 1440;
@@ -570,6 +573,16 @@ namespace AR6DoF
                 return;
             }
 
+            // heures illisibles : les heures sont comptees depuis la premiere ligne, l'utilisateur donne celle-ci
+            if (res.relative)
+            {
+                Para("Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures).", 56, 15);
+                var ab = BtnRow(52f, 21, "", (Action)(() => { plan.anchor = (plan.anchor + 23) % 24; Rebuild(); }),
+                                         "", (Action)(() => { plan.anchor = (plan.anchor + 1) % 24; Rebuild(); }));
+                ab[0].GetComponentInChildren<Text>().text = Ar6dofLoc.T("Premiere ligne") + " " + plan.anchor.ToString("00") + ":00  -1 h";
+                ab[1].GetComponentInChildren<Text>().text = Ar6dofLoc.T("Premiere ligne") + " " + plan.anchor.ToString("00") + ":00  +1 h";
+            }
+
             // salle et jour
             var fb = BtnRow(52f, 20, "", (Action)(() =>
                                     {
@@ -598,7 +611,7 @@ namespace AR6DoF
                 total++;
                 if (nShown >= 18) continue;
                 if (sb.Length > 0) sb.Append('\n');
-                sb.Append(Hm(e.startMin)).Append('-').Append(Hm(e.endMin)).Append(e.endKnown ? "  " : "?  ").Append(e.title);
+                sb.Append(Hm(e.startMin + AnchorShift)).Append('-').Append(Hm(e.endMin + AnchorShift)).Append(e.endKnown ? "  " : "?  ").Append(e.title);
                 if (room.Length == 0 && e.room.Length > 0) sb.Append("  (").Append(e.room).Append(')');
                 nShown++;
             }

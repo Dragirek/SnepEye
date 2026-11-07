@@ -27,13 +27,16 @@ namespace AR6DoF
         int gen, lastCount = -1, stage;
         int fw, fh;
         List<Color32[]> frames = new List<Color32[]>();   // premiere ligne = haut
+        List<Quaternion> rots = new List<Quaternion>();   // orientation de la tete a chaque image gardee (aide a placer les images)
+        float tanH = 0.7f;
+        public int anchor = 10;   // heures illisibles : heure de la premiere ligne de la grille
         List<string> paths = new List<string>();
         Task alignTask;
         bool[] used; int[] ox, oy;
         Ar6dofOcr.BoxJob ocr;
         Task<PlanResult> parseTask;
         // sortie du fil de calcul
-        Color32[] outPreview; int outPw, outPh; int outKept, outTotal, outLines, outLabels; string outOcr = "";
+        Color32[] outPreview; int outPw, outPh; int outKept, outTotal, outLines, outLabels; float outTextH; string outOcr = "";
 
         public static string TempFolder { get { return Path.Combine(Path.GetTempPath(), "AR6DoF_scan"); } }
 
@@ -48,7 +51,7 @@ namespace AR6DoF
         {
             phase = Phase.Idle; status = ""; error = ""; info = ""; shots = 0; countSec = 0; lastCount = -1; stage = 0;
             result = null; previewPx = null; previewW = previewH = 0;
-            frames = new List<Color32[]>();
+            frames = new List<Color32[]>(); rots = new List<Quaternion>(); anchor = 10;
             DeletePaths();
             alignTask = null; ocr = null; parseTask = null; used = null; ox = null; oy = null;
         }
@@ -96,10 +99,11 @@ namespace AR6DoF
             var es = pt.EyeSize;
             fw = es.x; fh = es.y;
             try { Directory.CreateDirectory(TempFolder); } catch (Exception) { }
+            tanH = pt.DisplayTan;
             phase = Phase.Capturing;
             status = Ar6dofLoc.F("Planning dans {0} s...", 3);
             var o = new Ar6dofPassthrough.SweepOptions { width = es.x, height = es.y, eye = 0, withUi = false, interval = 1.4f, delay = 3f, maxFrames = 10, maxSeconds = 45f };
-            pt.StartSweep(o, s => OnCount(my, s), (t, q, i) => OnFrame(my, t, i), e => OnSweepDone(my, e));
+            pt.StartSweep(o, s => OnCount(my, s), (t, q, i) => OnFrame(my, t, q, i), e => OnSweepDone(my, e));
             if (changed != null) changed();
         }
 
@@ -112,7 +116,7 @@ namespace AR6DoF
             if (statusChanged != null) statusChanged();
         }
 
-        void OnFrame(int my, Texture2D t, int index)
+        void OnFrame(int my, Texture2D t, Quaternion q, int index)
         {
             if (my != gen || t == null) return;
             if (frames.Count == 0) { fw = t.width; fh = t.height; }
@@ -120,8 +124,16 @@ namespace AR6DoF
             try
             {
                 string path = Path.Combine(TempFolder, "plan_" + DateTime.Now.ToString("HHmmss") + "_" + index + ".png");
-                File.WriteAllBytes(path, t.EncodeToPNG());
-                frames.Add(Ar6dofAlign.FlipV(t.GetPixels32(), fw, fh));
+                Color32[] px = t.GetPixels32();
+                // pour la lecture du texte : niveaux de gris, contraste etire, contours renforces (la couleur reste dans 'frames' pour trouver les blocs)
+                var enh = new Texture2D(fw, fh, TextureFormat.RGB24, false);
+                enh.SetPixels32(Ar6dofStack.EnhanceGray(px, fw, fh));
+                enh.Apply(false, false);
+                byte[] png = enh.EncodeToPNG();
+                UnityEngine.Object.Destroy(enh);
+                File.WriteAllBytes(path, png);
+                frames.Add(Ar6dofAlign.FlipV(px, fw, fh));
+                rots.Add(q);
                 paths.Add(path);
             }
             catch (Exception) { return; }
@@ -140,15 +152,30 @@ namespace AR6DoF
             stage = 0;
             status = Ar6dofLoc.T("Assemblage et lecture du texte...");
             var fr = frames; int w = fw, h = fh;
+            var rr = new List<Quaternion>(rots); float tn = tanH;
             ocr = Ar6dofOcr.StartBoxes(paths);   // supprime les fichiers apres lecture
             paths = new List<string>();
             alignTask = Task.Run(() =>
             {
                 bool[] u2; int[] x2, y2;
-                Ar6dofAlign.Register(fr, w, h, out u2, out x2, out y2);
+                Ar6dofAlign.Register(fr, w, h, (a, b) => Prior(rr, w, h, tn, a, b), out u2, out x2, out y2);
                 used = u2; ox = x2; oy = y2;
             });
             if (changed != null) changed();
+        }
+
+        // decalage attendu de l'image b par rapport a l'image a d'apres l'orientation de la tete : ou tombe, dans b, le centre de a
+        // (meme repere que le panorama : rayon (u * aspect * T, v * T, 1), v vers le haut ; images « premiere ligne = haut »). Null si la tete a trop tourne.
+        static float[] Prior(List<Quaternion> r, int w, int h, float tn, int a, int b)
+        {
+            if (r == null || a < 0 || b < 0 || a >= r.Count || b >= r.Count) return null;
+            Vector3 d = r[a] * Vector3.forward;
+            Vector3 l = Quaternion.Inverse(r[b]) * d;
+            if (l.z < 0.2f) return null;
+            float asp = (float)w / h;
+            float u = l.x / l.z / (asp * tn), v = l.y / l.z / tn;
+            float px = (u + 1f) * 0.5f * w, py = (1f - v) * 0.5f * h;
+            return new[] { w * 0.5f - px, h * 0.5f - py };
         }
 
         void Fail(string msg)
@@ -183,6 +210,8 @@ namespace AR6DoF
                 if (parseTask.IsFaulted) { Fail(Ar6dofLoc.F("Analyse impossible : {0}", parseTask.Exception != null ? parseTask.Exception.GetBaseException().Message : "?")); return; }
                 result = parseTask.Result;
                 previewPx = outPreview; previewW = outPw; previewH = outPh;
+                if (result != null && result.events.Count == 0 && outTextH > 0f && outTextH < 10f)
+                    result.info = (result.info.Length > 0 ? Ar6dofLoc.T(result.info) + "\n" : "") + Ar6dofLoc.F("Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche.", Mathf.RoundToInt(outTextH));
                 info = Ar6dofLoc.F("{0}/{1} images assemblees, {2} lignes de texte, {3} heures reconnues", outKept, outTotal, outLines, outLabels) + (outOcr.Length > 0 ? " ; OCR " + outOcr : "");
                 frames = new List<Color32[]>();   // la memoire des images est rendue
                 parseTask = null;
@@ -199,6 +228,10 @@ namespace AR6DoF
             for (int i = 0; i < u.Length; i++) if (u[i]) kept++;
             var lines = img.frameX != null ? Ar6dofPlan.BuildLines(pages, img.frameX, img.frameY) : new List<PlanLine>();
             var res = Ar6dofPlan.Parse(lines, img);
+            var hs = new List<float>();
+            foreach (var l in lines) hs.Add(l.h);
+            hs.Sort();
+            outTextH = hs.Count > 0 ? hs[hs.Count / 2] : 0f;
             int pw, ph;
             Color32[] pv = Ar6dofPlan.DrawPreview(img, res, 760, out pw, out ph);
             outPreview = Ar6dofAlign.FlipV(pv, pw, ph);
@@ -213,10 +246,11 @@ namespace AR6DoF
             var list = new List<Ar6dofParsedEvent>();
             if (result == null) return list;
             DateTime baseDay = now.Date.AddDays(dayOffset);
+            int shiftMin = result.relative ? anchor * 60 : 0;
             foreach (var e in result.events)
             {
                 if (!string.IsNullOrEmpty(room) && e.room != room) continue;
-                var pe = new Ar6dofParsedEvent { title = e.title, place = e.room, start = baseDay.AddMinutes(e.startMin), durMin = Math.Max(0, e.endMin - e.startMin) };
+                var pe = new Ar6dofParsedEvent { title = e.title, place = e.room, start = baseDay.AddMinutes(e.startMin + shiftMin), durMin = Math.Max(0, e.endMin - e.startMin) };
                 list.Add(pe);
             }
             return list;

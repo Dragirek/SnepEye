@@ -72,7 +72,7 @@ namespace AR6DoF
                 "$global:cf = 1.0\n" +
                 "$global:ow = 0\n" +
                 "$global:oh = 0\n" +
-                "function Prep($path) {\n" +
+                "function Prep($path, $minWant) {\n" +
                 "  $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])\n" +
                 "  $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])\n" +
                 "  $dec = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])\n" +
@@ -81,6 +81,7 @@ namespace AR6DoF
                 "  $big = [double][Math]::Max($dec.PixelWidth, $dec.PixelHeight)\n" +
                 "  $want = 1.0\n" +
                 "  if ($big -lt 1800) { $want = 2.0 }\n" +
+                "  if ($minWant -ne $null -and $minWant -gt $want -and $big -lt 1300) { $want = [double]$minWant }\n" +
                 "  $f = [Math]::Min($want, ($mx - 8) / $big)\n" +
                 "  $bmp = $null\n" +
                 "  if ([Math]::Abs($f - 1.0) -gt 0.02) {\n" +
@@ -88,6 +89,7 @@ namespace AR6DoF
                 "      $tr = New-Object Windows.Graphics.Imaging.BitmapTransform\n" +
                 "      $tr.ScaledWidth = [uint32]([Math]::Floor($dec.PixelWidth * $f))\n" +
                 "      $tr.ScaledHeight = [uint32]([Math]::Floor($dec.PixelHeight * $f))\n" +
+                "      try { $null = [Windows.Graphics.Imaging.BitmapInterpolationMode,Windows.Graphics.Imaging,ContentType=WindowsRuntime]; $tr.InterpolationMode = [Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant } catch { }\n" +
                 "      $bmp = Await ($dec.GetSoftwareBitmapAsync([Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied, $tr, [Windows.Graphics.Imaging.ExifOrientationMode]::IgnoreExifOrientation, [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) ([Windows.Graphics.Imaging.SoftwareBitmap])\n" +
                 "    } catch { $bmp = $null }\n" +
                 "  }\n" +
@@ -214,7 +216,7 @@ namespace AR6DoF
                 string p = path.Replace("'", "''");
                 sb.Append("Write-Output 'N:'\n");
                 sb.Append("try {\n");
-                sb.Append("  $bmp = Prep '" + p + "'\n");
+                sb.Append("  $bmp = Prep '" + p + "' 3.0\n");   // petites images : agrandies 3 fois (texte de l'affiche tres petit)
                 sb.Append("  Write-Output ('P:' + $global:ow + 'x' + $global:oh)\n");
                 sb.Append("  $res = Await ($eng.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])\n");
                 sb.Append("  foreach ($l in $res.Lines) {\n");

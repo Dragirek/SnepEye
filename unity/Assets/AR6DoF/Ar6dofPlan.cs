@@ -76,6 +76,15 @@ namespace AR6DoF
         /// <summary>Place l'image b dans le repere de a : le pixel (x, y) de b est le pixel (x + dx, y + dy) de a. Faux si aucune correspondance fiable.</summary>
         public static bool Shift(float[] a, float[] b, int w, int h, out int dx, out int dy, out float score)
         {
+            return Shift(a, b, w, h, null, out dx, out dy, out score);
+        }
+
+        /// <summary>
+        /// 'prior' (dx, dy attendus en pixels, deduits de l'orientation de la tete) : la recherche se limite a une fenetre autour (sans cela, une affiche tres reguliere -
+        /// lignes, colonnes - donne de faux decalages d'une periode). Null : recherche complete.
+        /// </summary>
+        public static bool Shift(float[] a, float[] b, int w, int h, float[] prior, out int dx, out int dy, out float score)
+        {
             dx = 0; dy = 0; score = 0f;
             int w4 = w / 4, h4 = h / 4, w16 = w4 / 4, h16 = h4 / 4;
             if (w16 < 24 || h16 < 18) return false;
@@ -86,13 +95,25 @@ namespace AR6DoF
             float best = -2f;
             int bx = 0, by = 0;
             int mx = (int)(w16 * 0.8f), my = (int)(h16 * 0.8f);
-            for (int sy = -my; sy <= my; sy++)
-                for (int sx = -mx; sx <= mx; sx++)
+            int cx0 = 0, cy0 = 0, rx = mx, ry = my;
+            bool hasPrior = prior != null && prior.Length >= 2;
+            if (hasPrior)
+            {
+                cx0 = (int)Math.Round(prior[0] / 16f); cy0 = (int)Math.Round(prior[1] / 16f);
+                rx = Math.Max(3, (int)(w16 * 0.3f)); ry = Math.Max(3, (int)(h16 * 0.3f));   // l'orientation ne dit pas tout (la tete se deplace aussi) : marge de 30 % de l'image
+            }
+            for (int sy = Math.Max(-my, cy0 - ry); sy <= Math.Min(my, cy0 + ry); sy++)
+                for (int sx = Math.Max(-mx, cx0 - rx); sx <= Math.Min(mx, cx0 + rx); sx++)
                 {
                     float c = Ncc(a16, b16, w16, h16, sx, sy, 1, 0.2f);
                     if (c <= -1f) continue;
                     float frac = (float)(w16 - Math.Abs(sx)) * (h16 - Math.Abs(sy)) / (w16 * h16);
                     c *= 0.85f + 0.15f * frac;   // a qualite egale on prefere le plus grand recouvrement
+                    if (hasPrior)
+                    {
+                        float dd = (float)Math.Sqrt((double)((sx - cx0) * (sx - cx0) + (sy - cy0) * (sy - cy0))) / Math.Max(rx, ry);
+                        c *= 1f - 0.08f * Math.Min(1f, dd);   // a qualite egale, le plus proche de ce que dit l'orientation
+                    }
                     if (c > best) { best = c; bx = sx; by = sy; }
                 }
             if (best < 0.2f) return false;
@@ -128,6 +149,12 @@ namespace AR6DoF
         /// </summary>
         public static void Register(List<Color32[]> frames, int w, int h, out bool[] used, out int[] ox, out int[] oy)
         {
+            Register(frames, w, h, null, out used, out ox, out oy);
+        }
+
+        /// <summary>'prior(a, b)' : decalage attendu (dx, dy) de l'image b par rapport a l'image a, ou null.</summary>
+        public static void Register(List<Color32[]> frames, int w, int h, Func<int, int, float[]> prior, out bool[] used, out int[] ox, out int[] oy)
+        {
             int n = frames.Count;
             used = new bool[n]; ox = new int[n]; oy = new int[n];
             if (n == 0) return;
@@ -139,7 +166,7 @@ namespace AR6DoF
                 float[] g = Gray(frames[i]);
                 int dx, dy;
                 float sc;
-                if (Shift(gRef, g, w, h, out dx, out dy, out sc) && sc >= 0.4f)
+                if (Shift(gRef, g, w, h, prior != null ? prior(last, i) : null, out dx, out dy, out sc) && sc >= 0.4f)
                 {
                     used[i] = true;
                     ox[i] = ox[last] + dx;
@@ -190,6 +217,7 @@ namespace AR6DoF
         public List<string> rooms = new List<string>();
         public string info = "";
         public int labels;
+        public bool relative;   // heures illisibles : les heures sont comptees depuis la premiere ligne (0), l'utilisateur donne l'heure de depart
     }
 
     /// <summary>
@@ -201,7 +229,8 @@ namespace AR6DoF
     /// </summary>
     public static class Ar6dofPlan
     {
-        static readonly Regex TimeRx = new Regex(@"^(\d{1,2})\s*[:hH.]\s*(\d{2})$", RegexOptions.CultureInvariant);
+        // « 20:00 », « 20h00 », « 20.00 », « 20 00 » ; sans separateur (« 2000 ») seulement sur un quart d'heure
+        static readonly Regex TimeRx = new Regex(@"^(\d{1,2})\s*([:hH.;,]?)\s*(\d{2})$", RegexOptions.CultureInvariant);
 
         // ------------------------------------------------------------------ texte lu -> lignes
         public static List<PlanLine> BuildLines(List<Ar6dofOcr.Page> pages, float[] fx, float[] fy)
@@ -226,7 +255,8 @@ namespace AR6DoF
                         if (!cut)
                         {
                             var a = ln.words[i - 1]; var b = ln.words[i];
-                            cut = b.x - (a.x + a.w) > 1.4f * avg;
+                            int ta, tb;
+                            cut = b.x - (a.x + a.w) > 1.4f * avg || TryTime(a.text, out ta) != TryTime(b.text, out tb);   // une heure forme toujours sa propre ligne
                         }
                         if (!cut) continue;
                         var seg = new PlanLine { frame = p };
@@ -291,20 +321,24 @@ namespace AR6DoF
         {
             min = 0;
             if (text == null) return false;
-            string t = text.Trim();
-            if (t.Length < 3 || t.Length > 7) return false;
+            // l'OCR colle souvent les pointilles de la grille au chiffre (« 20:00 ---- ») : on retire la ponctuation autour
+            string t = text.Trim().Trim('-', '.', '_', '~', '=', '|', '\u00b7', '\u2014', '\u2013', '*', ' ', ',', ';');
+            if (t.Length < 3 || t.Length > 9) return false;
             var sb = new StringBuilder();
             foreach (char c in t)
             {
                 char d = c;
-                if (c == 'O' || c == 'o') d = '0';
+                if (c == 'O' || c == 'o' || c == 'D' || c == 'Q') d = '0';
                 else if (c == 'l' || c == 'I' || c == '|') d = '1';
+                else if (c == 'S') d = '5';
+                else if (c == 'B') d = '8';
                 sb.Append(d);
             }
             var m = TimeRx.Match(sb.ToString());
             if (!m.Success) return false;
-            int h = int.Parse(m.Groups[1].Value), mi = int.Parse(m.Groups[2].Value);
+            int h = int.Parse(m.Groups[1].Value), mi = int.Parse(m.Groups[3].Value);
             if (h > 24 || mi > 59 || (h == 24 && mi > 0)) return false;
+            if (m.Groups[2].Value.Length == 0 && (mi % 15 != 0 || sb.Length < 4)) return false;   // sans separateur : « 2000 » oui, « 100 » ou « 1234 » non
             min = h * 60 + mi;
             return true;
         }
@@ -410,11 +444,76 @@ namespace AR6DoF
         // ------------------------------------------------------------------ analyse
         public static PlanResult Parse(List<PlanLine> all, PlanImage img)
         {
-            var res = new PlanResult();
-            // 1) les heures
+            // 1) les heures lues (« 20:00 »)
             var tl = new List<PlanLine>();
             var tm = new List<int>();
             foreach (var l in all) { int m; if (TryTime(l.text, out m)) { tl.Add(l); tm.Add(m); } }
+            var first = ParseWith(all, img, tl, tm);
+            if (first.events.Count > 0 && first.labels >= 2) return first;
+            // 2) heures illisibles (texte trop petit, flou) : on cherche une colonne de petits textes regulierement espaces ; l'utilisateur donne l'heure de la premiere
+            List<PlanLine> gl; List<int> gm;
+            if (GuessLabels(all, out gl, out gm))
+            {
+                var second = ParseWith(all, img, gl, gm);
+                if (second.events.Count > 0) { second.relative = true; return second; }
+            }
+            return first;
+        }
+
+        // colonne de petits textes (chiffres mal lus) a intervalles reguliers : numerotes 0, 60, 120... minutes ; faux si moins de 4
+        static bool GuessLabels(List<PlanLine> all, out List<PlanLine> gl, out List<int> gm)
+        {
+            gl = new List<PlanLine>(); gm = new List<int>();
+            var cand = new List<PlanLine>();
+            foreach (var l in all)
+            {
+                string t = l.text.Trim();
+                if (t.Length < 3 || t.Length > 9) continue;
+                int dig = 0;
+                foreach (char c in t) if (char.IsDigit(c) || c == 'O' || c == 'o' || c == 'l' || c == 'I' || c == ':' || c == '.' || c == 'h' || c == 'H') dig++;
+                if (dig * 10 >= t.Length * 7 && Letters(t) <= 3) cand.Add(l);
+            }
+            if (cand.Count < 4) return false;
+            var hs = new List<float>();
+            foreach (var l in cand) hs.Add(l.h);
+            float medH = Median(hs);
+            // la colonne qui contient le plus de candidats (x a peu pres egal)
+            float tol = Math.Max(10f, 1.2f * medH + 0.2f * Median(WidthsOf(cand)));
+            List<PlanLine> best = null;
+            foreach (var c0 in cand)
+            {
+                var col = new List<PlanLine>();
+                foreach (var c1 in cand) if (Math.Abs(c1.cx - c0.cx) <= tol) col.Add(c1);
+                if (best == null || col.Count > best.Count) best = col;
+            }
+            if (best == null || best.Count < 4) return false;
+            best.Sort((a, b) => a.cy.CompareTo(b.cy));
+            var dys = new List<float>();
+            for (int i = 0; i + 1 < best.Count; i++) dys.Add(best[i + 1].cy - best[i].cy);
+            float step = Median(dys);
+            if (step < 2f * medH) return false;
+            // une heure = un pas ; une ligne manquante donne un pas double : l'indice se deduit de la position
+            int lastIdx = -1;
+            foreach (var l in best)
+            {
+                int idx = (int)Math.Round((l.cy - best[0].cy) / step);
+                if (idx <= lastIdx) continue;
+                lastIdx = idx;
+                gl.Add(l); gm.Add(idx * 60);
+            }
+            return gl.Count >= 4;
+        }
+
+        static List<float> WidthsOf(List<PlanLine> v)
+        {
+            var r = new List<float>();
+            foreach (var l in v) r.Add(l.w);
+            return r;
+        }
+
+        static PlanResult ParseWith(List<PlanLine> all, PlanImage img, List<PlanLine> tl, List<int> tm)
+        {
+            var res = new PlanResult();
             if (tl.Count < 2) { res.info = "Pas assez d'heures lues (il en faut au moins deux sur la colonne des horaires)"; return res; }
             var hs = new List<float>(); var ws = new List<float>();
             foreach (var l in tl) { hs.Add(l.h); ws.Add(l.w); }

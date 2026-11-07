@@ -224,6 +224,16 @@ namespace AR6DoF
             return res;
         }
 
+        /// <summary>Une seule image : niveaux de gris, contraste etire, image sombre relevee, contours renforces (ce que la lecture de texte prefere). Rend une nouvelle image de meme taille.</summary>
+        public static Color32[] EnhanceGray(Color32[] f, int w, int h)
+        {
+            var g = ToGray(f);
+            Enhance(g, w, h);
+            var px = new Color32[f.Length];
+            for (int i = 0; i < px.Length; i++) { byte v = ToByte(g[i]); px[i] = new Color32(v, v, v, 255); }
+            return px;
+        }
+
         static byte ToByte(float v) { return (byte)(v < 0f ? 0 : (v > 255f ? 255 : (int)(v + 0.5f))); }
 
         /// <summary>Etire le contraste (1 % - 99 %), relève les images sombres (gamma), puis renforce legerement les contours : ce que la lecture de texte aime.</summary>

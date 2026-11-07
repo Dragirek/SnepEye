@@ -119,7 +119,7 @@ namespace AR6DoF
                         float r = c00.r * w00 + c10.r * w10 + c01.r * w01 + c11.r * w11;
                         float g = c00.g * w00 + c10.g * w10 + c01.g * w01 + c11.g * w11;
                         float b = c00.b * w00 + c10.b * w10 + c01.b * w01 + c11.b * w11;
-                        wgt *= wgt;   // le centre compte beaucoup plus que le bord : raccords discrets
+                        float w2 = wgt * wgt; wgt = w2 * w2 * w2;   // le centre compte tres fortement plus que le bord (puissance 6) : une image domine, peu de flou de moyenne si le placement est un peu faux
                         sr += r * wgt; sg += g * wgt; sb += b * wgt; sw += wgt;
                     }
                     res[rowOut + x] = sw > 1e-5f
