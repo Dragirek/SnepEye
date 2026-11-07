@@ -661,10 +661,15 @@ namespace AR6DoF
         static readonly int[] None = new int[0];
         public readonly sbyte[] b = new sbyte[64];
         public int side = 1, quiet;
+        /// <summary>Vrai : dames francaises / bresiliennes (le pion prend aussi en arriere, la dame vole sur toute la diagonale, il faut prendre le plus de pieces possible). Faux : dames americaines.</summary>
+        public bool french = true;
+        const sbyte Taken = 9;      // pieces deja prises pendant une rafle : elles restent sur le plateau jusqu'a la fin du coup et bloquent le passage
 
-        public static Ar6dofCheckers Start()
+        public static Ar6dofCheckers Start() { return Start(true); }
+
+        public static Ar6dofCheckers Start(bool french)
         {
-            var c = new Ar6dofCheckers();
+            var c = new Ar6dofCheckers { french = french };
             for (int r = 0; r < 8; r++)
                 for (int f = 0; f < 8; f++)
                 {
@@ -679,7 +684,7 @@ namespace AR6DoF
         {
             var c = new Ar6dofCheckers();
             Array.Copy(b, c.b, 64);
-            c.side = side; c.quiet = quiet;
+            c.side = side; c.quiet = quiet; c.french = french;
             return c;
         }
 
@@ -688,8 +693,46 @@ namespace AR6DoF
             outL.Add(new Move { path = path.ToArray(), caps = taken.ToArray() });
         }
 
+        static bool In(int r, int f) { return r >= 0 && r < 8 && f >= 0 && f < 8; }
+
+        void Take(sbyte[] w, int mid, int land, int p, List<int> path, List<int> taken, List<Move> outL)
+        {
+            sbyte mp = w[mid];
+            w[mid] = Taken;
+            path.Add(land); taken.Add(mid);
+            Jumps(w, land, p, path, taken, outL);
+            path.RemoveAt(path.Count - 1); taken.RemoveAt(taken.Count - 1);
+            w[mid] = mp;
+        }
+
+        void JumpsFrench(sbyte[] w, int sq, int p, List<int> path, List<int> taken, List<Move> outL)
+        {
+            int r = sq >> 3, f = sq & 7;
+            bool king = p == 2 || p == -2;
+            int before = outL.Count;
+            for (int dr = -1; dr <= 1; dr += 2)
+                for (int df = -1; df <= 1; df += 2)
+                {
+                    int rr = r + dr, ff = f + df;
+                    if (king) while (In(rr, ff) && w[rr * 8 + ff] == 0) { rr += dr; ff += df; }
+                    if (!In(rr, ff)) continue;
+                    int mid = rr * 8 + ff;
+                    int mp = w[mid];
+                    if (mp == 0 || mp == Taken || (mp > 0) == (p > 0)) continue;
+                    int lr = rr + dr, lf = ff + df;
+                    while (In(lr, lf) && w[lr * 8 + lf] == 0)
+                    {
+                        Take(w, mid, lr * 8 + lf, p, path, taken, outL);
+                        if (!king) break;                 // le pion se pose juste derriere ; la dame peut se poser sur n'importe quelle case libre apres la prise
+                        lr += dr; lf += df;
+                    }
+                }
+            if (taken.Count > 0 && outL.Count == before) Record(path, taken, outL);     // plus rien a prendre depuis ici : la rafle s'arrete
+        }
+
         void Jumps(sbyte[] w, int sq, int p, List<int> path, List<int> taken, List<Move> outL)
         {
+            if (french) { JumpsFrench(w, sq, p, path, taken, outL); return; }
             int r = sq >> 3, f = sq & 7;
             bool king = p == 2 || p == -2, any = false;
             for (int dr = -1; dr <= 1; dr += 2)
@@ -740,11 +783,20 @@ namespace AR6DoF
                     for (int df = -1; df <= 1; df += 2)
                     {
                         int nr = r + dr, nf = f + df;
-                        if (nr < 0 || nr > 7 || nf < 0 || nf > 7) continue;
-                        if (b[nr * 8 + nf] != 0) continue;
-                        simple.Add(new Move { path = new[] { sq, nr * 8 + nf }, caps = None });
+                        while (In(nr, nf) && b[nr * 8 + nf] == 0)
+                        {
+                            simple.Add(new Move { path = new[] { sq, nr * 8 + nf }, caps = None });
+                            if (!french || !king) break;         // dames francaises : la dame avance d'autant de cases libres qu'elle veut
+                            nr += dr; nf += df;
+                        }
                     }
                 }
+            }
+            if (french && caps.Count > 1)
+            {
+                int max = 0;
+                foreach (var m in caps) if (m.caps.Length > max) max = m.caps.Length;
+                caps.RemoveAll(m => m.caps.Length < max);       // prise obligatoire, et la plus grosse (regle de la majorite)
             }
             return caps.Count > 0 ? caps : simple;
         }
@@ -794,7 +846,7 @@ namespace AR6DoF
                 int r = sq >> 3, f = sq & 7, v;
                 if (p == 1) v = 100 + r * 4 + (r == 0 ? 8 : 0);
                 else if (p == -1) v = 100 + (7 - r) * 4 + (r == 7 ? 8 : 0);
-                else v = 160 + ((f >= 2 && f <= 5 && r >= 2 && r <= 5) ? 6 : 0);
+                else v = (c.french ? 300 : 160) + ((f >= 2 && f <= 5 && r >= 2 && r <= 5) ? 6 : 0);
                 sc += p > 0 ? v : -v;
             }
             return c.side == 1 ? sc : -sc;

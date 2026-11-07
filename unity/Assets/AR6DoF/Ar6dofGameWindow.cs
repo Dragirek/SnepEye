@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace AR6DoF
 {
@@ -16,6 +17,8 @@ namespace AR6DoF
         bool failed;
         Ar6dofLabel3D banner;
         int bannerKey = -1, lastKind;
+        bool showRules;
+        int rulesPage;
 
         // ---- reglages communs aux jeux (sauvegardes)
         public static bool SoundOn
@@ -42,6 +45,27 @@ namespace AR6DoF
         }
 
         protected Ar6dofGameWindow(Ar6dofDock d, string id, string name, string glyph, string desc, float width) : base(d, id, name, glyph, desc, width) { }
+
+        /// <summary>Construit le jeu dans la fenetre (a la place de BuildMain). Appeler ViewBar() en premier pour avoir Vue 3D / 2D, Regles et Son.</summary>
+        protected abstract void GameBuild();
+
+        protected sealed override void BuildMain()
+        {
+            if (showRules)
+            {
+                DisposeTable();       // pas de plateau 3D pendant la lecture des regles ; il revient avec le jeu
+                BuildRules();
+                return;
+            }
+            GameBuild();
+        }
+
+        void ToggleRules(bool on)
+        {
+            showRules = on;
+            rulesPage = 0;
+            Rebuild();
+        }
 
         public static bool Want3D
         {
@@ -91,9 +115,152 @@ namespace AR6DoF
                 items.Add("Ramener le plateau");
                 items.Add((Action)(() => { if (table != null) table.Place(); }));
             }
+            items.Add("Regles");
+            items.Add((Action)(() => ToggleRules(true)));
             BtnRow(44f, 20, items.ToArray());
             if (withSound) ToggleRow("Son", () => SoundOn, v => SoundOn = v, 44f, 20);
             if (Is3D) Para("Le jeu est pose devant toi : vise-le au laser. Garde le bouton appuye sur le socle pour le deplacer.", 44, 17);
+        }
+
+        // ---------------------------------------------------------------- regles
+        static readonly Color RuleLight = new Color(0.86f, 0.78f, 0.62f), RuleDark = new Color(0.45f, 0.3f, 0.2f), RulePlain = new Color(0.2f, 0.24f, 0.32f);
+        static readonly Color RuleRed = new Color(0.8f, 0.25f, 0.22f), RuleGreen = new Color(0.3f, 0.7f, 0.35f), RuleYellow = new Color(0.9f, 0.8f, 0.25f);
+
+        /// <summary>Paragraphe dont la hauteur est estimee d'apres la longueur du texte (traduit).</summary>
+        Text ParaAuto(string key, int fs)
+        {
+            string tr = Ar6dofLoc.T(key);
+            float cpl = Mathf.Max(12f, IW / (fs * 0.55f));
+            int lines = Mathf.CeilToInt(tr.Length / cpl) + 1;
+            return Para(key, lines * (fs + 6f) + 6f, fs);
+        }
+
+        void BuildRules()
+        {
+            var pages = Ar6dofRules.For(id);
+            Btn("Retour au jeu", () => ToggleRules(false), 46f, 22);
+            if (pages == null || pages.Length == 0) { Para("Pas de regles pour ce jeu.", 40, 18); return; }
+            if (rulesPage >= pages.Length) rulesPage = 0;
+            if (pages.Length > 1)
+            {
+                var names = new string[pages.Length];
+                for (int i = 0; i < pages.Length; i++) names[i] = pages[i].tab;
+                Tabs(names, rulesPage, t => rulesPage = t);
+            }
+            var pg = pages[rulesPage];
+            Section(pg.title);
+            ParaAuto(pg.text, 18);
+            if (pg.diagrams != null && pg.diagrams.Length > 0) DrawDiagrams(pg.diagrams);
+        }
+
+        /// <summary>Schemas les uns a cote des autres, chacun avec sa legende dessous.</summary>
+        void DrawDiagrams(Ar6dofRuleDiagram[] ds)
+        {
+            int n = ds.Length, sumCols = 0, maxRows = 0;
+            var tok = new string[n][][];
+            for (int k = 0; k < n; k++)
+            {
+                var rows = ds[k].rows;
+                tok[k] = new string[rows.Length][];
+                for (int r = 0; r < rows.Length; r++) tok[k][r] = rows[r].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                sumCols += tok[k][0].Length;
+                maxRows = Mathf.Max(maxRows, rows.Length);
+            }
+            const float gap = 22f, capH = 58f;
+            float cell = Mathf.Min(34f, (IW - gap * (n - 1)) / Mathf.Max(1, sumCols));
+            float x = -(sumCols * cell + gap * (n - 1)) * 0.5f;
+            Space(6f);
+            float top = y;
+            for (int k = 0; k < n; k++)
+            {
+                var d = ds[k];
+                int rows = tok[k].Length, cols = tok[k][0].Length;
+                float w = cols * cell, cx = x + w * 0.5f;
+                var bv = Ar6dofBoardView.Make(content, cx, top, cell, rows, cols, null, d.kind == 2 || d.kind == 4);
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < cols && c < tok[k][r].Length; c++) FillDiagramCell(bv, d.kind, r * cols + c, r, c, tok[k][r][c]);
+                var cap = Ar6dofVrUi.Label(content, d.caption, new Vector2(cx, -(top + rows * cell + 6f + capH * 0.5f)), new Vector2(w + gap - 2f, capH), 16, TextAnchor.UpperCenter);
+                cap.horizontalOverflow = HorizontalWrapMode.Wrap;
+                cap.verticalOverflow = VerticalWrapMode.Truncate;
+                x += w + gap;
+            }
+            y = top + maxRows * cell + capH + 14f;
+        }
+
+        void FillDiagramCell(Ar6dofBoardView bv, int kind, int i, int r, int c, string t)
+        {
+            char ch = t[0];
+            bool dot = false;
+            Color? hl = null;
+            for (int j = 1; j < t.Length; j++)
+            {
+                switch (t[j])
+                {
+                    case 'o': dot = true; break;
+                    case 'r': hl = RuleRed; break;
+                    case 'g': hl = RuleGreen; break;
+                    case 'y': hl = RuleYellow; break;
+                }
+            }
+            if (ch == 'o' && kind != 6) { dot = true; ch = '.'; }
+            bool dark = ((r + c) & 1) == 1;
+            Color bg = RulePlain;
+            Sprite piece = null;
+            string cap = ""; Color capCol = Color.white;
+            Color? tint = null;
+            Color? mark = null; float markScale = 0.32f;
+            switch (kind)
+            {
+                case 0:
+                    bg = dark ? RuleDark : RuleLight;
+                    if (ch != '.')
+                    {
+                        int pk = "PRNBQK".IndexOf(char.ToUpperInvariant(ch));
+                        if (pk >= 0) piece = Ar6dofGameArt.Piece(pk, char.IsUpper(ch));
+                    }
+                    break;
+                case 1:
+                    bg = dark ? RuleDark : RuleLight;
+                    if (ch != '.') piece = Ar6dofGameArt.Checker(ch == 'W' || ch == 'B', ch == 'w' || ch == 'W');
+                    break;
+                case 2:
+                    if (ch == 'X') { cap = "X"; capCol = new Color(1f, 0.45f, 0.4f); }
+                    else if (ch == 'O') { cap = "O"; capCol = new Color(0.5f, 0.78f, 1f); }
+                    break;
+                case 3:
+                    bg = new Color(0.12f, 0.26f, 0.62f);
+                    piece = Ar6dofGameArt.Disc();
+                    tint = ch == 'R' ? new Color(0.9f, 0.14f, 0.16f) : (ch == 'Y' ? new Color(1f, 0.85f, 0.15f) : new Color(0.05f, 0.09f, 0.22f));
+                    break;
+                case 4:
+                    if (ch == '#' || ch == 'F') bg = new Color(0.58f, 0.66f, 0.8f); else bg = new Color(0.18f, 0.2f, 0.26f);
+                    if (ch == 'F') { cap = "F"; capCol = new Color(0.9f, 0.1f, 0.1f); }
+                    else if (ch >= '1' && ch <= '8') { cap = ch.ToString(); capCol = Ar6dofShapes.ColorOf(600 + (ch - '0')); }
+                    else if (ch == 'M') { mark = new Color(0.05f, 0.05f, 0.07f); markScale = 0.55f; }
+                    break;
+                case 5:
+                    bg = new Color(0.12f, 0.12f, 0.18f);
+                    if (ch >= '0' && ch <= '5') piece = Ar6dofGameArt.Slot(ch - '0');
+                    break;
+                case 6:
+                    bg = new Color(0.93f, 0.93f, 0.9f);
+                    if (ch == 'o') { mark = new Color(0.1f, 0.1f, 0.12f); markScale = 0.55f; }
+                    break;
+                case 7:
+                    bg = new Color(0.12f, 0.3f, 0.48f);
+                    if (ch == '#') bg = new Color(0.55f, 0.6f, 0.67f);
+                    else if (ch == 'm') { mark = new Color(0.88f, 0.94f, 1f, 0.9f); markScale = 0.3f; }
+                    else if (ch == 'H') { bg = new Color(0.85f, 0.28f, 0.2f); mark = new Color(1f, 0.8f, 0.1f); markScale = 0.45f; }
+                    else if (ch == 'S') { bg = new Color(0.45f, 0.08f, 0.08f); mark = new Color(0.1f, 0.1f, 0.1f, 0.8f); markScale = 0.5f; }
+                    break;
+            }
+            if (hl.HasValue) bg = hl.Value;
+            bv.Bg(i, bg);
+            bv.Piece(i, piece);
+            if (tint.HasValue) bv.Tint(i, tint.Value);
+            if (cap.Length > 0) bv.Caption(i, cap, capCol);
+            if (mark.HasValue) bv.Mark(i, mark.Value, markScale);
+            else if (dot) bv.Mark(i, new Color(0.2f, 0.9f, 0.3f, 0.95f), 0.34f);
         }
 
         // ---------------------------------------------------------------- bannieres Gagne / Perdu / Egalite

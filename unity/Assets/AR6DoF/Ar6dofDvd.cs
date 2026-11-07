@@ -9,7 +9,7 @@ namespace AR6DoF
     /// <summary>Reglages (sauvegardes) et liste des ecrans poses. Rien n'existe tant qu'aucun ecran n'est pose : aucun objet, aucun calcul.</summary>
     public static class Ar6dofDvdWorld
     {
-        public const int Max = 4;
+        public const int Max = 1;      // un seul ecran DVD
         public static readonly List<Ar6dofDvdScreen> Screens = new List<Ar6dofDvdScreen>();
         static Ar6dofGameSound snd;
         static Sprite custom;
@@ -51,6 +51,22 @@ namespace AR6DoF
             float dist = Mathf.Max(1.3f, width * 1.1f);
             Vector3 pos = head + f * dist + right * (Screens.Count * 0.25f) + Vector3.up * -0.05f;
             var s = Ar6dofDvdScreen.Create(type, width, pos, Quaternion.LookRotation(f, Vector3.up));
+            Screens.Add(s);
+            return s;
+        }
+
+        /// <summary>Pose l'ecran du type voulu. S'il y en a deja un, il est remplace a la meme place, avec la meme largeur et la meme orientation.</summary>
+        public static Ar6dofDvdScreen Place(int type, float width)
+        {
+            Prune();
+            if (Screens.Count == 0) return Add(type, width);
+            var old = Screens[0];
+            Vector3 pos = old.transform.position;
+            Quaternion rot = old.transform.rotation;
+            float w = old.width;
+            UnityEngine.Object.Destroy(old.gameObject);
+            Screens.Clear();
+            var s = Ar6dofDvdScreen.Create(type, w, pos, rot);
             Screens.Add(s);
             return s;
         }

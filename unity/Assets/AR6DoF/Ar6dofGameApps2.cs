@@ -52,7 +52,7 @@ namespace AR6DoF
             aiStart = Time.unscaledTime;
         }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             BtnRow(48f, 20,
@@ -177,7 +177,7 @@ namespace AR6DoF
 
         string ToolText() { return Ar6dofLoc.T("Outil") + " : " + Ar6dofLoc.T(flagTool ? "Drapeau" : "Creuser"); }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             var bs = BtnRow(48f, 20,

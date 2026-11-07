@@ -10,6 +10,7 @@ namespace AR6DoF
     {
         public string id, title, desc, glyph;
         public bool game;     // vrai : affichee dans l'onglet Jeux du Hub
+        public bool meme;     // vrai : affichee dans l'onglet Memes du Hub (ni Applications ni Jeux)
         public float yaw;
         public Func<Ar6dofDock, Ar6dofAppWindow> make;
     }
@@ -49,7 +50,7 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "calendar", title = "Calendrier", glyph = "calendar", yaw = 36f,
                 desc = "Evenements avec rappel avant leur debut. Scanne une affiche, le programme d'une convention ou un QR code devant toi pour les creer. Le scan ne tourne que quand tu le lances.",
                 make = d => new Ar6dofCalendarApp(d) },
-            new Ar6dofAppEntry { id = "memes", title = "Memes", glyph = "memes", yaw = 125f,
+            new Ar6dofAppEntry { id = "dvd", title = "DVD", glyph = "disc", yaw = 125f, meme = true,
                 desc = "Un logo DVD qui rebondit sur un ecran statique pose dans le monde : plat, ultra-large, incurve, ancien ou portrait.",
                 make = d => new Ar6dofMemesApp(d) },
 
@@ -70,7 +71,7 @@ namespace AR6DoF
                 desc = "Echecs contre le PC : toutes les regles, trois niveaux, tu peux jouer les blancs ou les noirs.",
                 make = d => new Ar6dofChessApp(d) },
             new Ar6dofAppEntry { id = "checkers", title = "Dames", glyph = "checkers", yaw = 89f, game = true,
-                desc = "Jeu de dames contre le PC (8 x 8, prise obligatoire) : trois niveaux.",
+                desc = "Jeu de dames contre le PC (8 x 8, prise obligatoire, regles francaises ou americaines) : trois niveaux.",
                 make = d => new Ar6dofCheckersApp(d) },
             new Ar6dofAppEntry { id = "connect4", title = "Puissance 4", glyph = "connect4", yaw = -89f, game = true,
                 desc = "Puissance 4 contre le PC : aligne quatre jetons avant lui, trois niveaux.",
@@ -88,7 +89,7 @@ namespace AR6DoF
     }
 
     /// <summary>
-    /// Hub : deux onglets, Applications et Jeux, avec l'icône et le nom de chacune comme dans la barre de tâches. Toucher une icône ouvre l'application
+    /// Hub : trois onglets, Applications, Jeux et Memes, avec l'icône et le nom de chacune comme dans la barre de tâches. Toucher une icône ouvre l'application
     /// (elle apparaît alors dans la barre) ; la toucher de nouveau la range. Placé juste à gauche de la roue des réglages.
     /// </summary>
     public class Ar6dofAppsApp : Ar6dofAppWindow
@@ -96,7 +97,7 @@ namespace AR6DoF
         const int Cols = 4;
         const float TileH = 132f, TileGap = 10f;
 
-        int tab;     // 0 Applications, 1 Jeux
+        int tab;     // 0 Applications, 1 Jeux, 2 Memes
 
         public Ar6dofAppsApp(Ar6dofDock d) : base(d, "apps", "Hub", "apps", "Applications et jeux : touche-en un pour l'ouvrir ou le ranger", 720f) { }
 
@@ -118,22 +119,25 @@ namespace AR6DoF
 
         protected override void BuildMain()
         {
-            Tabs(new[] { "Applications", "Jeux" }, tab, t => tab = t);
+            Tabs(new[] { "Applications", "Jeux", "Memes" }, tab, t => tab = t);
             Para(tab == 0
                 ? "Touche une application pour l'ouvrir ; elle prend alors sa place dans la barre. La toucher de nouveau la range : une application rangee ne consomme rien."
-                : "Touche un jeu pour l'ouvrir ; il prend sa place dans la barre. Un jeu range ou ferme ne consomme rien.", 56, 18);
+                : (tab == 1
+                    ? "Touche un jeu pour l'ouvrir ; il prend sa place dans la barre. Un jeu range ou ferme ne consomme rien."
+                    : "Touche un meme pour l'ouvrir ; il prend sa place dans la barre. Rien n'existe dans le monde tant que tu n'as rien pose."), 56, 18);
             float tileW = (IW - (Cols - 1) * TileGap) / Cols;
             int shown = 0;
             for (int i = 0; i < Ar6dofCatalog.Entries.Count; i++)
             {
                 var e = Ar6dofCatalog.Entries[i];
-                if (e.game != (tab == 1)) continue;
+                if ((e.meme ? 2 : (e.game ? 1 : 0)) != tab) continue;
                 string id = e.id;
                 Tile(shown++, tileW, e.glyph, e.title, e.desc, () => dock.ToggleApp(id), () => dock.IsOpen(id));
             }
-            if (tab == 1)
+            if (tab != 0)
             {
-                Para("Les jeux se jouent au laser, comme le reste. Fermes ou ranges, ils ne consomment rien.", 40, 18);
+                if (tab == 1) Para("Les jeux se jouent au laser, comme le reste. Fermes ou ranges, ils ne consomment rien.", 40, 18);
+                else Para("D'autres memes arriveront ici.", 40, 18);
                 return;
             }
 

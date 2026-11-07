@@ -40,7 +40,7 @@ namespace AR6DoF
         readonly Ar6dofBoard3D enemy, own;
         readonly Action<Ar6dofGameSound.Id, float> sound;
         readonly Material mOpaque, mAlpha, mAdd;
-        readonly Mesh sphere, box, ring, missileMesh, planeMesh, bombMesh, barrelMesh;
+        readonly Mesh sphere, box, ring, missileMesh, planeMesh, bombMesh, barrelMesh, shellMesh;
         readonly MaterialPropertyBlock mpb = new MaterialPropertyBlock();
         readonly System.Random rnd = new System.Random();
         readonly P[] ps = new P[Max];
@@ -84,6 +84,10 @@ namespace AR6DoF
             b.Box(new Vector3(0f, 0.004f, 0f), new Vector3(0.03f, 0.008f, 0.03f));
             b.Box(new Vector3(0f, 0.016f, 0.012f), new Vector3(0.012f, 0.012f, 0.05f));
             barrelMesh = t.Own(b.ToMesh("AR6DoF_Cannon"));
+
+            b = new Ar6dofMeshBuilder();                   // obus : cylindre a ogive, pointe vers +y, avec une bague de forcement
+            b.Lathe(new[] { 0f, -0.02f, 0.0055f, -0.02f, 0.0065f, -0.016f, 0.0065f, -0.002f, 0.0075f, 0f, 0.0075f, 0.003f, 0.0065f, 0.004f, 0.0062f, 0.008f, 0.0042f, 0.0165f, 0.0018f, 0.022f, 0f, 0.0245f }, 12, Vector3.zero);
+            shellMesh = t.Own(b.ToMesh("AR6DoF_Shell"));
         }
 
         Material NewMat(int src, int dst, float zwrite, float shade, int queue)
@@ -219,8 +223,7 @@ namespace AR6DoF
                     f.dur = 0.7f + dist * 0.3f; f.h = 0.04f + dist * 0.15f;
                     f.go = MakePart("Canon", barrelMesh, new Color(0.28f, 0.3f, 0.34f));
                     f.go.gameObject.SetActive(false);
-                    f.extra = MakePart("Obus", sphere, new Color(0.15f, 0.15f, 0.17f));
-                    f.extra.localScale = Vector3.one * 0.016f;
+                    f.extra = MakePart("Obus", shellMesh, new Color(0.42f, 0.4f, 0.26f));
                     f.extra.gameObject.SetActive(false);
                 }
             }
@@ -292,7 +295,7 @@ namespace AR6DoF
                         if (mover != null)
                         {
                             mover.localPosition = p;
-                            if (f.type == 0) mover.localRotation = Quaternion.FromToRotation(Vector3.up, dir);
+                            mover.localRotation = Quaternion.FromToRotation(Vector3.up, dir);        // missile et obus : la pointe suit la trajectoire
                         }
                         if (now - f.trail > 0.02f)
                         {

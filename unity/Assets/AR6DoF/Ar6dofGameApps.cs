@@ -236,7 +236,7 @@ namespace AR6DoF
             Rebuild();
         }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             BtnRow(48f, 20,
@@ -345,7 +345,7 @@ namespace AR6DoF
 
         string KindName(int k) { return k == 2 ? Ar6dofLoc.T("Piece") : "d" + k; }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar(false);
             Section("Type de de");
@@ -538,7 +538,7 @@ namespace AR6DoF
             return 0;
         }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             var tb = EnsureTable(new Color(0.15f, 0.15f, 0.18f));
@@ -811,8 +811,9 @@ namespace AR6DoF
         Ar6dofBoardView enemyView, ownView;
         Text status, shots, count;
         Ar6dofBattleFx fx;                  // tirs animes (3D seulement)
-        Action pending;                     // le tir en vol : sa suite est appelee a l'impact
-        bool flying;
+        // La partie avance tout de suite ; l'animation ne fait que retarder l'AFFICHAGE du resultat jusqu'a l'impact.
+        readonly bool[] pendE = new bool[100], pendO = new bool[100];   // tirs en vol : case pas encore revelee
+        readonly List<Action> flights = new List<Action>();             // revelations en attente (pour tout finir si la fenetre se reconstruit)
         readonly int[] lvEnemy = new int[100], lvOwn = new int[100];
 
         public Ar6dofBattleshipApp(Ar6dofDock d) : base(d, "battleship", "Bataille navale", "ship", "Bataille navale contre le PC : place ta flotte et coule la sienne.", 840f)
@@ -830,12 +831,12 @@ namespace AR6DoF
             base.OnVisible(on);
         }
 
-        /// <summary>Un tir est en vol et la fenetre se reconstruit ou se ferme : on applique son resultat tout de suite, sans animation, pour que la partie ne reste jamais bloquee.</summary>
+        /// <summary>La fenetre se reconstruit ou se ferme avec des tirs en vol : on montre tout de suite leur resultat, sans animation.</summary>
         void FinishPending()
         {
-            var a = pending;
-            pending = null; flying = false;
-            if (a != null) a();
+            var l = flights.ToArray();
+            flights.Clear();
+            for (int i = 0; i < l.Length; i++) l[i]();
         }
 
         void Shuffle() { mine.PlaceRandom(rnd); }
@@ -845,7 +846,7 @@ namespace AR6DoF
             Shuffle();
             theirs.PlaceRandom(rnd);
             ai = new Ar6dofNavalAi(rnd);
-            pending = null; flying = false;
+            FinishPending();
             phase = 0; playerTurn = true; iWon = false; pcAt = -1f; myShot = ""; pcShot = "";
             Rebuild();
         }
@@ -859,7 +860,7 @@ namespace AR6DoF
             Draw();
         }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             BtnRow(48f, 20, "Nouvelle partie", (Action)NewGame, "Melanger ma flotte", (Action)(() => { if (phase == 0) { Shuffle(); Draw(); } }), "Commencer", (Action)Start);
@@ -896,17 +897,42 @@ namespace AR6DoF
 
         void OnEnemyCell(int i)
         {
-            if (phase != 1 || !playerTurn || flying || theirs.shot[i]) return;
-            if (fx != null)
+            if (phase != 1 || !playerTurn || theirs.shot[i]) return;
+            int sunk;
+            int res = theirs.Shoot(i, out sunk);
+            playerTurn = false;
+            if (theirs.AllSunk) { phase = 2; iWon = true; }
+            else pcAt = Time.unscaledTime + (fx != null ? 0.9f : 0.7f);
+            Fire(true, i, res, sunk, res == 2 ? ShipCells(theirs, sunk) : null);
+        }
+
+        /// <summary>Le resultat est deja applique a la partie ; ici on lance l'animation et on retarde seulement ce qui se voit (case, texte) jusqu'a l'impact. Le vol est le meme que le tir touche ou non.</summary>
+        void Fire(bool mineShot, int i, int res, int sunk, int[] cells)
+        {
+            string txt = ShotText(res, sunk);
+            var pend = mineShot ? pendE : pendO;
+            bool done = false;
+            Action reveal = null;
+            reveal = () =>
             {
-                // le tir part maintenant ; le resultat n'est connu (et montre) qu'a l'impact : le vol est le meme que le tir touche ou non
-                flying = true; playerTurn = false;
-                pending = () => ResolveMine(i);
-                fx.Launch(true, i, () => { var a = pending; pending = null; flying = false; if (a != null) a(); });
+                if (done) return;
+                done = true;
+                pend[i] = false;
+                flights.Remove(reveal);
+                if (mineShot) myShot = txt; else pcShot = txt;
+            };
+            var f = fx;
+            if (f == null) { reveal(); Draw(); return; }
+            pend[i] = true;
+            flights.Add(reveal);
+            f.Launch(mineShot, i, () =>
+            {
+                if (done) return;
+                reveal();
+                f.Impact(mineShot, i, res, cells);
                 Draw();
-                return;
-            }
-            ResolveMine(i);
+            });
+            Draw();
         }
 
         static int[] ShipCells(Ar6dofFleet f, int k)
@@ -914,29 +940,6 @@ namespace AR6DoF
             var l = new List<int>();
             if (k >= 0) for (int j = 0; j < f.ship.Length; j++) if (f.ship[j] == k) l.Add(j);
             return l.ToArray();
-        }
-
-        void ResolveMine(int i)
-        {
-            int sunk;
-            int res = theirs.Shoot(i, out sunk);
-            myShot = ShotText(res, sunk);
-            if (theirs.AllSunk) { phase = 2; iWon = true; }
-            else { playerTurn = false; pcAt = Time.unscaledTime + (fx != null ? 1.1f : 0.7f); }
-            if (fx != null) fx.Impact(true, i, res, res == 2 ? ShipCells(theirs, sunk) : null);
-            Draw();
-        }
-
-        void ResolvePc(int i)
-        {
-            int sunk;
-            int res = mine.Shoot(i, out sunk);
-            ai.Report(i, res, mine, sunk);
-            pcShot = ShotText(res, sunk);
-            if (mine.AllSunk) { phase = 2; iWon = false; }
-            else playerTurn = true;
-            if (fx != null) fx.Impact(false, i, res, res == 2 ? ShipCells(mine, sunk) : null);
-            Draw();
         }
 
         static string ShotText(int res, int sunk)
@@ -954,67 +957,80 @@ namespace AR6DoF
                 if (phase != 1) return;
                 int i = ai.Next();
                 if (i < 0) return;
-                if (fx != null)
-                {
-                    flying = true;
-                    pending = () => ResolvePc(i);
-                    fx.Launch(false, i, () => { var a = pending; pending = null; flying = false; if (a != null) a(); });
-                    Draw();
-                    return;
-                }
-                ResolvePc(i);
+                int sunk;
+                int res = mine.Shoot(i, out sunk);
+                ai.Report(i, res, mine, sunk);
+                if (mine.AllSunk) { phase = 2; iWon = false; }
+                else playerTurn = true;
+                Fire(false, i, res, sunk, res == 2 ? ShipCells(mine, sunk) : null);
             }
         }
 
         static readonly Color Water = new Color(0.12f, 0.3f, 0.48f), Hull = new Color(0.55f, 0.6f, 0.67f), Hit = new Color(0.85f, 0.28f, 0.2f), Sunk = new Color(0.45f, 0.08f, 0.08f), Splash = new Color(0.88f, 0.94f, 1f, 0.9f), Fire = new Color(1f, 0.8f, 0.1f, 1f);
 
+        /// <summary>Case tiree ET deja revelee (le tir en vol n'est pas encore visible).</summary>
+        static bool Seen(Ar6dofFleet f, bool[] pend, int i) { return f.shot[i] && !pend[i]; }
+
+        /// <summary>Cases du navire k encore intactes aux yeux du joueur (un tir en vol compte comme intact).</summary>
+        static int SeenLeft(Ar6dofFleet f, bool[] pend, int k)
+        {
+            int n = 0;
+            for (int j = 0; j < f.ship.Length; j++) if (f.ship[j] == k && !Seen(f, pend, j)) n++;
+            return n;
+        }
+
         void Draw()
         {
             if (enemyView == null) return;
+            bool anyFlying = false;
+            int afloatMine = 0, afloatTheirs = 0;
+            for (int k = 0; k < mine.left.Length; k++) if (SeenLeft(mine, pendO, k) > 0) afloatMine++;
+            for (int k = 0; k < theirs.left.Length; k++) if (SeenLeft(theirs, pendE, k) > 0) afloatTheirs++;
             for (int i = 0; i < 100; i++)
             {
+                if (pendE[i] || pendO[i]) anyFlying = true;
                 // flotte ennemie : on ne voit que ce qu'on a touche
-                if (theirs.shot[i])
+                int k = theirs.ship[i];
+                if (Seen(theirs, pendE, i))
                 {
-                    int k = theirs.ship[i];
                     if (k < 0) { enemyView.Bg(i, Water); enemyView.Token(i, 0); enemyView.Mark(i, Splash, 0.3f); }
-                    else if (theirs.left[k] == 0) { enemyView.Bg(i, Sunk); enemyView.Token(i, Ar6dofShapes.TokShipSunk); enemyView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
+                    else if (SeenLeft(theirs, pendE, k) == 0) { enemyView.Bg(i, Sunk); enemyView.Token(i, Ar6dofShapes.TokShipSunk); enemyView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
                     else { enemyView.Bg(i, Hit); enemyView.Token(i, Ar6dofShapes.TokShipHit); enemyView.Mark(i, Fire, 0.45f); }
                 }
                 else { enemyView.Bg(i, Water); enemyView.Token(i, 0); enemyView.Mark(i, Color.clear, 0f); }
                 // ma flotte : tout est visible
                 int m = mine.ship[i];
-                if (mine.shot[i])
+                if (Seen(mine, pendO, i))
                 {
                     if (m < 0) { ownView.Bg(i, Water); ownView.Token(i, 0); ownView.Mark(i, Splash, 0.3f); }
-                    else if (mine.left[m] == 0) { ownView.Bg(i, Sunk); ownView.Token(i, Ar6dofShapes.TokShipSunk); ownView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
+                    else if (SeenLeft(mine, pendO, m) == 0) { ownView.Bg(i, Sunk); ownView.Token(i, Ar6dofShapes.TokShipSunk); ownView.Mark(i, Ar6dofGameUi.C(0.1f, 0.1f, 0.1f, 0.8f), 0.5f); }
                     else { ownView.Bg(i, Hit); ownView.Token(i, Ar6dofShapes.TokShipHit); ownView.Mark(i, Fire, 0.45f); }
                 }
                 else { ownView.Bg(i, m >= 0 ? Hull : Water); ownView.Token(i, m >= 0 ? Ar6dofShapes.TokShip : 0); ownView.Mark(i, Color.clear, 0f); }
             }
             if (fx != null)
             {
+                // seuls les navires touches mais pas coules fument ; un navire coule ne fume plus
                 for (int i = 0; i < 100; i++)
                 {
                     int k = theirs.ship[i];
-                    lvEnemy[i] = theirs.shot[i] && k >= 0 ? (theirs.left[k] == 0 ? 2 : 1) : 0;
+                    lvEnemy[i] = Seen(theirs, pendE, i) && k >= 0 && SeenLeft(theirs, pendE, k) > 0 ? 1 : 0;
                     int m = mine.ship[i];
-                    lvOwn[i] = mine.shot[i] && m >= 0 ? (mine.left[m] == 0 ? 2 : 1) : 0;
+                    lvOwn[i] = Seen(mine, pendO, i) && m >= 0 && SeenLeft(mine, pendO, m) > 0 ? 1 : 0;
                 }
                 fx.SetBurning(lvEnemy, lvOwn);
             }
-            Result(phase == 2 ? (iWon ? 1 : 2) : 0);
+            Result(phase == 2 && !anyFlying ? (iWon ? 1 : 2) : 0);
             string s;
             if (phase == 0) s = "Place ta flotte : melange-la jusqu'a ce qu'elle te plaise, puis commence.";
-            else if (phase == 2) s = iWon ? "Victoire ! Toute la flotte ennemie est coulee." : "Defaite : ta flotte est coulee.";
-            else if (flying) s = "Tir en cours...";
+            else if (phase == 2) s = anyFlying ? "Dernier tir..." : (iWon ? "Victoire ! Toute la flotte ennemie est coulee." : "Defaite : ta flotte est coulee.");
             else s = playerTurn ? "A toi de tirer !" : "Le PC vise...";
             status.text = Ar6dofLoc.T(s);
             string line = "";
             if (myShot.Length > 0) line += Ar6dofLoc.T("Toi") + " : " + myShot;
             if (pcShot.Length > 0) line += (line.Length > 0 ? "     " : "") + Ar6dofLoc.T("PC") + " : " + pcShot;
             shots.text = line;
-            count.text = Ar6dofLoc.T("Navires restants") + " - " + Ar6dofLoc.T("toi") + " : " + mine.Afloat + "    PC : " + theirs.Afloat;
+            count.text = Ar6dofLoc.T("Navires restants") + " - " + Ar6dofLoc.T("toi") + " : " + afloatMine + "    PC : " + afloatTheirs;
         }
     }
 
@@ -1068,13 +1084,14 @@ namespace AR6DoF
 
         int Map(int i) { int r = i >> 3, c = i & 7; return playerSide == 1 ? (7 - r) * 8 + c : r * 8 + (7 - c); }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             BtnRow(48f, 20,
                 Ar6dofLoc.T("Niveau") + " : " + Ar6dofLoc.T(Levels[level]), (Action)(() => { level = (level + 1) % 3; Rebuild(); }),
                 Ar6dofLoc.T("Je joue") + " : " + Ar6dofLoc.T(playerSide == 1 ? "Blancs" : "Noirs"), (Action)(() => { playerSide = -playerSide; NewGame(); }),
                 "Nouvelle partie", (Action)NewGame);
+            BtnRow(44f, 20, Ar6dofLoc.T("Regles") + " : " + Ar6dofLoc.T(french ? "Francaises" : "Americaines"), (Action)(() => { french = !french; NewGame(); }));
             statusText = Lbl("", 40, 25, TextAnchor.MiddleCenter);
             statusText.fontStyle = FontStyle.Bold;
             Space(2f);
@@ -1189,13 +1206,14 @@ namespace AR6DoF
         readonly List<Ar6dofCheckers> history = new List<Ar6dofCheckers>();
         List<Ar6dofCheckers.Move> moves = new List<Ar6dofCheckers.Move>();
         int level = 1, playerSide = 1, selected = -1, lastFrom = -1, lastTo = -1, status;
+        bool french = true;
         Ar6dofAiJob<Ar6dofCheckers.Move> job;
         Ar6dofCheckersAi ai;
         float aiStart;
         Ar6dofBoardView view;
         Text statusText;
 
-        public Ar6dofCheckersApp(Ar6dofDock d) : base(d, "checkers", "Dames", "checkers", "Jeu de dames contre le PC (8 x 8, prise obligatoire) : trois niveaux.", 560f)
+        public Ar6dofCheckersApp(Ar6dofDock d) : base(d, "checkers", "Dames", "checkers", "Jeu de dames contre le PC (8 x 8, prise obligatoire, regles francaises ou americaines) : trois niveaux.", 560f)
         {
             moves = game.Moves();
         }
@@ -1209,7 +1227,7 @@ namespace AR6DoF
         void NewGame()
         {
             Cancel();
-            game = Ar6dofCheckers.Start();
+            game = Ar6dofCheckers.Start(french);
             history.Clear();
             selected = -1; lastFrom = lastTo = -1; status = 0;
             moves = game.Moves();
@@ -1229,7 +1247,7 @@ namespace AR6DoF
 
         int Map(int i) { int r = i >> 3, c = i & 7; return playerSide == 1 ? (7 - r) * 8 + c : r * 8 + (7 - c); }
 
-        protected override void BuildMain()
+        protected override void GameBuild()
         {
             ViewBar();
             BtnRow(48f, 20,
@@ -1328,7 +1346,7 @@ namespace AR6DoF
             if (status == 1) s = game.side == playerSide ? "Plus de coup : le PC gagne." : "Le PC n'a plus de coup : tu gagnes !";
             else if (status == 2) s = "Partie nulle.";
             else if (game.side != playerSide) s = "Le PC reflechit...";
-            else s = mustCapture ? "Prise obligatoire !" : "A toi de jouer.";
+            else s = mustCapture ? (french ? "Prise obligatoire : la plus grosse !" : "Prise obligatoire !") : "A toi de jouer.";
             statusText.text = Ar6dofLoc.T(s);
         }
     }

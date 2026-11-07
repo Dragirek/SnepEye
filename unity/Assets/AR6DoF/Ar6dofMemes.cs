@@ -6,19 +6,18 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// Memes : pour l'instant un logo « DVD » qui rebondit sur un ecran statique pose dans le monde (plat, ultra-large, incurve, ancien, portrait). D'autres memes arriveront.
-    /// Rien n'existe ni ne tourne tant qu'aucun ecran n'est pose ; les ecrans posees restent dans le monde meme quand la fenetre est rangee.
+    /// DVD (categorie Memes du Hub) : un logo « DVD » qui rebondit sur UN ecran statique pose dans le monde (plat, ultra-large, incurve, ancien, portrait).
+    /// Rien n'existe ni ne tourne tant qu'aucun ecran n'est pose ; l'ecran pose reste dans le monde meme quand la fenetre est rangee.
     /// </summary>
     public class Ar6dofMemesApp : Ar6dofAppWindow
     {
         static readonly string[] LogoNames = { "DVD", "Disque", "Mon image" };
         static readonly string[] ImageExt = { ".png", ".jpg", ".jpeg" };
-        readonly List<Text> lines = new List<Text>();
-        readonly List<Ar6dofDvdScreen> shown = new List<Ar6dofDvdScreen>();
+        Text line;
+        Ar6dofDvdScreen shown;
         float nextRefresh;
-        string status = "";
 
-        public Ar6dofMemesApp(Ar6dofDock d) : base(d, "memes", "Memes", "memes", "Un logo DVD qui rebondit sur un ecran statique pose dans le monde : plat, ultra-large, incurve, ancien ou portrait.", 560f) { }
+        public Ar6dofMemesApp(Ar6dofDock d) : base(d, "dvd", "DVD", "disc", "Un logo DVD qui rebondit sur un ecran statique pose dans le monde : plat, ultra-large, incurve, ancien ou portrait.", 560f) { }
 
         public override void Destroy()
         {
@@ -26,47 +25,41 @@ namespace AR6DoF
             base.Destroy();
         }
 
-        void AddScreen(int type)
+        void PlaceScreen(int type)
         {
-            var s = Ar6dofDvdWorld.Add(type, Ar6dofDvdWorld.ScreenWidth);
-            status = s == null ? Ar6dofLoc.F("Maximum : {0} ecrans", Ar6dofDvdWorld.Max) : "";
+            Ar6dofDvdWorld.Place(type, Ar6dofDvdWorld.ScreenWidth);
             Rebuild();
         }
 
         protected override void BuildMain()
         {
-            lines.Clear(); shown.Clear();
+            line = null; shown = null;
             Ar6dofDvdWorld.Prune();
-            Section("Ajouter un ecran statique");
-            BtnRow(48f, 19,
-                Ar6dofDvdScreen.TypeNames[0], (Action)(() => AddScreen(0)),
-                Ar6dofDvdScreen.TypeNames[1], (Action)(() => AddScreen(1)),
-                Ar6dofDvdScreen.TypeNames[2], (Action)(() => AddScreen(2)));
-            BtnRow(48f, 19,
-                Ar6dofDvdScreen.TypeNames[3], (Action)(() => AddScreen(3)),
-                Ar6dofDvdScreen.TypeNames[4], (Action)(() => AddScreen(4)));
-            SliderRow("Taille des nouveaux ecrans", 0.4f, 2.6f, () => Ar6dofDvdWorld.ScreenWidth, v => Ar6dofDvdWorld.ScreenWidth = v, v => Fmt("{0:0.0} m", v), 50f);
-            var st = Para("", 28, 17);
-            st.text = status.Length > 0 ? Ar6dofLoc.T(status) : "";
-            Para("L'ecran est pose devant toi. Vise-le au laser et garde le bouton appuye pour le deplacer : il te fait toujours face.", 44, 16);
+            var sc = Ar6dofDvdWorld.Screens.Count > 0 ? Ar6dofDvdWorld.Screens[0] : null;
 
-            int n = Ar6dofDvdWorld.Screens.Count;
-            Section(Ar6dofLoc.F("Ecrans poses : {0}", n));
-            if (n == 0) Para("Aucun ecran pour le moment : utilise un des boutons ci-dessus.", 30, 18);
-            for (int i = 0; i < n; i++)
+            Section(sc == null ? "Poser l'ecran" : "Changer de type d'ecran");
+            BtnRow(48f, 19,
+                Ar6dofDvdScreen.TypeNames[0], (Action)(() => PlaceScreen(0)),
+                Ar6dofDvdScreen.TypeNames[1], (Action)(() => PlaceScreen(1)),
+                Ar6dofDvdScreen.TypeNames[2], (Action)(() => PlaceScreen(2)));
+            BtnRow(48f, 19,
+                Ar6dofDvdScreen.TypeNames[3], (Action)(() => PlaceScreen(3)),
+                Ar6dofDvdScreen.TypeNames[4], (Action)(() => PlaceScreen(4)));
+
+            if (sc == null)
+                Para("Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose devant toi ; vise-le au laser et garde le bouton appuye pour le deplacer, il te fait toujours face.", 70, 17);
+            else
             {
-                var sc = Ar6dofDvdWorld.Screens[i];
-                if (sc == null) continue;
-                shown.Add(sc);
-                var ln = Lbl("", 30, 18, TextAnchor.MiddleLeft);
-                lines.Add(ln);
+                shown = sc;
+                line = Lbl("", 30, 18, TextAnchor.MiddleLeft);
                 BtnRow(42f, 18,
                     "Plus petit", (Action)(() => { if (sc != null) sc.Resize(sc.width / 1.2f); Refresh(); }),
                     "Plus grand", (Action)(() => { if (sc != null) sc.Resize(sc.width * 1.2f); Refresh(); }),
-                    "Compteurs a zero", (Action)(() => { if (sc != null) sc.ResetCounters(); RefreshLines(); }),
-                    "Retirer", (Action)(() => { Ar6dofDvdWorld.Remove(sc); Rebuild(); }));
+                    "Compteurs a zero", (Action)(() => { if (sc != null) sc.ResetCounters(); RefreshLine(); }),
+                    "Retirer l'ecran", (Action)(() => { Ar6dofDvdWorld.Remove(sc); Rebuild(); }));
+                Para("Vise l'ecran au laser et garde le bouton appuye pour le deplacer : il te fait toujours face.", 44, 16);
             }
-            RefreshLines();
+            RefreshLine();
 
             Section("Logo");
             BtnRow(48f, 20,
@@ -81,21 +74,17 @@ namespace AR6DoF
             Para("Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux).", 44, 16);
         }
 
-        void RefreshLines()
+        void RefreshLine()
         {
-            for (int i = 0; i < lines.Count && i < shown.Count; i++)
-            {
-                var s = shown[i];
-                if (s == null || lines[i] == null) continue;
-                lines[i].text = (i + 1) + " - " + Ar6dofLoc.T(Ar6dofDvdScreen.TypeNames[s.type]) + " - " + Fmt("{0:0.0} m", s.width) + "     " + Ar6dofLoc.T("Rebonds") + " " + s.bounces + "   " + Ar6dofLoc.T("Coins") + " " + s.corners;
-            }
+            if (line == null || shown == null) return;
+            line.text = Ar6dofLoc.T(Ar6dofDvdScreen.TypeNames[shown.type]) + " - " + Fmt("{0:0.0} m", shown.width) + "     " + Ar6dofLoc.T("Rebonds") + " " + shown.bounces + "   " + Ar6dofLoc.T("Coins") + " " + shown.corners;
         }
 
         protected override void OnTick()
         {
-            if (lines.Count == 0 || Time.unscaledTime < nextRefresh) return;
+            if (line == null || Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + 0.5f;
-            RefreshLines();
+            RefreshLine();
         }
     }
 }
