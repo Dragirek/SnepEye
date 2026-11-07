@@ -408,6 +408,22 @@ namespace AR6DoF
             if (changed != null) changed();
         }
 
+        /// <summary>Un QR lu en direct sur l'apercu (sans photo) : le resultat s'affiche tout de suite, comme apres un scan.</summary>
+        public void AcceptLive(string text)
+        {
+            var pt = dock != null ? dock.passthrough : null;
+            if (pt != null && pt.PhotoBusy) pt.CancelPhoto();
+            gen++;
+            DeleteTemp();
+            DropKept();
+            Clear();
+            Ar6dofNotifyService.Resolve("scan");
+            qr = text;
+            kind = Ar6dofScanText.Classify(text);
+            phase = Phase.Done;
+            if (changed != null) changed();
+        }
+
         public void Start(bool ocr)
         {
             var pt = dock != null ? dock.passthrough : null;

@@ -307,7 +307,7 @@ namespace AR6DoF
         {
             if (!built || canvas == null) return;
             var d = Ar6dofSettings.Current;
-            if (Ar6dofDockInfo.Signature(d) != infoSig || Mathf.Clamp(d.dockMaxApps, 2, 12) != maxAppsShown) RebuildIcons();   // heure, date ou batterie : le bandeau change ; nombre d'applications visibles
+            if (Ar6dofDockInfo.Signature(d) != infoSig || Mathf.Clamp(d.dockMaxApps, 2, 16) != maxAppsShown) RebuildIcons();   // heure, date ou batterie : le bandeau change ; nombre d'applications visibles
             if (kbMenu != null) kbMenu.follow = d.menusFollow;
             feetInit = false; FollowFeet(true);
             foreach (var a in apps) SetIndicator(a);
@@ -503,11 +503,9 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ icônes
-        void RebuildIcons()
+        /// <summary>Tous les groupes d'icones dans l'ordre de la barre : chaque cluster d'ecrans (de gauche a droite), le clavier, puis les menus d'appareils et les applications presents dans la barre.</summary>
+        List<List<Ar6dofDockApp>> BuildGroups()
         {
-            foreach (Transform c in iconsRoot) Destroy(c.gameObject);
-            iconOf.Clear();
-            apps.Clear();
             var sc = Ar6dofScreens.Instance;
             // groupes d'icônes : chaque cluster d'écrans (de gauche à droite) reste côte à côte, puis le clavier et les menus d'appareils
             var groups = new List<List<Ar6dofDockApp>>();
@@ -531,15 +529,41 @@ namespace AR6DoF
                 }
             }
             if (kbApp != null) groups.Add(new List<Ar6dofDockApp> { kbApp });
-            // applications et menus d'appareils : au plus 'max' icones, les autres defilent avec les fleches ; une application fermee n'est que dans Apps
-            var scroll = ScrollApps();
+            foreach (var m in devMenus.menus) if (m.open || m.docked) groups.Add(new List<Ar6dofDockApp> { m });   // un menu d'appareil ferme n'est que dans Apps
+            foreach (var w in windows) if (w.open || w.docked) groups.Add(new List<Ar6dofDockApp> { w });   // une application fermee n'est que dans Apps
+            return groups;
+        }
+
+        void RebuildIcons()
+        {
+            foreach (Transform c in iconsRoot) Destroy(c.gameObject);
+            iconOf.Clear();
+            apps.Clear();
+            // toutes les icones (ecrans, clavier, menus d'appareils, applications) : au plus 'max' visibles, les autres defilent avec les fleches ; une application fermee n'est que dans Apps
+            var all = BuildGroups();
+            int totalIcons = 0;
+            foreach (var g0 in all) totalIcons += g0.Count;
             int maxApps = MaxApps();
             maxAppsShown = maxApps;
-            bool overflow = scroll.Count > maxApps;
-            int firstApp = 0, lastApp = scroll.Count;
-            if (overflow) { appScroll = Mathf.Clamp(appScroll, 0, scroll.Count - maxApps); firstApp = appScroll; lastApp = appScroll + maxApps; }
+            bool overflow = totalIcons > maxApps;
+            int firstApp = 0, lastApp = totalIcons;
+            if (overflow) { appScroll = Mathf.Clamp(appScroll, 0, totalIcons - maxApps); firstApp = appScroll; lastApp = appScroll + maxApps; }
             else appScroll = 0;
-            for (int i = firstApp; i < lastApp; i++) groups.Add(new List<Ar6dofDockApp> { scroll[i] });
+            var groups = new List<List<Ar6dofDockApp>>();
+            int idx = 0;
+            foreach (var g0 in all)
+            {
+                List<Ar6dofDockApp> cur = null;
+                foreach (var a0 in g0)
+                {
+                    if (idx >= firstApp && idx < lastApp)
+                    {
+                        if (cur == null) { cur = new List<Ar6dofDockApp>(); groups.Add(cur); }
+                        cur.Add(a0);
+                    }
+                    idx++;
+                }
+            }
             foreach (var g in groups) apps.AddRange(g);
 
             const float size = 96f, inCluster = 102f, between = 116f, gearSize = 96f;   // la roue a la meme taille que les autres icones
@@ -602,7 +626,7 @@ namespace AR6DoF
             }
             xi = 0;
             foreach (var g in groups) foreach (var a in g) { MakeIcon(a, xs[xi] + shift, size, false); xi++; }
-            if (overflow) MakeScrollArrows(arrowL + shift, arrowR + shift, arrowW, size, scroll.Count);
+            if (overflow) MakeScrollArrows(arrowL + shift, arrowR + shift, arrowW, size, totalIcons);
             if (appsApp != null) MakeIcon(appsApp, appsX + shift, size, false);
             if (notifApp != null)
             {
@@ -624,16 +648,7 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ defilement des applications dans la barre
-        int MaxApps() { return Mathf.Clamp(Ar6dofSettings.Current.dockMaxApps, 2, 12); }
-
-        /// <summary>Menus d'appareils puis applications presents dans la barre (affiches ou reduits), dans l'ordre de la barre.</summary>
-        List<Ar6dofDockApp> ScrollApps()
-        {
-            var l = new List<Ar6dofDockApp>();
-            foreach (var m in devMenus.menus) if (m.open || m.docked) l.Add(m);
-            foreach (var w in windows) if (w.open || w.docked) l.Add(w);
-            return l;
-        }
+        int MaxApps() { return Mathf.Clamp(Ar6dofSettings.Current.dockMaxApps, 2, 16); }
 
         void ScrollApp(int d)
         {
@@ -641,15 +656,17 @@ namespace AR6DoF
             RebuildIcons();       // recale appScroll dans les limites
         }
 
-        /// <summary>Fait defiler la barre pour que l'application soit visible ; vrai si la barre doit etre refaite.</summary>
+        /// <summary>Fait defiler la barre pour que l'icone de l'application soit visible ; vrai si la barre doit etre refaite.</summary>
         bool RevealApp(Ar6dofDockApp app)
         {
-            var l = ScrollApps();
-            int idx = l.IndexOf(app), max = MaxApps();
-            if (idx < 0 || l.Count <= max) return false;
+            int idx = 0, at = -1, count = 0;
+            foreach (var g in BuildGroups())
+                foreach (var a in g) { if (a == app) at = idx; idx++; count++; }
+            int max = MaxApps();
+            if (at < 0 || count <= max) return false;
             int was = appScroll;
-            if (idx < appScroll) appScroll = idx;
-            else if (idx >= appScroll + max) appScroll = idx - max + 1;
+            if (at < appScroll) appScroll = at;
+            else if (at >= appScroll + max) appScroll = at - max + 1;
             return appScroll != was;
         }
 
@@ -660,8 +677,8 @@ namespace AR6DoF
             var br = Ar6dofVrUi.MakeButton(iconsRoot, ">", new Vector2(xr, -26f), new Vector2(w, h), () => ScrollApp(1), out t, 40);
             bl.interactable = appScroll > 0;
             br.interactable = appScroll < count - maxAppsShown;
-            Tip(bl, "Applications precedentes dans le dock");
-            Tip(br, "Applications suivantes dans le dock");
+            Tip(bl, "Icones precedentes dans le dock");
+            Tip(br, "Icones suivantes dans le dock");
         }
 
         // ------------------------------------------------------------------ actions rapides (remplacent les touches R, M et F)

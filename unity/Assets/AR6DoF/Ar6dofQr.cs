@@ -19,7 +19,13 @@ namespace AR6DoF
     {
         // ------------------------------------------------------------------ API
         /// <summary>Pixels Unity (Texture2D.GetPixels32, origine en bas a gauche) -> texte du QR, ou null. A appeler dans un autre fil.</summary>
-        public static string DecodePixels(Color32[] px, int w, int h)
+        public static string DecodePixels(Color32[] px, int w, int h) { return DecodePixels(px, w, h, 4000, null); }
+
+        /// <summary>Resultat d'une lecture : 'quad' = cadre du QR trouve (8 nombres : haut-gauche, haut-droite, bas-droite, bas-gauche, en pixels de l'image donnee, origine en HAUT a gauche), meme quand le contenu n'a pas pu etre lu ; 'decoded' = le contenu est lu.</summary>
+        public sealed class Result { public float[] quad; public bool decoded; }
+
+        /// <summary>Comme DecodePixels, avec une duree maximale et, si 'res' n'est pas null, le cadre du QR (utile pour le dessiner en direct). L'origine de 'quad' est en haut a gauche de l'image affichee.</summary>
+        public static string DecodePixels(Color32[] px, int w, int h, int maxMs, Result res)
         {
             if (px == null || w < 21 || h < 21 || px.Length < w * h) return null;
             int f = 1;
@@ -45,16 +51,20 @@ namespace AR6DoF
                     lum[y * ow + x] = (byte)(sum / (f * f));
                 }
             }
-            return Decode(lum, ow, oh, 4000);
+            string text = Decode(lum, ow, oh, maxMs, res);
+            if (res != null && res.quad != null && f != 1) for (int i = 0; i < res.quad.Length; i++) res.quad[i] *= f;
+            return text;
         }
 
         /// <summary>Niveaux de gris (octets, ligne 0 en haut) -> texte du QR, ou null. Plusieurs essais (seuils plus ou moins locaux, normal puis inverse, puis image reduite de moitie) jusqu'a 'maxMs' au total.</summary>
-        public static string Decode(byte[] lum, int w, int h, int maxMs)
+        public static string Decode(byte[] lum, int w, int h, int maxMs) { return Decode(lum, w, h, maxMs, null); }
+
+        public static string Decode(byte[] lum, int w, int h, int maxMs, Result res)
         {
             try
             {
                 var sw = Stopwatch.StartNew();
-                string r = DecodeAt(lum, w, h, maxMs, sw);
+                string r = DecodeAt(lum, w, h, maxMs, sw, res, 1f);
                 if (r != null) return r;
                 if (w >= 640 && h >= 480 && sw.ElapsedMilliseconds < maxMs)
                 {
@@ -67,7 +77,7 @@ namespace AR6DoF
                         for (int x = 0; x < w2; x++)
                             small[y * w2 + x] = (byte)((lum[r0 + 2 * x] + lum[r0 + 2 * x + 1] + lum[r1 + 2 * x] + lum[r1 + 2 * x + 1]) >> 2);
                     }
-                    r = DecodeAt(small, w2, h2, maxMs, sw);
+                    r = DecodeAt(small, w2, h2, maxMs, sw, res, 2f);
                 }
                 return r;
             }
@@ -78,12 +88,12 @@ namespace AR6DoF
         static readonly int[] PassDiv = { 8, 16, 32, 8 };
         static readonly int[] PassThr = { 92, 94, 96, 98 };
 
-        static string DecodeAt(byte[] lum, int w, int h, int maxMs, Stopwatch sw)
+        static string DecodeAt(byte[] lum, int w, int h, int maxMs, Stopwatch sw, Result res, float scale)
         {
             for (int p = 0; p < PassDiv.Length; p++)
             {
                 if (sw.ElapsedMilliseconds > maxMs) return null;
-                var d = new Decoder { w = w, h = h, limit = maxMs, sw = sw, lum = lum, inv = false };
+                var d = new Decoder { w = w, h = h, limit = maxMs, sw = sw, lum = lum, inv = false, res = res, scale = scale };
                 d.bw = Binarize(lum, w, h, PassDiv[p], PassThr[p]);
                 string r = d.TryDecode();
                 if (r != null) return r;
@@ -258,6 +268,25 @@ namespace AR6DoF
             public int w, h, limit;
             public byte[] bw, lum;
             public bool inv;     // vrai : bw est l'image inversee (QR clair sur fond sombre)
+            public Result res;   // cadre trouve (peut etre null)
+            public float scale = 1f;   // pour ramener les coordonnees a l'image d'origine quand on lit une image reduite
+
+            /// <summary>Note le cadre du QR : 'decoded' faux = simple detection (premier triplet de reperes), vrai = lu (on remplace par le cadre exact).</summary>
+            void NoteQuad(double[] H, int dim, bool decoded)
+            {
+                if (res == null || H == null) return;
+                if (!decoded && res.quad != null) return;
+                double[] cx = { 0, dim, dim, 0 }, cy = { 0, 0, dim, dim };
+                var q = new float[8];
+                for (int i = 0; i < 4; i++)
+                {
+                    double px, py;
+                    Apply(H, cx[i], cy[i], out px, out py);
+                    q[2 * i] = (float)(px * scale); q[2 * i + 1] = (float)(py * scale);
+                }
+                res.quad = q;
+                if (decoded) res.decoded = true;
+            }
             public Stopwatch sw;
 
             bool TimeUp { get { return sw.ElapsedMilliseconds > limit; } }
@@ -527,8 +556,10 @@ namespace AR6DoF
                 var H = Homography(sx, sy, dx, dy);
                 if (H == null) return null;
                 best = Score(H, fp);
-                double step = 3.0;
-                for (int it = 0; it < 60 && step >= 0.15; it++)
+                // pas de depart large : en perspective forte le 4e coin deduit des reperes peut etre a plus de 10 % du cote de sa vraie place
+                double side = (Math.Sqrt((bx[1] - bx[0]) * (bx[1] - bx[0]) + (by[1] - by[0]) * (by[1] - by[0])) + Math.Sqrt((bx[2] - bx[0]) * (bx[2] - bx[0]) + (by[2] - by[0]) * (by[2] - by[0]))) * 0.5;
+                double step = Math.Max(6.0, 0.08 * side);
+                for (int it = 0; it < 200 && step >= 0.15; it++)
                 {
                     bool improved = false;
                     for (int k = 0; k < 4; k++)
@@ -575,6 +606,11 @@ namespace AR6DoF
                     double brx = tr.cx + bl.cx - tl.cx, bry = tr.cy + bl.cy - tl.cy;
                     double[] bx = { tl.cx, tr.cx, bl.cx, brx };
                     double[] by = { tl.cy, tr.cy, bl.cy, bry };
+                    if (res != null && res.quad == null && bse >= 21 && bse <= 177)
+                    {
+                        double[] qx = { 3.5, bse - 3.5, 3.5, bse - 3.5 }, qy = { 3.5, 3.5, bse - 3.5, bse - 3.5 };
+                        NoteQuad(Homography(qx, qy, bx, by), bse, false);   // cadre deja visible, meme si la lecture echoue
+                    }
 
                     // 1) essai direct : le 4e coin est deduit des reperes (parallelogramme), bon pour un QR de face
                     int[] dims = { bse, bse - 4, bse + 4, bse - 8, bse + 8 };
@@ -587,7 +623,7 @@ namespace AR6DoF
                         var H = Homography(sx, sy, bx, by);
                         if (H == null) continue;
                         string r = DecodeBoth(SampleGrid(H, dim), dim);
-                        if (r != null) return r;
+                        if (r != null) { NoteQuad(H, dim, true); return r; }
                     }
 
                     // 2) transformation recalee sur les modules connus (perspective), pour les 3 tailles les plus probables, la mieux collee d'abord
@@ -615,7 +651,7 @@ namespace AR6DoF
                         used[bi] = true;
                         if (TimeUp) return null;
                         string r = DecodeBoth(SampleGrid(hs[bi], dd[bi]), dd[bi]);
-                        if (r != null) return r;
+                        if (r != null) { NoteQuad(hs[bi], dd[bi], true); return r; }
                     }
                 }
                 return null;

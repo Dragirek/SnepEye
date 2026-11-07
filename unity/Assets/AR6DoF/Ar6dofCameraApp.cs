@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -29,6 +30,22 @@ namespace AR6DoF
         int lastCount = -1;
         bool shown;   // la fenetre est affichee (pas reduite, pas fermee) : HideUi la cache seulement pendant la prise
 
+        // ---- detection du QR code en direct (onglet Scanner seulement) : l'apercu est lu 5 fois par seconde dans un autre fil, le cadre du QR est dessine des qu'il est vu, et le contenu s'affiche des qu'il est lu
+        Texture2D liveTex;
+        Task<string> liveTask;
+        Ar6dofQr.Result liveRes;
+        float nextLive, liveSeen = -9f;
+        float[] liveQuad;
+        int liveW = 1, liveH = 1;
+        RectTransform[] quadLines;
+        Vector2 previewSize;
+        Text liveLabel;
+        static bool LiveOn
+        {
+            get { try { return PlayerPrefs.GetInt("ar6dof_cam_live", 1) != 0; } catch (Exception) { return true; } }
+            set { try { PlayerPrefs.SetInt("ar6dof_cam_live", value ? 1 : 0); } catch (Exception) { } }
+        }
+
         public Ar6dofCameraApp(Ar6dofDock d) : base(d, "camera", "Appareil photo", "camera", "Apercu en direct, photo et scanner (QR code, texte)", 700f)
         {
             ui = Get("ui", 1); eye = Get("eye", 0); timer = Get("timer", 1); quality = Get("quality", 0);
@@ -37,7 +54,7 @@ namespace AR6DoF
         static int Get(string k, int def) { try { return PlayerPrefs.GetInt("ar6dof_cam_" + k, def); } catch (Exception) { return def; } }
         static void Put(string k, int v) { try { PlayerPrefs.SetInt("ar6dof_cam_" + k, v); } catch (Exception) { } }
 
-        protected override void OnRebuildStart() { base.OnRebuildStart(); shootLabel = null; countOverlay = null; }
+        protected override void OnRebuildStart() { base.OnRebuildStart(); shootLabel = null; countOverlay = null; quadLines = null; liveLabel = null; }
 
         public override void OnClosed() { mode = 0; base.OnClosed(); }
 
@@ -54,6 +71,7 @@ namespace AR6DoF
             shown = on;
             if (!on)
             {
+                DropLive();
                 AbortScan();
                 var pt = dock.passthrough;
                 if (pt != null) { if (pt.PhotoBusy) pt.CancelPhoto(); pt.ReleasePreviewScene(); }
@@ -64,6 +82,7 @@ namespace AR6DoF
 
         public override void Destroy()
         {
+            DropLive();
             AbortScan();
             DestroyCount();
             ReleasePreview();
@@ -83,7 +102,7 @@ namespace AR6DoF
         {
             var pt = Pt;
             float aspect = pt != null ? pt.EyeAspect : 4f / 3f;
-            int h = 360, w = Mathf.RoundToInt(h * aspect);
+            int h = mode == 1 ? 540 : 360, w = Mathf.RoundToInt(h * aspect);   // scanner : plus de pixels pour lire un QR de loin
             if (preview != null && (preview.height != h || preview.width != 2 * w)) ReleasePreview();
             if (preview == null)
             {
@@ -102,6 +121,70 @@ namespace AR6DoF
             lastPreview = Time.unscaledTime;
             EnsurePreview();
             pt.RenderPreview(preview, mode == 0 && ui != 0, PreviewLayer);   // onglet Scanner : l'apercu est toujours sans interfaces (la photo du scan aussi)
+            if (mode == 1 && LiveOn && scan.phase == Ar6dofScanSession.Phase.Idle) TickLive();
+            else if (liveTask != null || liveQuad != null) DropLive();
+        }
+
+        // ------------------------------------------------------------------ detection en direct
+        void TickLive()
+        {
+            float now = Time.unscaledTime;
+            if (liveTask != null)
+            {
+                if (!liveTask.IsCompleted) return;
+                string text = liveTask.IsFaulted ? null : liveTask.Result;
+                var res = liveRes;
+                liveTask = null; liveRes = null;
+                if (!string.IsNullOrEmpty(text)) { DropLive(); scan.AcceptLive(text); return; }
+                liveQuad = res != null ? res.quad : null;
+                if (liveQuad != null) liveSeen = now;
+                UpdateQuad();
+            }
+            else if (liveQuad != null && now - liveSeen > 0.8f) { liveQuad = null; UpdateQuad(); }
+            if (now < nextLive || preview == null) return;
+            nextLive = now + 0.2f;
+            int w = preview.width / 2, h = preview.height;
+            if (liveTex == null || liveTex.width != w || liveTex.height != h)
+            {
+                if (liveTex != null) UnityEngine.Object.Destroy(liveTex);
+                liveTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            }
+            var prev = RenderTexture.active;
+            RenderTexture.active = preview;
+            liveTex.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);   // oeil gauche (moitie gauche de l'apercu)
+            RenderTexture.active = prev;
+            Color32[] px = liveTex.GetPixels32();
+            var rs = new Ar6dofQr.Result();
+            liveRes = rs; liveW = w; liveH = h;
+            liveTask = Task.Run(() => Ar6dofQr.DecodePixels(px, w, h, 600, rs));
+        }
+
+        void DropLive()
+        {
+            liveTask = null; liveRes = null; liveQuad = null;
+            if (liveTex != null) { UnityEngine.Object.Destroy(liveTex); liveTex = null; }
+            UpdateQuad();
+        }
+
+        /// <summary>Dessine le cadre du QR trouve sur l'apercu (4 traits) ; rien si aucun QR n'est vu.</summary>
+        void UpdateQuad()
+        {
+            if (quadLines == null) return;
+            bool on = liveQuad != null && liveQuad.Length >= 8;
+            for (int i = 0; i < 4; i++)
+            {
+                var rt = quadLines[i];
+                if (rt == null) continue;
+                if (!on) { if (rt.gameObject.activeSelf) rt.gameObject.SetActive(false); continue; }
+                int j = (i + 1) & 3;
+                Vector2 a = new Vector2((liveQuad[2 * i] / liveW - 0.5f) * previewSize.x, (0.5f - liveQuad[2 * i + 1] / liveH) * previewSize.y);
+                Vector2 b = new Vector2((liveQuad[2 * j] / liveW - 0.5f) * previewSize.x, (0.5f - liveQuad[2 * j + 1] / liveH) * previewSize.y);
+                rt.gameObject.SetActive(true);
+                rt.anchoredPosition = (a + b) * 0.5f;
+                rt.sizeDelta = new Vector2((b - a).magnitude + 5f, 5f);
+                rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(b.y - a.y, b.x - a.x) * Mathf.Rad2Deg);
+            }
+            if (liveLabel != null) liveLabel.text = Ar6dofLoc.T(on ? "QR detecte : tiens-toi immobile, lecture en cours..." : "Cherche un QR code...");
         }
 
         protected override void BuildMain()
@@ -125,7 +208,23 @@ namespace AR6DoF
             var r = Ar6dofVrUi.Rect(content, "Apercu", new Vector2(0f, cy), sz);
             var ri = r.gameObject.AddComponent<RawImage>();
             ri.texture = preview;
-            ri.uvRect = new Rect(eye == 0 ? 0f : 0.5f, 0f, 0.5f, 1f);
+            ri.uvRect = new Rect(eye == 0 || mode == 1 ? 0f : 0.5f, 0f, 0.5f, 1f);   // scanner : toujours l'oeil gauche, celui de la photo et de la detection
+            previewSize = sz;
+            quadLines = null;
+            if (mode == 1)
+            {
+                // cadre du QR detecte en direct : quatre traits sur l'apercu
+                quadLines = new RectTransform[4];
+                for (int i = 0; i < 4; i++)
+                {
+                    var ln = Ar6dofVrUi.Rect(r, "Cadre", Vector2.zero, new Vector2(10f, 5f));
+                    var im = ln.gameObject.AddComponent<Image>();
+                    im.color = new Color(1f, 0.85f, 0.1f, 0.95f);
+                    im.raycastTarget = false;
+                    ln.gameObject.SetActive(false);
+                    quadLines[i] = ln;
+                }
+            }
             ri.raycastTarget = false;
             // compte a rebours du minuteur, sur l'apercu
             countOverlay = Ar6dofVrUi.Label(r, "", Vector2.zero, new Vector2(sz.x, sz.y), 150, TextAnchor.MiddleCenter);
@@ -181,7 +280,11 @@ namespace AR6DoF
             switch (scan.phase)
             {
                 case Ar6dofScanSession.Phase.Idle:
-                    Para("Vise un QR code ou un texte, bien en face et bien eclaire, sans bouger. Touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. Rien ne tourne avant ton clic.", 100, 18);
+                    liveLabel = Lbl("", 32, 20, TextAnchor.MiddleCenter);
+                    liveLabel.fontStyle = FontStyle.Bold;
+                    refreshers.Add(() => { if (liveLabel != null && !LiveOn) liveLabel.text = ""; });
+                    ToggleRow("Detection automatique du QR code", () => LiveOn, v => { LiveOn = v; if (!v) DropLive(); else UpdateQuad(); }, 46f, 20);
+                    Para("Vise un QR code : son cadre est repere tout seul et son contenu s'affiche des qu'il est lu (la detection ne tourne que dans cet onglet). Pour lire du texte, touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows.", 100, 18);
                     var go = Btn("Scanner", () => StartScan(true), 64f, 26);
                     Ar6dofTheme.SetSelected(go, true);
                     break;

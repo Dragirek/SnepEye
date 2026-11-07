@@ -1533,6 +1533,14 @@ namespace AR6DoF
             "Applications visibles en meme temps (les autres defilent avec les fleches) => Apps visible at once (the others scroll with the arrows)",
             "Applications precedentes dans le dock => Previous apps in the dock",
             "Applications suivantes dans le dock => Next apps in the dock",
+            "QR detecte : tiens-toi immobile, lecture en cours... => QR code found: hold still, reading...",
+            "Cherche un QR code... => Looking for a QR code...",
+            "Detection automatique du QR code => Automatic QR code detection",
+            "Vise un QR code : son cadre est repere tout seul et son contenu s'affiche des qu'il est lu (la detection ne tourne que dans cet onglet). Pour lire du texte, touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. => Aim at a QR code: its frame is spotted automatically and its content appears as soon as it is read (detection only runs in this tab). To read text, tap Scan: photo in 3 seconds, QR code reading, otherwise text reading by Windows.",
+            "Icones du dock => Dock icons",
+            "Icones visibles en meme temps (ecrans, clavier, applications ; les autres defilent avec les fleches) => Icons visible at once (screens, keyboard, apps; the others scroll with the arrows)",
+            "Icones precedentes dans le dock => Previous icons in the dock",
+            "Icones suivantes dans le dock => Next icons in the dock",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3056,6 +3064,14 @@ namespace AR6DoF
             "Applications visibles en meme temps (les autres defilent avec les fleches) => Aplicaciones visibles a la vez (las demas se desplazan con las flechas)",
             "Applications precedentes dans le dock => Aplicaciones anteriores del dock",
             "Applications suivantes dans le dock => Aplicaciones siguientes del dock",
+            "QR detecte : tiens-toi immobile, lecture en cours... => QR detectado: no te muevas, leyendo...",
+            "Cherche un QR code... => Buscando un codigo QR...",
+            "Detection automatique du QR code => Deteccion automatica del codigo QR",
+            "Vise un QR code : son cadre est repere tout seul et son contenu s'affiche des qu'il est lu (la detection ne tourne que dans cet onglet). Pour lire du texte, touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. => Apunta a un codigo QR: su marco se detecta solo y su contenido aparece en cuanto se lee (la deteccion solo funciona en esta pestana). Para leer texto, toca Escanear: foto en 3 segundos, lectura del codigo QR y, si no, del texto con Windows.",
+            "Icones du dock => Iconos del dock",
+            "Icones visibles en meme temps (ecrans, clavier, applications ; les autres defilent avec les fleches) => Iconos visibles a la vez (pantallas, teclado, aplicaciones; los demas se desplazan con las flechas)",
+            "Icones precedentes dans le dock => Iconos anteriores del dock",
+            "Icones suivantes dans le dock => Iconos siguientes del dock",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4586,6 +4602,14 @@ namespace AR6DoF
             "Applications visibles en meme temps (les autres defilent avec les fleches) => Gleichzeitig sichtbare Apps (die anderen scrollen mit den Pfeilen)",
             "Applications precedentes dans le dock => Vorherige Apps im Dock",
             "Applications suivantes dans le dock => Naechste Apps im Dock",
+            "QR detecte : tiens-toi immobile, lecture en cours... => QR-Code erkannt: ruhig halten, wird gelesen...",
+            "Cherche un QR code... => Suche einen QR-Code...",
+            "Detection automatique du QR code => Automatische QR-Code-Erkennung",
+            "Vise un QR code : son cadre est repere tout seul et son contenu s'affiche des qu'il est lu (la detection ne tourne que dans cet onglet). Pour lire du texte, touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. => Richte die Kamera auf einen QR-Code: sein Rahmen wird automatisch erkannt und der Inhalt erscheint, sobald er gelesen ist (die Erkennung laeuft nur in diesem Tab). Zum Lesen von Text tippe auf Scannen: Foto in 3 Sekunden, QR-Code lesen, sonst Text durch Windows.",
+            "Icones du dock => Dock-Symbole",
+            "Icones visibles en meme temps (ecrans, clavier, applications ; les autres defilent avec les fleches) => Gleichzeitig sichtbare Symbole (Bildschirme, Tastatur, Apps; die anderen scrollen mit den Pfeilen)",
+            "Icones precedentes dans le dock => Vorherige Symbole im Dock",
+            "Icones suivantes dans le dock => Naechste Symbole im Dock",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6116,6 +6140,14 @@ namespace AR6DoF
             "Applications visibles en meme temps (les autres defilent avec les fleches) => App visibili contemporaneamente (le altre scorrono con le frecce)",
             "Applications precedentes dans le dock => App precedenti nel dock",
             "Applications suivantes dans le dock => App successive nel dock",
+            "QR detecte : tiens-toi immobile, lecture en cours... => QR rilevato: resta fermo, lettura in corso...",
+            "Cherche un QR code... => Cerco un codice QR...",
+            "Detection automatique du QR code => Rilevamento automatico del codice QR",
+            "Vise un QR code : son cadre est repere tout seul et son contenu s'affiche des qu'il est lu (la detection ne tourne que dans cet onglet). Pour lire du texte, touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. => Inquadra un codice QR: il suo riquadro viene individuato da solo e il contenuto appare appena letto (il rilevamento funziona solo in questa scheda). Per leggere del testo tocca Scansiona: foto tra 3 secondi, lettura del codice QR, altrimenti del testo con Windows.",
+            "Icones du dock => Icone del dock",
+            "Icones visibles en meme temps (ecrans, clavier, applications ; les autres defilent avec les fleches) => Icone visibili contemporaneamente (schermi, tastiera, app; le altre scorrono con le frecce)",
+            "Icones precedentes dans le dock => Icone precedenti nel dock",
+            "Icones suivantes dans le dock => Icone successive nel dock",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -7645,6 +7677,14 @@ namespace AR6DoF
             "Applications visibles en meme temps (les autres defilent avec les fleches) => Apps visiveis ao mesmo tempo (as outras rolam com as setas)",
             "Applications precedentes dans le dock => Apps anteriores no dock",
             "Applications suivantes dans le dock => Proximas apps no dock",
+            "QR detecte : tiens-toi immobile, lecture en cours... => QR detectado: fique parado, lendo...",
+            "Cherche un QR code... => Procurando um codigo QR...",
+            "Detection automatique du QR code => Deteccao automatica do codigo QR",
+            "Vise un QR code : son cadre est repere tout seul et son contenu s'affiche des qu'il est lu (la detection ne tourne que dans cet onglet). Pour lire du texte, touche Scanner : photo dans 3 secondes, lecture du QR code, sinon du texte par Windows. => Aponte para um codigo QR: o quadro dele e detectado sozinho e o conteudo aparece assim que e lido (a deteccao so funciona nesta aba). Para ler texto, toque em Escanear: foto em 3 segundos, leitura do codigo QR e, se nao, do texto pelo Windows.",
+            "Icones du dock => Icones do dock",
+            "Icones visibles en meme temps (ecrans, clavier, applications ; les autres defilent avec les fleches) => Icones visiveis ao mesmo tempo (telas, teclado, apps; os outros rolam com as setas)",
+            "Icones precedentes dans le dock => Icones anteriores no dock",
+            "Icones suivantes dans le dock => Proximos icones no dock",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

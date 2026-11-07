@@ -2769,8 +2769,8 @@ namespace AR6DoF
             StepRow(page, ref c, "Taille du clavier (%)", 50f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.keyboardScale * 100f), v => { Ar6dofSettings.Current.keyboardScale = v / 100f; Touch(); }, "0");
             CloseCard(page, top, ref c);
 
-            top = OpenCard(page, ref c, "Applications dans le dock");
-            StepRow(page, ref c, "Applications visibles en meme temps (les autres defilent avec les fleches)", 2f, 12f, 1f, 1f, 2f, () => Mathf.Clamp(Ar6dofSettings.Current.dockMaxApps, 2, 12), v => { Ar6dofSettings.Current.dockMaxApps = Mathf.RoundToInt(v); Touch(); }, "0");
+            top = OpenCard(page, ref c, "Icones du dock");
+            StepRow(page, ref c, "Icones visibles en meme temps (ecrans, clavier, applications ; les autres defilent avec les fleches)", 2f, 16f, 1f, 1f, 2f, () => Mathf.Clamp(Ar6dofSettings.Current.dockMaxApps, 2, 16), v => { Ar6dofSettings.Current.dockMaxApps = Mathf.RoundToInt(v); Touch(); }, "0");
             CloseCard(page, top, ref c);
 
             top = OpenCard(page, ref c, "Informations sur le dock");
