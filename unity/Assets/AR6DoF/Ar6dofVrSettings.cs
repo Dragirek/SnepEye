@@ -2769,6 +2769,10 @@ namespace AR6DoF
             StepRow(page, ref c, "Taille du clavier (%)", 50f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.keyboardScale * 100f), v => { Ar6dofSettings.Current.keyboardScale = v / 100f; Touch(); }, "0");
             CloseCard(page, top, ref c);
 
+            top = OpenCard(page, ref c, "Applications dans le dock");
+            StepRow(page, ref c, "Applications visibles en meme temps (les autres defilent avec les fleches)", 2f, 12f, 1f, 1f, 2f, () => Mathf.Clamp(Ar6dofSettings.Current.dockMaxApps, 2, 12), v => { Ar6dofSettings.Current.dockMaxApps = Mathf.RoundToInt(v); Touch(); }, "0");
+            CloseCard(page, top, ref c);
+
             top = OpenCard(page, ref c, "Informations sur le dock");
             Toggle(page, 0f, Next(ref c, 48f, 12f), "Afficher l'heure", () => Ar6dofSettings.Current.dockShowClock, v => { Ar6dofSettings.Current.dockShowClock = v; Touch(); }, 600f);
             CycleRow(page, ref c, "Affichage de l'heure", 3, () => Ar6dofSettings.Current.dockClockStyle, v => { Ar6dofSettings.Current.dockClockStyle = v; Touch(); }, i => Ar6dofLoc.T(i == 0 ? "Numerique" : i == 1 ? "Analogique" : "Les deux"));

@@ -19,6 +19,8 @@ namespace AR6DoF
         int bannerKey = -1, lastKind;
         bool showRules;
         int rulesPage;
+        bool resetPending = true;       // la prochaine ouverture repart d'une partie neuve (jamais ouvert, ou ferme depuis)
+        bool shown;                     // fenetre affichee : pas de plateau 3D ni de calcul de jeu quand elle est cachee
 
         // ---- reglages communs aux jeux (sauvegardes)
         public static bool SoundOn
@@ -49,6 +51,52 @@ namespace AR6DoF
         /// <summary>Construit le jeu dans la fenetre (a la place de BuildMain). Appeler ViewBar() en premier pour avoir Vue 3D / 2D, Regles et Son.</summary>
         protected abstract void GameBuild();
 
+        /// <summary>Remet le jeu a zero, SANS reconstruire la fenetre (le dock la reconstruit juste apres) ; si le PC joue en premier, il est lance ici. Appele a chaque ouverture qui suit une fermeture (et a la premiere) : le jeu demarre tout seul, sans bouton a presser.</summary>
+        protected virtual void GameReset() { }
+
+        /// <summary>Fermeture (pas une simple reduction) : arreter ce que le jeu faisait (calcul du PC, tirs en vol, son).</summary>
+        protected virtual void GameClosed() { }
+
+        /// <summary>La fenetre est cachee (reduite ou en train de se fermer) : finir ce qui doit l'etre pour ne rien perdre (le tirage d'une machine a sous, par exemple). L'etat de la partie est conserve.</summary>
+        protected virtual void GameHidden() { }
+
+        public override void Activate(bool on)
+        {
+            if (on && resetPending)
+            {
+                resetPending = false;
+                try { GameReset(); }
+                catch (Exception e) { Debug.LogWarning("AR6DoF : remise a zero du jeu impossible : " + e); }
+            }
+            shown = on;
+            base.Activate(on);
+        }
+
+        /// <summary>Appele par le dock des le DEBUT d'une reduction ou d'une fermeture : le plateau 3D disparait tout de suite (il revient a la reouverture) et le jeu se fige. La partie reste telle quelle.</summary>
+        public void HideWorld()
+        {
+            if (!shown) return;
+            shown = false;
+            snd.StopWhirr();
+            DisposeTable();
+            ClearBanner();
+            try { GameHidden(); }
+            catch (Exception e) { Debug.LogWarning("AR6DoF : jeu cache : " + e.Message); }
+        }
+
+        /// <summary>Fermee (croix) : le jeu s'arrete et la prochaine ouverture lance une partie neuve.</summary>
+        public sealed override void OnClosed()
+        {
+            HideWorld();
+            try { GameClosed(); }
+            catch (Exception e) { Debug.LogWarning("AR6DoF : fermeture du jeu : " + e.Message); }
+            snd.StopWhirr(); snd.Dispose();
+            DisposeTable();
+            showRules = false; rulesPage = 0;
+            lastKind = 0;
+            resetPending = true;
+        }
+
         protected sealed override void BuildMain()
         {
             if (showRules)
@@ -77,7 +125,7 @@ namespace AR6DoF
         /// <summary>La table 3D (creee au premier besoin), ou null si le jeu est en 2D.</summary>
         protected Ar6dofTable3D EnsureTable(Color slab)
         {
-            if (!Is3D) return null;
+            if (!Is3D || !shown) return null;
             if (table == null)
             {
                 try { table = new Ar6dofTable3D(slab); }
@@ -360,6 +408,7 @@ namespace AR6DoF
 
         protected sealed override void OnTick()
         {
+            if (!shown) return;
             if (table != null) table.Tick();
             GameTick();
         }
@@ -368,7 +417,7 @@ namespace AR6DoF
 
         protected override void OnVisible(bool on)
         {
-            if (!on) { snd.StopWhirr(); snd.Dispose(); DisposeTable(); }
+            if (!on) { HideWorld(); snd.StopWhirr(); snd.Dispose(); DisposeTable(); }
         }
 
         public override void Destroy()

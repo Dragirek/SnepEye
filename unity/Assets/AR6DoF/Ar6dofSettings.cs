@@ -81,6 +81,7 @@ namespace AR6DoF
         public int dockLayoutV = 0;        // 1 : nouvelles valeurs d'origine du dock (30 cm, 40 cm assis, 75 deg) déjà appliquées
         public float dockScale = 1f;
         public float dockTilt = 0f;        // inclinaison en plus (deg) ; 0 = face à tes yeux
+        public int dockMaxApps = 6;        // applications visibles dans la barre en meme temps ; les autres defilent (fleches)
         public float dockSeatedDrop = 0.40f; // assis : le dock est sous tes yeux de cette hauteur (m) ; debout il est au sol
         public bool seated = false;        // mode assis : le dock se place a hauteur des mains et le sol suppose est ajuste a la hauteur des yeux assis
 

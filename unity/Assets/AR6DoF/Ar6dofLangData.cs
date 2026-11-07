@@ -1527,6 +1527,12 @@ namespace AR6DoF
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => A number says how many mines touch the square, among its 8 neighbours. If the number equals the count of hidden squares around it, all of them are mines: put flags on them (Flag tool, or the laser's right button). Once all of a number's flags are placed, touch that number to open its other neighbours at once.",
             "Variante => Variant",
             "Image du scan gardee : {0} => Scan image kept: {0}",
+            "A toi de tirer ! Tu peux encore melanger ta flotte. => Your turn to fire! You can still shuffle your fleet.",
+            "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). La partie commence des l'ouverture : tant que tu n'as pas tire, tu peux melanger ta flotte jusqu'a ce qu'elle te plaise. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne. => Each side hides five ships on a 10 x 10 grid: carrier (5 squares), cruiser (4), destroyer (3), submarine (3) and patrol boat (2). The game starts as soon as you open it: until you have fired, you can shuffle your fleet until you like it. Taking turns, you fire at a square of the enemy fleet. The first to sink all the opposing ships wins.",
+            "Applications dans le dock => Apps in the dock",
+            "Applications visibles en meme temps (les autres defilent avec les fleches) => Apps visible at once (the others scroll with the arrows)",
+            "Applications precedentes dans le dock => Previous apps in the dock",
+            "Applications suivantes dans le dock => Next apps in the dock",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3044,6 +3050,12 @@ namespace AR6DoF
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Un numero dice cuantas minas tocan la casilla, entre sus 8 vecinas. Si el numero es igual al de casillas ocultas alrededor, todas son minas: pon banderas (herramienta Bandera o boton derecho del laser). Cuando estan todas las banderas de un numero, toca ese numero para abrir de golpe sus otras vecinas.",
             "Variante => Variante",
             "Image du scan gardee : {0} => Imagen del escaneo guardada: {0}",
+            "A toi de tirer ! Tu peux encore melanger ta flotte. => Te toca disparar. Aun puedes mezclar tu flota.",
+            "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). La partie commence des l'ouverture : tant que tu n'as pas tire, tu peux melanger ta flotte jusqu'a ce qu'elle te plaise. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne. => Cada bando oculta cinco barcos en una cuadricula de 10 x 10: portaaviones (5 casillas), crucero (4), destructor (3), submarino (3) y patrullero (2). La partida empieza al abrirla: mientras no hayas disparado, puedes mezclar tu flota hasta que te guste. Por turnos, disparas a una casilla de la flota enemiga. El primero que hunda todos los barcos contrarios gana.",
+            "Applications dans le dock => Aplicaciones en el dock",
+            "Applications visibles en meme temps (les autres defilent avec les fleches) => Aplicaciones visibles a la vez (las demas se desplazan con las flechas)",
+            "Applications precedentes dans le dock => Aplicaciones anteriores del dock",
+            "Applications suivantes dans le dock => Aplicaciones siguientes del dock",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4568,6 +4580,12 @@ namespace AR6DoF
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Eine Zahl sagt, wie viele Minen das Feld beruehren, unter seinen 8 Nachbarn. Ist die Zahl gleich der Anzahl verdeckter Felder ringsum, sind alle Minen: setze Flaggen darauf (Werkzeug Flagge oder rechte Taste des Lasers). Sind alle Flaggen einer Zahl gesetzt, beruehre die Zahl, um ihre anderen Nachbarn auf einmal zu oeffnen.",
             "Variante => Variante",
             "Image du scan gardee : {0} => Scan-Bild gespeichert: {0}",
+            "A toi de tirer ! Tu peux encore melanger ta flotte. => Du bist dran! Du kannst deine Flotte noch mischen.",
+            "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). La partie commence des l'ouverture : tant que tu n'as pas tire, tu peux melanger ta flotte jusqu'a ce qu'elle te plaise. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne. => Jede Seite versteckt fuenf Schiffe auf einem 10 x 10 Gitter: Flugzeugtraeger (5 Felder), Kreuzer (4), Zerstoerer (3), U-Boot (3) und Patrouillenboot (2). Das Spiel beginnt sofort beim Oeffnen: solange du nicht geschossen hast, kannst du deine Flotte mischen, bis sie dir gefaellt. Abwechselnd schiesst du auf ein Feld der feindlichen Flotte. Wer zuerst alle gegnerischen Schiffe versenkt, gewinnt.",
+            "Applications dans le dock => Apps im Dock",
+            "Applications visibles en meme temps (les autres defilent avec les fleches) => Gleichzeitig sichtbare Apps (die anderen scrollen mit den Pfeilen)",
+            "Applications precedentes dans le dock => Vorherige Apps im Dock",
+            "Applications suivantes dans le dock => Naechste Apps im Dock",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6092,6 +6110,12 @@ namespace AR6DoF
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Un numero dice quante mine toccano la casella, tra le sue 8 vicine. Se il numero e uguale a quello delle caselle nascoste intorno, sono tutte mine: mettici delle bandierine (strumento Bandierina o tasto destro del laser). Quando tutte le bandierine di un numero sono messe, tocca quel numero per aprire in un colpo le altre vicine.",
             "Variante => Variante",
             "Image du scan gardee : {0} => Immagine della scansione conservata: {0}",
+            "A toi de tirer ! Tu peux encore melanger ta flotte. => Tocca a te sparare! Puoi ancora mescolare la tua flotta.",
+            "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). La partie commence des l'ouverture : tant que tu n'as pas tire, tu peux melanger ta flotte jusqu'a ce qu'elle te plaise. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne. => Ogni campo nasconde cinque navi su una griglia 10 x 10: portaerei (5 caselle), incrociatore (4), cacciatorpediniere (3), sottomarino (3) e pattugliatore (2). La partita inizia appena la apri: finche non hai sparato, puoi mescolare la tua flotta finche non ti piace. A turno, spari su una casella della flotta nemica. Il primo che affonda tutte le navi avversarie vince.",
+            "Applications dans le dock => App nel dock",
+            "Applications visibles en meme temps (les autres defilent avec les fleches) => App visibili contemporaneamente (le altre scorrono con le frecce)",
+            "Applications precedentes dans le dock => App precedenti nel dock",
+            "Applications suivantes dans le dock => App successive nel dock",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -7615,6 +7639,12 @@ namespace AR6DoF
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Um numero diz quantas minas tocam a casa, entre suas 8 vizinhas. Se o numero e igual ao de casas ocultas ao redor, todas sao minas: coloque bandeiras (ferramenta Bandeira ou botao direito do laser). Quando todas as bandeiras de um numero estiverem colocadas, toque nesse numero para abrir de uma vez as outras vizinhas.",
             "Variante => Variante",
             "Image du scan gardee : {0} => Imagem do scan guardada: {0}",
+            "A toi de tirer ! Tu peux encore melanger ta flotte. => Sua vez de atirar! Voce ainda pode misturar sua frota.",
+            "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). La partie commence des l'ouverture : tant que tu n'as pas tire, tu peux melanger ta flotte jusqu'a ce qu'elle te plaise. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne. => Cada lado esconde cinco navios numa grade de 10 x 10: porta-avioes (5 casas), cruzador (4), destroier (3), submarino (3) e patrulha (2). A partida comeca assim que voce abre: enquanto nao tiver atirado, voce pode misturar sua frota ate gostar. Por turnos, voce atira numa casa da frota inimiga. O primeiro que afundar todos os navios adversarios ganha.",
+            "Applications dans le dock => Apps no dock",
+            "Applications visibles en meme temps (les autres defilent avec les fleches) => Apps visiveis ao mesmo tempo (as outras rolam com as setas)",
+            "Applications precedentes dans le dock => Apps anteriores no dock",
+            "Applications suivantes dans le dock => Proximas apps no dock",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

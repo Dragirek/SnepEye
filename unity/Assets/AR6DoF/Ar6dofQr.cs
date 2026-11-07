@@ -11,7 +11,8 @@ namespace AR6DoF
     /// (Task.Run) et ne coute donc rien tant qu'on ne scanne pas. Entree : une image en niveaux de gris (octets) ; sortie : le texte du QR ou null.
     /// Etapes : seuil local (image integrale) -> reperes 1:1:3:1:1 -> triplet de reperes -> transformation (homographie) -> echantillonnage de la grille ->
     /// format / version (BCH) -> masque -> blocs -> correction Reed-Solomon -> modes numerique, alphanumerique, octets (UTF-8) et ECI.
-    /// Limites assumees : pas de mode Kanji, pas de QR miroir, une forte perspective (QR vu de tres biais) peut echouer ; QR de face ou legerement tourne : bon.
+    /// Lit aussi les QR en miroir (image de camera inversee) et recale la transformation sur les motifs connus (reperes, pointilles, alignement), ce qui tient la perspective.
+    /// Limites assumees : pas de mode Kanji, une perspective extreme (QR vu de tres biais) peut echouer ; QR de face, tourne, penche ou en miroir : bon.
     /// Essaie l'image normale puis inversee (QR clair sur fond sombre). Pas plus de ~2,5 s de calcul.
     /// </summary>
     public static class Ar6dofQr
@@ -82,13 +83,14 @@ namespace AR6DoF
             for (int p = 0; p < PassDiv.Length; p++)
             {
                 if (sw.ElapsedMilliseconds > maxMs) return null;
-                var d = new Decoder { w = w, h = h, limit = maxMs, sw = sw };
+                var d = new Decoder { w = w, h = h, limit = maxMs, sw = sw, lum = lum, inv = false };
                 d.bw = Binarize(lum, w, h, PassDiv[p], PassThr[p]);
                 string r = d.TryDecode();
                 if (r != null) return r;
                 var inv = new byte[d.bw.Length];
                 for (int i = 0; i < inv.Length; i++) inv[i] = (byte)(1 - d.bw[i]);
                 d.bw = inv;
+                d.inv = true;
                 r = d.TryDecode();
                 if (r != null) return r;
             }
@@ -254,7 +256,8 @@ namespace AR6DoF
         class Decoder
         {
             public int w, h, limit;
-            public byte[] bw;
+            public byte[] bw, lum;
+            public bool inv;     // vrai : bw est l'image inversee (QR clair sur fond sombre)
             public Stopwatch sw;
 
             bool TimeUp { get { return sw.ElapsedMilliseconds > limit; } }
@@ -456,6 +459,105 @@ namespace AR6DoF
                 return g;
             }
 
+            /// <summary>Modules dont la valeur est connue d'avance (reperes + separateurs, pointilles, motifs d'alignement) : triplets x, y, valeur (1 noir, 0 clair).</summary>
+            static int[] FuncPoints(int dim)
+            {
+                int v = (dim - 17) / 4;
+                var val = new sbyte[dim * dim];
+                for (int i = 0; i < val.Length; i++) val[i] = -1;
+                int[] fx = { 3, dim - 4, 3 }, fy = { 3, 3, dim - 4 };
+                for (int k = 0; k < 3; k++)
+                    for (int dy = -4; dy <= 4; dy++)
+                        for (int dx = -4; dx <= 4; dx++)
+                        {
+                            int x = fx[k] + dx, y = fy[k] + dy;
+                            if (x < 0 || y < 0 || x >= dim || y >= dim) continue;
+                            int m = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                            val[y * dim + x] = (sbyte)((m <= 1 || m == 3) ? 1 : 0);
+                        }
+                for (int i = 8; i < dim - 8; i++)
+                {
+                    sbyte t = (sbyte)(i % 2 == 0 ? 1 : 0);
+                    val[6 * dim + i] = t; val[i * dim + 6] = t;
+                }
+                var ap = AlignPositions(v);
+                for (int i = 0; i < ap.Length; i++)
+                    for (int j = 0; j < ap.Length; j++)
+                    {
+                        if ((i == 0 && j == 0) || (i == 0 && j == ap.Length - 1) || (i == ap.Length - 1 && j == 0)) continue;
+                        for (int dy = -2; dy <= 2; dy++)
+                            for (int dx = -2; dx <= 2; dx++)
+                                val[(ap[i] + dy) * dim + ap[j] + dx] = (sbyte)(Math.Max(Math.Abs(dx), Math.Abs(dy)) == 1 ? 0 : 1);
+                    }
+                int n = 0;
+                for (int i = 0; i < val.Length; i++) if (val[i] >= 0) n++;
+                var res = new int[n * 3];
+                int o = 0;
+                for (int i = 0; i < val.Length; i++)
+                    if (val[i] >= 0) { res[o++] = i % dim; res[o++] = i / dim; res[o++] = val[i]; }
+                return res;
+            }
+
+            /// <summary>Accord entre l'image (niveaux de gris) et les modules connus, pour une transformation donnee. Plus c'est grand, mieux la grille colle.</summary>
+            double Score(double[] H, int[] fp)
+            {
+                double s = 0;
+                for (int i = 0; i < fp.Length; i += 3)
+                {
+                    double px, py;
+                    Apply(H, fp[i] + 0.5, fp[i + 1] + 0.5, out px, out py);
+                    int X = (int)px, Y = (int)py;
+                    if (px < 1 || py < 1 || X >= w - 1 || Y >= h - 1) { s -= 1; continue; }
+                    int l = lum[Y * w + X];
+                    int dark = inv ? l : 255 - l;
+                    s += (fp[i + 2] == 1 ? dark : 255 - dark) / 255.0;
+                }
+                return s;
+            }
+
+            /// <summary>Recale la transformation : on deplace un a un les 4 points de reference (3 reperes + 4e coin) par pas de plus en plus fins tant que l'accord avec les modules connus s'ameliore.
+            /// C'est ce qui rattrape la perspective : le 4e coin deduit des reperes est faux quand le QR est vu de biais.</summary>
+            double[] Refine(double[] bx, double[] by, int dim, int[] fp, out double best)
+            {
+                double[] sx = { 3.5, dim - 3.5, 3.5, dim - 3.5 };
+                double[] sy = { 3.5, 3.5, dim - 3.5, dim - 3.5 };
+                var dx = (double[])bx.Clone();
+                var dy = (double[])by.Clone();
+                best = double.NegativeInfinity;
+                var H = Homography(sx, sy, dx, dy);
+                if (H == null) return null;
+                best = Score(H, fp);
+                double step = 3.0;
+                for (int it = 0; it < 60 && step >= 0.15; it++)
+                {
+                    bool improved = false;
+                    for (int k = 0; k < 4; k++)
+                        for (int ax = 0; ax < 2; ax++)
+                            for (int sg = -1; sg <= 1; sg += 2)
+                            {
+                                double old = ax == 0 ? dx[k] : dy[k];
+                                if (ax == 0) dx[k] = old + sg * step; else dy[k] = old + sg * step;
+                                var Hn = Homography(sx, sy, dx, dy);
+                                double sc = Hn == null ? double.NegativeInfinity : Score(Hn, fp);
+                                if (sc > best + 1e-9) { best = sc; H = Hn; improved = true; }
+                                else { if (ax == 0) dx[k] = old; else dy[k] = old; }
+                            }
+                    if (!improved) step *= 0.5;
+                }
+                return H;
+            }
+
+            /// <summary>Lit la grille telle quelle, puis transposee (QR en miroir).</summary>
+            static string DecodeBoth(byte[] g, int dim)
+            {
+                string r = DecodeMatrix(g, dim);
+                if (r != null) return r;
+                var t = new byte[g.Length];
+                for (int y = 0; y < dim; y++)
+                    for (int x = 0; x < dim; x++) t[x * dim + y] = g[y * dim + x];
+                return DecodeMatrix(t, dim);
+            }
+
             public string TryDecode()
             {
                 var cands = FindFinders();
@@ -470,20 +572,49 @@ namespace AR6DoF
                     float dtr = Dist(tl, tr), dbl = Dist(tl, bl);
                     float est = (dtr + dbl) / 2f / ms + 7f;
                     int bse = (int)Math.Round((est - 17f) / 4f) * 4 + 17;
+                    double brx = tr.cx + bl.cx - tl.cx, bry = tr.cy + bl.cy - tl.cy;
+                    double[] bx = { tl.cx, tr.cx, bl.cx, brx };
+                    double[] by = { tl.cy, tr.cy, bl.cy, bry };
+
+                    // 1) essai direct : le 4e coin est deduit des reperes (parallelogramme), bon pour un QR de face
                     int[] dims = { bse, bse - 4, bse + 4, bse - 8, bse + 8 };
                     foreach (int dim in dims)
                     {
                         if (dim < 21 || dim > 177) continue;
                         if (TimeUp) return null;
-                        double brx = tr.cx + bl.cx - tl.cx, bry = tr.cy + bl.cy - tl.cy;
                         double[] sx = { 3.5, dim - 3.5, 3.5, dim - 3.5 };
                         double[] sy = { 3.5, 3.5, dim - 3.5, dim - 3.5 };
-                        double[] dx = { tl.cx, tr.cx, bl.cx, brx };
-                        double[] dy = { tl.cy, tr.cy, bl.cy, bry };
-                        var H = Homography(sx, sy, dx, dy);
+                        var H = Homography(sx, sy, bx, by);
                         if (H == null) continue;
-                        var g = SampleGrid(H, dim);
-                        string r = DecodeMatrix(g, dim);
+                        string r = DecodeBoth(SampleGrid(H, dim), dim);
+                        if (r != null) return r;
+                    }
+
+                    // 2) transformation recalee sur les modules connus (perspective), pour les 3 tailles les plus probables, la mieux collee d'abord
+                    int[] rd = { bse, bse - 4, bse + 4 };
+                    var hs = new double[3][];
+                    var sc = new double[3];
+                    var dd = new int[3];
+                    int cnt = 0;
+                    for (int q = 0; q < 3; q++)
+                    {
+                        int dim = rd[q];
+                        if (dim < 21 || dim > 177) continue;
+                        if (TimeUp) return null;
+                        int[] fp = FuncPoints(dim);
+                        double s;
+                        var H = Refine(bx, by, dim, fp, out s);
+                        if (H == null) continue;
+                        hs[cnt] = H; sc[cnt] = s / (fp.Length / 3); dd[cnt] = dim; cnt++;
+                    }
+                    var used = new bool[3];
+                    for (int n = 0; n < cnt; n++)
+                    {
+                        int bi = -1;
+                        for (int q = 0; q < cnt; q++) if (!used[q] && (bi < 0 || sc[q] > sc[bi])) bi = q;
+                        used[bi] = true;
+                        if (TimeUp) return null;
+                        string r = DecodeBoth(SampleGrid(hs[bi], dd[bi]), dd[bi]);
                         if (r != null) return r;
                     }
                 }

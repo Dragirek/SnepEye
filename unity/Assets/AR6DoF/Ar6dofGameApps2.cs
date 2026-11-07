@@ -29,16 +29,23 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { view = null; statusText = null; scoreText = null; }
 
-        public override void OnClosed() { Cancel(); }
+        protected override void GameClosed() { Cancel(); }
 
         void Cancel() { if (ai != null) ai.cancel = true; ai = null; job = null; }
 
-        void NewGame()
+        void ResetState()
         {
             Cancel();
             game = new Ar6dofConnect4();
             status = 0; winner = 0; dropCell = -1; hoverCol = -1;
-            if (game.side != Me) StartAi();
+            if (game.side != Me) StartAi();       // le PC ouvre tout seul s'il commence
+        }
+
+        protected override void GameReset() { ResetState(); }
+
+        void NewGame()
+        {
+            ResetState();
             Rebuild();
         }
 
@@ -168,10 +175,17 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { view = null; header = null; statusText = null; toolLabel = null; }
 
-        void NewGame()
+        void ResetState()
         {
             game = new Ar6dofMines(Size[level], Size[level], Count[level], rnd);
             startT = -1f; endSec = -1; lastSec = -1;
+        }
+
+        protected override void GameReset() { ResetState(); }
+
+        void NewGame()
+        {
+            ResetState();
             Rebuild();
         }
 

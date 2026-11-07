@@ -226,13 +226,20 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { view = null; status = null; score = null; }
 
-        public override void OnClosed() { pcAt = -1f; }
+        protected override void GameClosed() { pcAt = -1f; }
 
-        void NewGame()
+        void ResetState()
         {
             for (int i = 0; i < 9; i++) cells[i] = 0;
             result = 0;
-            pcAt = pcFirst ? Time.unscaledTime + 0.5f : -1f;
+            pcAt = pcFirst ? Time.unscaledTime + 0.5f : -1f;      // le PC ouvre tout seul s'il commence
+        }
+
+        protected override void GameReset() { ResetState(); }
+
+        void NewGame()
+        {
+            ResetState();
             Rebuild();
         }
 
@@ -326,7 +333,7 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { face = null; nums = null; pips = null; totalText = null; d3 = null; kindBtns.Clear(); }
 
-        public override void OnClosed() { rolling = false; }
+        protected override void GameClosed() { rolling = false; }
 
         static Color Tint(int s)
         {
@@ -519,15 +526,29 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { machineTop = -1f; s3 = null; syms = null; bulbs = null; ball = null; creditText = null; msgText = null; rechargeBtn = null; betBtns.Clear(); }
 
-        public override void OnClosed() { spinning = false; snd.StopWhirr(); }
+        protected override void GameClosed() { spinning = false; snd.StopWhirr(); }
+
+        /// <summary>Fenetre reduite ou fermee en plein tirage : on ne perd pas la mise, le tirage est termine et le gain verse tout de suite (sans spectacle).</summary>
+        protected override void GameHidden()
+        {
+            if (!spinning) return;
+            spinning = false;
+            for (int r = 0; r < 3; r++) if (!stopped[r]) { stopped[r] = true; rows[r][1] = result[r]; }
+            lastWin = Mult() * Bets[betIdx];
+            winUntil = 0f;
+            if (lastWin > 0) { credits += lastWin; Save(); message = Ar6dofLoc.F("Gagne ! +{0} jetons", lastWin); }
+            else message = "Perdu... retente ta chance !";
+        }
+
+        int Mult()
+        {
+            int a = result[0], b = result[1], c = result[2];
+            if (a == b && b == c) return Pay[a];
+            int cherries = (a == 0 ? 1 : 0) + (b == 0 ? 1 : 0) + (c == 0 ? 1 : 0);
+            return cherries == 2 ? 2 : 0;
+        }
 
         static readonly Color Gold = new Color(1f, 0.86f, 0.25f);
-
-        protected override void OnVisible(bool on)
-        {
-            base.OnVisible(on);
-            if (!on) spinning = false;
-        }
 
         int RandSymbol()
         {
@@ -740,13 +761,7 @@ namespace AR6DoF
         void EndSpin(float now)
         {
             spinning = false;
-            int a = result[0], b = result[1], c = result[2], mult = 0;
-            if (a == b && b == c) mult = Pay[a];
-            else
-            {
-                int cherries = (a == 0 ? 1 : 0) + (b == 0 ? 1 : 0) + (c == 0 ? 1 : 0);
-                if (cherries == 2) mult = 2;
-            }
+            int mult = Mult();
             int bet = Bets[betIdx];
             lastWin = mult * bet;
             if (lastWin > 0)
@@ -804,7 +819,8 @@ namespace AR6DoF
         readonly System.Random rnd = new System.Random();
         readonly Ar6dofFleet mine = new Ar6dofFleet(), theirs = new Ar6dofFleet();
         Ar6dofNavalAi ai;
-        int phase;                 // 0 : placement de ma flotte, 1 : bataille, 2 : fini
+        int phase;                 // 1 : bataille (elle commence des l'ouverture), 2 : fini
+        int moves;                 // tirs du joueur : tant que c'est 0, la flotte peut encore etre melangee
         bool playerTurn = true, iWon;
         float pcAt = -1f;
         string myShot = "", pcShot = "";
@@ -823,13 +839,9 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { fx = null; FinishPending(); enemyView = null; ownView = null; status = null; shots = null; count = null; }
 
-        public override void OnClosed() { fx = null; FinishPending(); }
+        protected override void GameClosed() { fx = null; FinishPending(); }
 
-        protected override void OnVisible(bool on)
-        {
-            if (!on) { fx = null; FinishPending(); }
-            base.OnVisible(on);
-        }
+        protected override void GameHidden() { fx = null; FinishPending(); }
 
         /// <summary>La fenetre se reconstruit ou se ferme avec des tirs en vol : on montre tout de suite leur resultat, sans animation.</summary>
         void FinishPending()
@@ -841,29 +853,28 @@ namespace AR6DoF
 
         void Shuffle() { mine.PlaceRandom(rnd); }
 
-        void NewGame()
+        /// <summary>Nouvelle bataille : flottes tirees au hasard et c'est tout de suite a toi de tirer (rien a lancer).</summary>
+        void ResetState()
         {
             Shuffle();
             theirs.PlaceRandom(rnd);
             ai = new Ar6dofNavalAi(rnd);
             FinishPending();
-            phase = 0; playerTurn = true; iWon = false; pcAt = -1f; myShot = ""; pcShot = "";
-            Rebuild();
+            phase = 1; playerTurn = true; iWon = false; pcAt = -1f; myShot = ""; pcShot = ""; moves = 0;
         }
 
-        void Start()
+        protected override void GameReset() { ResetState(); }
+
+        void NewGame()
         {
-            if (phase != 0) return;
-            theirs.PlaceRandom(rnd);
-            ai = new Ar6dofNavalAi(rnd);
-            phase = 1; playerTurn = true; myShot = ""; pcShot = "";
-            Draw();
+            ResetState();
+            Rebuild();
         }
 
         protected override void GameBuild()
         {
             ViewBar();
-            BtnRow(48f, 20, "Nouvelle partie", (Action)NewGame, "Melanger ma flotte", (Action)(() => { if (phase == 0) { Shuffle(); Draw(); } }), "Commencer", (Action)Start);
+            BtnRow(48f, 20, "Nouvelle partie", (Action)NewGame, "Melanger ma flotte", (Action)(() => { if (moves == 0 && phase == 1) { Shuffle(); Draw(); } }));
             status = Lbl("", 40, 26, TextAnchor.MiddleCenter);
             status.fontStyle = FontStyle.Bold;
             shots = Lbl("", 30, 20, TextAnchor.MiddleCenter);
@@ -898,6 +909,7 @@ namespace AR6DoF
         void OnEnemyCell(int i)
         {
             if (phase != 1 || !playerTurn || theirs.shot[i]) return;
+            moves++;
             int sunk;
             int res = theirs.Shoot(i, out sunk);
             playerTurn = false;
@@ -1022,9 +1034,8 @@ namespace AR6DoF
             }
             Result(phase == 2 && !anyFlying ? (iWon ? 1 : 2) : 0);
             string s;
-            if (phase == 0) s = "Place ta flotte : melange-la jusqu'a ce qu'elle te plaise, puis commence.";
-            else if (phase == 2) s = anyFlying ? "Dernier tir..." : (iWon ? "Victoire ! Toute la flotte ennemie est coulee." : "Defaite : ta flotte est coulee.");
-            else s = playerTurn ? "A toi de tirer !" : "Le PC vise...";
+            if (phase == 2) s = anyFlying ? "Dernier tir..." : (iWon ? "Victoire ! Toute la flotte ennemie est coulee." : "Defaite : ta flotte est coulee.");
+            else s = playerTurn ? (moves == 0 ? "A toi de tirer ! Tu peux encore melanger ta flotte." : "A toi de tirer !") : "Le PC vise...";
             status.text = Ar6dofLoc.T(s);
             string line = "";
             if (myShot.Length > 0) line += Ar6dofLoc.T("Toi") + " : " + myShot;
@@ -1057,18 +1068,25 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { view = null; statusText = null; }
 
-        public override void OnClosed() { Cancel(); }
+        protected override void GameClosed() { Cancel(); }
 
         void Cancel() { if (ai != null) ai.cancel = true; ai = null; job = null; }
 
-        void NewGame()
+        void ResetState()
         {
             Cancel();
             game = Ar6dofChess.Start();
             history.Clear();
             selected = -1; lastFrom = lastTo = -1; status = 0;
             nLegal = game.LegalMoves(legal);
-            if (game.side != playerSide) StartAi();
+            if (game.side != playerSide) StartAi();       // le PC ouvre tout seul si tu joues les noirs
+        }
+
+        protected override void GameReset() { ResetState(); }
+
+        void NewGame()
+        {
+            ResetState();
             Rebuild();
         }
 
@@ -1219,18 +1237,25 @@ namespace AR6DoF
 
         protected override void GameRebuildStart() { view = null; statusText = null; }
 
-        public override void OnClosed() { Cancel(); }
+        protected override void GameClosed() { Cancel(); }
 
         void Cancel() { if (ai != null) ai.cancel = true; ai = null; job = null; }
 
-        void NewGame()
+        void ResetState()
         {
             Cancel();
             game = Ar6dofCheckers.Start(french);
             history.Clear();
             selected = -1; lastFrom = lastTo = -1; status = 0;
             moves = game.Moves();
-            if (game.side != playerSide) StartAi();
+            if (game.side != playerSide) StartAi();       // le PC ouvre tout seul si tu joues les noirs
+        }
+
+        protected override void GameReset() { ResetState(); }
+
+        void NewGame()
+        {
+            ResetState();
             Rebuild();
         }
 

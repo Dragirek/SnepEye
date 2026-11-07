@@ -116,6 +116,8 @@ namespace AR6DoF
         RectTransform barRt;
         Sprite gear;
         readonly List<Ar6dofDockApp> apps = new List<Ar6dofDockApp>();      // dans la barre (sans les réglages)
+        int appScroll;                  // premiere application (ou menu d'appareil) visible dans la barre quand il y en a plus que le maximum
+        int maxAppsShown = 6;           // maximum utilise a la derniere reconstruction de la barre
         readonly Dictionary<Ar6dofScreenPanel, ScreenApp> screenApps = new Dictionary<Ar6dofScreenPanel, ScreenApp>();
         readonly HashSet<Ar6dofDockApp> animating = new HashSet<Ar6dofDockApp>();
         readonly HashSet<Ar6dofDockApp> closing = new HashSet<Ar6dofDockApp>();   // fermeture demandee : retirees de la barre une fois rangees
@@ -305,7 +307,7 @@ namespace AR6DoF
         {
             if (!built || canvas == null) return;
             var d = Ar6dofSettings.Current;
-            if (Ar6dofDockInfo.Signature(d) != infoSig) RebuildIcons();   // heure, date ou batterie : le bandeau change
+            if (Ar6dofDockInfo.Signature(d) != infoSig || Mathf.Clamp(d.dockMaxApps, 2, 12) != maxAppsShown) RebuildIcons();   // heure, date ou batterie : le bandeau change ; nombre d'applications visibles
             if (kbMenu != null) kbMenu.follow = d.menusFollow;
             feetInit = false; FollowFeet(true);
             foreach (var a in apps) SetIndicator(a);
@@ -529,8 +531,15 @@ namespace AR6DoF
                 }
             }
             if (kbApp != null) groups.Add(new List<Ar6dofDockApp> { kbApp });
-            foreach (var m in devMenus.menus) if (m.open || m.docked) groups.Add(new List<Ar6dofDockApp> { m });   // un menu d'appareil ferme n'est que dans Apps
-            foreach (var w in windows) if (w.open || w.docked) groups.Add(new List<Ar6dofDockApp> { w });   // une application fermee n'est que dans Apps
+            // applications et menus d'appareils : au plus 'max' icones, les autres defilent avec les fleches ; une application fermee n'est que dans Apps
+            var scroll = ScrollApps();
+            int maxApps = MaxApps();
+            maxAppsShown = maxApps;
+            bool overflow = scroll.Count > maxApps;
+            int firstApp = 0, lastApp = scroll.Count;
+            if (overflow) { appScroll = Mathf.Clamp(appScroll, 0, scroll.Count - maxApps); firstApp = appScroll; lastApp = appScroll + maxApps; }
+            else appScroll = 0;
+            for (int i = firstApp; i < lastApp; i++) groups.Add(new List<Ar6dofDockApp> { scroll[i] });
             foreach (var g in groups) apps.AddRange(g);
 
             const float size = 96f, inCluster = 102f, between = 116f, gearSize = 96f;   // la roue a la meme taille que les autres icones
@@ -545,7 +554,17 @@ namespace AR6DoF
                     first = false;
                     xs.Add(cx);
                 }
-            float addX = (first ? size * 0.5f : cx + between);                     // place de la prochaine icone (plus de bouton + : les nouveaux appareils se creent dans Apps)
+            const float arrowW = 56f;
+            float arrowL = 0f, arrowR = 0f;
+            if (overflow)
+            {
+                // fleches de defilement juste apres la derniere application visible
+                float lastRight = first ? 0f : cx + size * 0.5f;
+                arrowL = lastRight + 14f + arrowW * 0.5f;
+                arrowR = arrowL + arrowW + 8f;
+            }
+            float addX = overflow ? arrowR + arrowW * 0.5f + (between - size) + size * 0.5f
+                                  : (first ? size * 0.5f : cx + between);          // place de la prochaine icone (plus de bouton + : les nouveaux appareils se creent dans Apps)
             float sepX = addX - size * 0.5f + 26f;                                 // le separateur isole le groupe de droite : Apps et reglages
             float appsX = sepX + 26f + size * 0.5f;                                // Apps : juste a gauche de la roue des reglages
             float bellX = appsX + size + 12f;                                      // la cloche des notifications, entre Apps et la roue
@@ -583,6 +602,7 @@ namespace AR6DoF
             }
             xi = 0;
             foreach (var g in groups) foreach (var a in g) { MakeIcon(a, xs[xi] + shift, size, false); xi++; }
+            if (overflow) MakeScrollArrows(arrowL + shift, arrowR + shift, arrowW, size, scroll.Count);
             if (appsApp != null) MakeIcon(appsApp, appsX + shift, size, false);
             if (notifApp != null)
             {
@@ -601,6 +621,47 @@ namespace AR6DoF
             simg.raycastTarget = false;
             Ar6dofTheme.Attach(sep, Ar6dofRole.Accent, 2);
             MakeIcon(settingsApp, gearX + shift, gearSize, true);
+        }
+
+        // ------------------------------------------------------------------ defilement des applications dans la barre
+        int MaxApps() { return Mathf.Clamp(Ar6dofSettings.Current.dockMaxApps, 2, 12); }
+
+        /// <summary>Menus d'appareils puis applications presents dans la barre (affiches ou reduits), dans l'ordre de la barre.</summary>
+        List<Ar6dofDockApp> ScrollApps()
+        {
+            var l = new List<Ar6dofDockApp>();
+            foreach (var m in devMenus.menus) if (m.open || m.docked) l.Add(m);
+            foreach (var w in windows) if (w.open || w.docked) l.Add(w);
+            return l;
+        }
+
+        void ScrollApp(int d)
+        {
+            appScroll += d;
+            RebuildIcons();       // recale appScroll dans les limites
+        }
+
+        /// <summary>Fait defiler la barre pour que l'application soit visible ; vrai si la barre doit etre refaite.</summary>
+        bool RevealApp(Ar6dofDockApp app)
+        {
+            var l = ScrollApps();
+            int idx = l.IndexOf(app), max = MaxApps();
+            if (idx < 0 || l.Count <= max) return false;
+            int was = appScroll;
+            if (idx < appScroll) appScroll = idx;
+            else if (idx >= appScroll + max) appScroll = idx - max + 1;
+            return appScroll != was;
+        }
+
+        void MakeScrollArrows(float xl, float xr, float w, float h, int count)
+        {
+            Text t;
+            var bl = Ar6dofVrUi.MakeButton(iconsRoot, "<", new Vector2(xl, -26f), new Vector2(w, h), () => ScrollApp(-1), out t, 40);
+            var br = Ar6dofVrUi.MakeButton(iconsRoot, ">", new Vector2(xr, -26f), new Vector2(w, h), () => ScrollApp(1), out t, 40);
+            bl.interactable = appScroll > 0;
+            br.interactable = appScroll < count - maxAppsShown;
+            Tip(bl, "Applications precedentes dans le dock");
+            Tip(br, "Applications suivantes dans le dock");
         }
 
         // ------------------------------------------------------------------ actions rapides (remplacent les touches R, M et F)
@@ -860,11 +921,18 @@ namespace AR6DoF
             var win = app as Ar6dofAppWindow;
             bool inCatalog = (win != null && windows.Contains(win)) || app is DeviceMenu;
             // l'application ouverte prend sa place dans la barre : l'animation part de son icone. La barre n'est refaite que si elle n'y etait pas deja (rouvrir une application reduite ne change rien aux icones)
-            if (show && inCatalog) { bool wasDocked = app.docked; app.docked = true; app.open = true; if (!wasDocked) RebuildIcons(); }
+            if (show && inCatalog)
+            {
+                bool wasDocked = app.docked;
+                app.docked = true; app.open = true;
+                bool scrolled = RevealApp(app);     // l'icone doit etre visible dans la barre (defilement) pour que l'animation parte d'elle
+                if (!wasDocked || scrolled) RebuildIcons();
+            }
             Transform t = app.AnimRoot;
             RectTransform icon;
             iconOf.TryGetValue(app, out icon);
             Vector3 from = icon != null ? icon.position : transform.position;
+            if (!show) { var gw = app as Ar6dofGameWindow; if (gw != null) gw.HideWorld(); }   // un jeu : son plateau 3D disparait tout de suite, pas a la fin de l'animation
             if (show) { app.BeforeFirstShow(); app.Activate(true); app.open = true; SetIndicator(app); }
             Vector3 rest = t.position;
             Vector3 restScale = t.localScale;

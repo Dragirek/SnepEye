@@ -68,7 +68,7 @@ namespace AR6DoF
                     return new[]
                     {
                         P("But", "Couler la flotte ennemie",
-                          "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). Melange ta flotte jusqu'a ce qu'elle te plaise, puis commence. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne.",
+                          "Chaque camp cache cinq navires sur une grille de 10 x 10 : porte-avions (5 cases), croiseur (4), destroyer (3), sous-marin (3) et patrouilleur (2). La partie commence des l'ouverture : tant que tu n'as pas tire, tu peux melanger ta flotte jusqu'a ce qu'elle te plaise. A tour de role, tu tires sur une case de la flotte ennemie. Le premier qui coule tous les navires adverses gagne.",
                           D(7, "Les 5 navires", "# # # # #", "# # # # ~", "# # # ~ ~", "# # # ~ ~", "# # ~ ~ ~")),
                         P("Tirs", "Rate, touche, coule",
                           "Un rond blanc veut dire a l'eau. Un navire rouge avec du feu est touche : tente les cases voisines. Quand toutes les cases d'un navire sont touchees, il est coule : il explose puis ne fume plus. Tu ne vois que ce que tu as touche de la flotte ennemie ; la tienne est toujours visible.",
