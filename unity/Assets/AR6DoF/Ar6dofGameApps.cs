@@ -903,11 +903,11 @@ namespace AR6DoF
             playerTurn = false;
             if (theirs.AllSunk) { phase = 2; iWon = true; }
             else pcAt = Time.unscaledTime + (fx != null ? 0.9f : 0.7f);
-            Fire(true, i, res, sunk, res == 2 ? ShipCells(theirs, sunk) : null);
+            Shoot(true, i, res, sunk, res == 2 ? ShipCells(theirs, sunk) : null);
         }
 
         /// <summary>Le resultat est deja applique a la partie ; ici on lance l'animation et on retarde seulement ce qui se voit (case, texte) jusqu'a l'impact. Le vol est le meme que le tir touche ou non.</summary>
-        void Fire(bool mineShot, int i, int res, int sunk, int[] cells)
+        void Shoot(bool mineShot, int i, int res, int sunk, int[] cells)
         {
             string txt = ShotText(res, sunk);
             var pend = mineShot ? pendE : pendO;
@@ -962,7 +962,7 @@ namespace AR6DoF
                 ai.Report(i, res, mine, sunk);
                 if (mine.AllSunk) { phase = 2; iWon = false; }
                 else playerTurn = true;
-                Fire(false, i, res, sunk, res == 2 ? ShipCells(mine, sunk) : null);
+                Shoot(false, i, res, sunk, res == 2 ? ShipCells(mine, sunk) : null);
             }
         }
 
