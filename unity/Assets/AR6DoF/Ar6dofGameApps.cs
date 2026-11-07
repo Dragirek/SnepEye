@@ -1091,7 +1091,6 @@ namespace AR6DoF
                 Ar6dofLoc.T("Niveau") + " : " + Ar6dofLoc.T(Levels[level]), (Action)(() => { level = (level + 1) % 3; Rebuild(); }),
                 Ar6dofLoc.T("Je joue") + " : " + Ar6dofLoc.T(playerSide == 1 ? "Blancs" : "Noirs"), (Action)(() => { playerSide = -playerSide; NewGame(); }),
                 "Nouvelle partie", (Action)NewGame);
-            BtnRow(44f, 20, Ar6dofLoc.T("Regles") + " : " + Ar6dofLoc.T(french ? "Francaises" : "Americaines"), (Action)(() => { french = !french; NewGame(); }));
             statusText = Lbl("", 40, 25, TextAnchor.MiddleCenter);
             statusText.fontStyle = FontStyle.Bold;
             Space(2f);
@@ -1254,6 +1253,7 @@ namespace AR6DoF
                 Ar6dofLoc.T("Niveau") + " : " + Ar6dofLoc.T(Levels[level]), (Action)(() => { level = (level + 1) % 3; Rebuild(); }),
                 Ar6dofLoc.T("Je joue") + " : " + Ar6dofLoc.T(playerSide == 1 ? "Blancs" : "Noirs"), (Action)(() => { playerSide = -playerSide; NewGame(); }),
                 "Nouvelle partie", (Action)NewGame);
+            BtnRow(44f, 20, Ar6dofLoc.T("Variante") + " : " + Ar6dofLoc.T(french ? "Francaises" : "Americaines"), (Action)(() => { french = !french; NewGame(); }));
             statusText = Lbl("", 40, 25, TextAnchor.MiddleCenter);
             statusText.fontStyle = FontStyle.Bold;
             Space(2f);
