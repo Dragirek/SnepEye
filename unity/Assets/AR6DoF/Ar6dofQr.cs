@@ -44,25 +44,55 @@ namespace AR6DoF
                     lum[y * ow + x] = (byte)(sum / (f * f));
                 }
             }
-            return Decode(lum, ow, oh, 2500);
+            return Decode(lum, ow, oh, 4000);
         }
 
-        /// <summary>Niveaux de gris (octets, ligne 0 en haut) -> texte du QR, ou null.</summary>
+        /// <summary>Niveaux de gris (octets, ligne 0 en haut) -> texte du QR, ou null. Plusieurs essais (seuils plus ou moins locaux, normal puis inverse, puis image reduite de moitie) jusqu'a 'maxMs' au total.</summary>
         public static string Decode(byte[] lum, int w, int h, int maxMs)
         {
             try
             {
-                var d = new Decoder { w = w, h = h, limit = maxMs };
-                d.sw.Start();
-                d.bw = Binarize(lum, w, h);
+                var sw = Stopwatch.StartNew();
+                string r = DecodeAt(lum, w, h, maxMs, sw);
+                if (r != null) return r;
+                if (w >= 640 && h >= 480 && sw.ElapsedMilliseconds < maxMs)
+                {
+                    // image reduite de moitie : le bruit se moyenne et un code flou ou petit redevient lisible
+                    int w2 = w / 2, h2 = h / 2;
+                    var small = new byte[w2 * h2];
+                    for (int y = 0; y < h2; y++)
+                    {
+                        int r0 = 2 * y * w, r1 = r0 + w;
+                        for (int x = 0; x < w2; x++)
+                            small[y * w2 + x] = (byte)((lum[r0 + 2 * x] + lum[r0 + 2 * x + 1] + lum[r1 + 2 * x] + lum[r1 + 2 * x + 1]) >> 2);
+                    }
+                    r = DecodeAt(small, w2, h2, maxMs, sw);
+                }
+                return r;
+            }
+            catch (Exception) { return null; }
+        }
+
+        // taille de la fenetre du seuil local (fraction du petit cote : 1/8, 1/16...) et seuil (pourcentage de la moyenne locale), pour chaque essai
+        static readonly int[] PassDiv = { 8, 16, 32, 8 };
+        static readonly int[] PassThr = { 92, 94, 96, 98 };
+
+        static string DecodeAt(byte[] lum, int w, int h, int maxMs, Stopwatch sw)
+        {
+            for (int p = 0; p < PassDiv.Length; p++)
+            {
+                if (sw.ElapsedMilliseconds > maxMs) return null;
+                var d = new Decoder { w = w, h = h, limit = maxMs, sw = sw };
+                d.bw = Binarize(lum, w, h, PassDiv[p], PassThr[p]);
                 string r = d.TryDecode();
                 if (r != null) return r;
                 var inv = new byte[d.bw.Length];
                 for (int i = 0; i < inv.Length; i++) inv[i] = (byte)(1 - d.bw[i]);
                 d.bw = inv;
-                return d.TryDecode();
+                r = d.TryDecode();
+                if (r != null) return r;
             }
-            catch (Exception) { return null; }
+            return null;
         }
 
         // ------------------------------------------------------------------ tables
@@ -187,9 +217,9 @@ namespace AR6DoF
         }
 
         // ------------------------------------------------------------------ binarisation : seuil local par image integrale (1 = noir)
-        static byte[] Binarize(byte[] lum, int w, int h)
+        static byte[] Binarize(byte[] lum, int w, int h, int div, int thr)
         {
-            int win = Math.Max(16, (Math.Min(w, h) / 8) | 1);
+            int win = Math.Max(16, (Math.Min(w, h) / div) | 1);
             int half = win / 2;
             int iw = w + 1;
             var integ = new int[iw * (h + 1)];
@@ -211,7 +241,7 @@ namespace AR6DoF
                     int x0 = Math.Max(0, x - half), x1 = Math.Min(w, x + half + 1);
                     long s = integ[y1 * iw + x1] - integ[y0 * iw + x1] - integ[y1 * iw + x0] + integ[y0 * iw + x0];
                     long cnt = (long)(x1 - x0) * (y1 - y0);
-                    if ((long)lum[y * w + x] * cnt * 100L < s * 92L) bw[y * w + x] = 1;
+                    if ((long)lum[y * w + x] * cnt * 100L < s * thr) bw[y * w + x] = 1;
                 }
             }
             return bw;
@@ -225,7 +255,7 @@ namespace AR6DoF
         {
             public int w, h, limit;
             public byte[] bw;
-            public Stopwatch sw = new Stopwatch();
+            public Stopwatch sw;
 
             bool TimeUp { get { return sw.ElapsedMilliseconds > limit; } }
 

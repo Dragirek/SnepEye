@@ -1526,6 +1526,7 @@ namespace AR6DoF
             "Des mines sont cachees sous les cases. Ouvre toutes les cases qui n'en ont pas pour gagner ; en ouvrir une qui en a une fait perdre. La premiere case que tu ouvres n'est jamais une mine. Une case vide s'ouvre en cascade avec ses voisines. => Mines are hidden under the squares. Open every square that has none to win; opening one that has a mine loses. The first square you open is never a mine. An empty square opens in a cascade with its neighbours.",
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => A number says how many mines touch the square, among its 8 neighbours. If the number equals the count of hidden squares around it, all of them are mines: put flags on them (Flag tool, or the laser's right button). Once all of a number's flags are placed, touch that number to open its other neighbours at once.",
             "Variante => Variant",
+            "Image du scan gardee : {0} => Scan image kept: {0}",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3042,6 +3043,7 @@ namespace AR6DoF
             "Des mines sont cachees sous les cases. Ouvre toutes les cases qui n'en ont pas pour gagner ; en ouvrir une qui en a une fait perdre. La premiere case que tu ouvres n'est jamais une mine. Une case vide s'ouvre en cascade avec ses voisines. => Hay minas ocultas bajo las casillas. Abre todas las casillas que no tienen para ganar; abrir una que la tiene hace perder. La primera casilla que abres nunca es una mina. Una casilla vacia se abre en cascada con sus vecinas.",
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Un numero dice cuantas minas tocan la casilla, entre sus 8 vecinas. Si el numero es igual al de casillas ocultas alrededor, todas son minas: pon banderas (herramienta Bandera o boton derecho del laser). Cuando estan todas las banderas de un numero, toca ese numero para abrir de golpe sus otras vecinas.",
             "Variante => Variante",
+            "Image du scan gardee : {0} => Imagen del escaneo guardada: {0}",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4565,6 +4567,7 @@ namespace AR6DoF
             "Des mines sont cachees sous les cases. Ouvre toutes les cases qui n'en ont pas pour gagner ; en ouvrir une qui en a une fait perdre. La premiere case que tu ouvres n'est jamais une mine. Une case vide s'ouvre en cascade avec ses voisines. => Unter den Feldern sind Minen versteckt. Oeffne alle Felder ohne Mine, um zu gewinnen; ein Feld mit Mine zu oeffnen verliert. Das erste Feld, das du oeffnest, ist nie eine Mine. Ein leeres Feld oeffnet sich kaskadenartig mit seinen Nachbarn.",
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Eine Zahl sagt, wie viele Minen das Feld beruehren, unter seinen 8 Nachbarn. Ist die Zahl gleich der Anzahl verdeckter Felder ringsum, sind alle Minen: setze Flaggen darauf (Werkzeug Flagge oder rechte Taste des Lasers). Sind alle Flaggen einer Zahl gesetzt, beruehre die Zahl, um ihre anderen Nachbarn auf einmal zu oeffnen.",
             "Variante => Variante",
+            "Image du scan gardee : {0} => Scan-Bild gespeichert: {0}",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6088,6 +6091,7 @@ namespace AR6DoF
             "Des mines sont cachees sous les cases. Ouvre toutes les cases qui n'en ont pas pour gagner ; en ouvrir une qui en a une fait perdre. La premiere case que tu ouvres n'est jamais une mine. Une case vide s'ouvre en cascade avec ses voisines. => Sotto le caselle sono nascoste delle mine. Apri tutte le caselle che non ne hanno per vincere; aprirne una che ce l'ha fa perdere. La prima casella che apri non e mai una mina. Una casella vuota si apre a cascata con le vicine.",
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Un numero dice quante mine toccano la casella, tra le sue 8 vicine. Se il numero e uguale a quello delle caselle nascoste intorno, sono tutte mine: mettici delle bandierine (strumento Bandierina o tasto destro del laser). Quando tutte le bandierine di un numero sono messe, tocca quel numero per aprire in un colpo le altre vicine.",
             "Variante => Variante",
+            "Image du scan gardee : {0} => Immagine della scansione conservata: {0}",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -7610,6 +7614,7 @@ namespace AR6DoF
             "Des mines sont cachees sous les cases. Ouvre toutes les cases qui n'en ont pas pour gagner ; en ouvrir une qui en a une fait perdre. La premiere case que tu ouvres n'est jamais une mine. Une case vide s'ouvre en cascade avec ses voisines. => Ha minas escondidas sob as casas. Abra todas as casas que nao tem mina para ganhar; abrir uma que tem faz perder. A primeira casa que voce abre nunca e uma mina. Uma casa vazia abre em cascata com as vizinhas.",
             "Un chiffre dit combien de mines touchent la case, parmi ses 8 voisines. Si le chiffre est egal au nombre de cases cachees autour, toutes sont des mines : pose-y des drapeaux (outil Drapeau, ou bouton droit du laser). Une fois tous les drapeaux d'un chiffre poses, touche ce chiffre pour ouvrir d'un coup ses autres voisines. => Um numero diz quantas minas tocam a casa, entre suas 8 vizinhas. Se o numero e igual ao de casas ocultas ao redor, todas sao minas: coloque bandeiras (ferramenta Bandeira ou botao direito do laser). Quando todas as bandeiras de um numero estiverem colocadas, toque nesse numero para abrir de uma vez as outras vizinhas.",
             "Variante => Variante",
+            "Image du scan gardee : {0} => Imagem do scan guardada: {0}",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

@@ -101,7 +101,7 @@ namespace AR6DoF
             if (Time.unscaledTime - lastPreview < 1f / 30f) return;                                              // 30 images/s
             lastPreview = Time.unscaledTime;
             EnsurePreview();
-            pt.RenderPreview(preview, ui != 0, PreviewLayer);
+            pt.RenderPreview(preview, mode == 0 && ui != 0, PreviewLayer);   // onglet Scanner : l'apercu est toujours sans interfaces (la photo du scan aussi)
         }
 
         protected override void BuildMain()

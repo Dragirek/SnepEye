@@ -300,7 +300,8 @@ namespace AR6DoF
         readonly string appId, appTitle;
         readonly Action changed, statusChanged;
         int gen, lastCount = -1;
-        string pathA, pathB;
+        string pathA, pathB, pathK;   // pathK : copie gardee jusqu'a la fin de la lecture ; si rien n'est lu elle est rangee dans le dossier Photos pour comprendre pourquoi
+        public string KeptImage = "";
         Task<string> qrTask;
         Ar6dofOcr.Job job;
         bool wantOcr;
@@ -341,7 +342,7 @@ namespace AR6DoF
 
         void Clear()
         {
-            phase = Phase.Idle; status = ""; error = ""; info = ""; qr = null; countSec = 0; lastCount = -1;
+            phase = Phase.Idle; status = ""; error = ""; info = ""; qr = null; countSec = 0; lastCount = -1; KeptImage = "";
             lines.Clear(); evCache = null; kind = Ar6dofScanKind.Text;
             job = null; qrTask = null;
         }
@@ -350,6 +351,32 @@ namespace AR6DoF
         {
             if (pathA != null) { try { File.Delete(pathA); } catch (Exception) { } pathA = null; }
             if (pathB != null) { try { File.Delete(pathB); } catch (Exception) { } pathB = null; }
+        }
+
+        void DropKept()
+        {
+            if (pathK != null) { try { File.Delete(pathK); } catch (Exception) { } pathK = null; }
+        }
+
+        /// <summary>Fin de lecture : si quelque chose a ete lu, la copie est supprimee ; sinon elle est rangee dans Images\AR6DoF\Photos\scan_echec.png (ecrasee a chaque echec).</summary>
+        void KeepOrDrop(bool found)
+        {
+            string k = pathK;
+            pathK = null;
+            if (k == null) return;
+            try
+            {
+                if (!found)
+                {
+                    string dir = Ar6dofPassthrough.PhotosFolder;
+                    Directory.CreateDirectory(dir);
+                    string dest = Path.Combine(dir, "scan_echec.png");
+                    File.Copy(k, dest, true);
+                    KeptImage = dest;
+                }
+            }
+            catch (Exception) { KeptImage = ""; }
+            try { File.Delete(k); } catch (Exception) { }
         }
 
         static void DeleteAll(List<string> files)
@@ -365,6 +392,7 @@ namespace AR6DoF
             if (pt != null && pt.PhotoBusy) pt.CancelPhoto();
             gen++;
             DeleteTemp();
+            DropKept();
             Clear();
         }
 
@@ -375,6 +403,7 @@ namespace AR6DoF
             if (phase == Phase.Countdown && pt != null && pt.PhotoBusy) { pt.CancelPhoto(); return; }   // la photo repond « Annule » et remet tout a zero
             gen++;
             DeleteTemp();
+            DropKept();
             Clear();
             if (changed != null) changed();
         }
@@ -384,6 +413,7 @@ namespace AR6DoF
             var pt = dock != null ? dock.passthrough : null;
             gen++;
             DeleteTemp();
+            DropKept();
             Clear();
             Ar6dofNotifyService.Resolve("scan");
             if (pt == null || pt.PhotoBusy) { Fail("Camera indisponible : le passthrough n'est pas pret"); return; }
@@ -421,6 +451,8 @@ namespace AR6DoF
             if (files == null || files.Count == 0) { Fail("Photo impossible : rien n'a ete enregistre"); return; }
             for (int i = 1; i < files.Count; i++) { try { File.Delete(files[i]); } catch (Exception) { } }
             pathA = files[0];
+            try { pathK = Path.Combine(Path.GetDirectoryName(pathA), "keep_" + Path.GetFileName(pathA)); File.Copy(pathA, pathK, true); }
+            catch (Exception) { pathK = null; }
             var pt = dock != null ? dock.passthrough : null;
             info = pt != null ? pt.LastStackInfo : "";
             phase = Phase.Reading;
@@ -466,6 +498,7 @@ namespace AR6DoF
         void Fail(string msg)
         {
             DeleteTemp();
+            DropKept();
             error = msg;
             phase = Phase.Done;
             Ar6dofNotifyService.Post(Ar6dofNoteKind.Error, Ar6dofLoc.T(appTitle), Ar6dofLoc.T(msg), appId, "scan");
@@ -475,6 +508,7 @@ namespace AR6DoF
         void Finish()
         {
             phase = Phase.Done;
+            KeepOrDrop(qr != null || lines.Count > 0);
             if (changed != null) changed();
         }
 
@@ -616,7 +650,11 @@ namespace AR6DoF
             if (scanNote.Length > 0) Lbl(scanNote, 30, 19).MakeAccent();
             string body = s.BodyText();
             if (s.error.Length > 0) Para(s.error, 80, 19);
-            else if (body.Length == 0) Para("Rien de lisible. Rapproche-toi, ameliore la lumiere et ne bouge pas pendant la photo.", 56, 18);
+            else if (body.Length == 0)
+            {
+                Para("Rien de lisible. Rapproche-toi, ameliore la lumiere et ne bouge pas pendant la photo.", 76, 18);
+                if (s.KeptImage.Length > 0) Para(Ar6dofLoc.F("Image du scan gardee : {0}", s.KeptImage), 60, 15);
+            }
             else
             {
                 string head = s.qr != null ? Ar6dofLoc.F("Code QR : {0}", Ar6dofLoc.T(Ar6dofScanText.KindName(s.Kind))) : Ar6dofLoc.T("Texte lu");
