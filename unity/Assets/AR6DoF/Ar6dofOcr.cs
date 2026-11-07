@@ -40,9 +40,9 @@ namespace AR6DoF
             return job;
         }
 
-        static string Script(string path)
+        // entete commun : environnement, moteur de reconnaissance, fonctions Await et Prep (image agrandie ou reduite pour rester sous la taille maximale du moteur)
+        static string Head()
         {
-            string p = path.Replace("'", "''");
             return
                 "$ProgressPreference = 'SilentlyContinue'\n" +
                 "$ErrorActionPreference = 'Stop'\n" +
@@ -68,23 +68,166 @@ namespace AR6DoF
                 "if ($eng -eq $null) { try { $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language('fr-FR'))) } catch { } }\n" +
                 "if ($eng -eq $null) { try { $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language('en-US'))) } catch { } }\n" +
                 "if ($eng -eq $null) { throw 'NOLANG' }\n" +
-                "$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync('" + p + "')) ([Windows.Storage.StorageFile])\n" +
-                "$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])\n" +
-                "$dec = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])\n" +
-                "$bmp = $null\n" +
-                "if ($dec.PixelWidth -lt 2400) {\n" +
-                "  try {\n" +
-                "    $tr = New-Object Windows.Graphics.Imaging.BitmapTransform\n" +
-                "    $tr.ScaledWidth = [uint32]($dec.PixelWidth * 2)\n" +
-                "    $tr.ScaledHeight = [uint32]($dec.PixelHeight * 2)\n" +
-                "    $bmp = Await ($dec.GetSoftwareBitmapAsync([Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied, $tr, [Windows.Graphics.Imaging.ExifOrientationMode]::IgnoreExifOrientation, [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) ([Windows.Graphics.Imaging.SoftwareBitmap])\n" +
-                "  } catch { $bmp = $null }\n" +
-                "}\n" +
-                "if ($bmp -eq $null) { $bmp = Await ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap]) }\n" +
+                "$mx = [double][Windows.Media.Ocr.OcrEngine]::MaxImageDimension\n" +
+                "$global:cf = 1.0\n" +
+                "$global:ow = 0\n" +
+                "$global:oh = 0\n" +
+                "function Prep($path) {\n" +
+                "  $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])\n" +
+                "  $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])\n" +
+                "  $dec = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])\n" +
+                "  $global:ow = $dec.PixelWidth\n" +
+                "  $global:oh = $dec.PixelHeight\n" +
+                "  $big = [double][Math]::Max($dec.PixelWidth, $dec.PixelHeight)\n" +
+                "  $want = 1.0\n" +
+                "  if ($big -lt 1800) { $want = 2.0 }\n" +
+                "  $f = [Math]::Min($want, ($mx - 8) / $big)\n" +
+                "  $bmp = $null\n" +
+                "  if ([Math]::Abs($f - 1.0) -gt 0.02) {\n" +
+                "    try {\n" +
+                "      $tr = New-Object Windows.Graphics.Imaging.BitmapTransform\n" +
+                "      $tr.ScaledWidth = [uint32]([Math]::Floor($dec.PixelWidth * $f))\n" +
+                "      $tr.ScaledHeight = [uint32]([Math]::Floor($dec.PixelHeight * $f))\n" +
+                "      $bmp = Await ($dec.GetSoftwareBitmapAsync([Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied, $tr, [Windows.Graphics.Imaging.ExifOrientationMode]::IgnoreExifOrientation, [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) ([Windows.Graphics.Imaging.SoftwareBitmap])\n" +
+                "    } catch { $bmp = $null }\n" +
+                "  }\n" +
+                "  if ($bmp -eq $null) { $f = 1.0; $bmp = Await ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap]) }\n" +
+                "  $global:cf = $f\n" +
+                "  return $bmp\n" +
+                "}\n";
+        }
+
+        // ------------------------------------------------------------------ lecture avec la position des mots (planning, plusieurs images)
+        public class Word { public string text = ""; public float x, y, w, h; }
+        public class Line { public List<Word> words = new List<Word>(); }
+        /// <summary>Une image lue : sa taille d'origine et ses lignes de mots (positions en pixels de l'image d'origine).</summary>
+        public class Page { public int w, h; public string error = ""; public List<Line> lines = new List<Line>(); }
+        public class BoxJob
+        {
+            public volatile bool done;
+            public string error = "";
+            public string info = "";
+            public List<Page> pages = new List<Page>();
+        }
+
+        /// <summary>Lit plusieurs images d'un coup (un seul lancement de PowerShell) et rend, pour chacune, ses mots et leur position. Les fichiers sont supprimes ensuite.</summary>
+        public static BoxJob StartBoxes(List<string> paths)
+        {
+            var job = new BoxJob();
+            var copy = new List<string>(paths);
+            Task.Run(() =>
+            {
+                try { RunBoxes(copy, job); }
+                catch (Exception e) { job.error = e.Message; }
+                finally
+                {
+                    foreach (string f in copy) { try { File.Delete(f); } catch (Exception) { } }
+                    job.done = true;
+                }
+            });
+            return job;
+        }
+
+        static void RunBoxes(List<string> paths, BoxJob job)
+        {
+            string enc = Convert.ToBase64String(Encoding.Unicode.GetBytes(BoxScript(paths)));
+            var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand " + enc)
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            string output, err;
+            int exit;
+            using (var p = Process.Start(psi))
+            {
+                var errTask = p.StandardError.ReadToEndAsync();
+                var outTask = p.StandardOutput.ReadToEndAsync();
+                if (!p.WaitForExit(30000 + 12000 * paths.Count))
+                {
+                    try { p.Kill(); } catch (Exception) { }
+                    job.error = "Delai depasse (la lecture du texte a pris trop de temps)";
+                    return;
+                }
+                output = outTask.Result;
+                err = errTask.Result;
+                exit = p.ExitCode;
+            }
+            Page page = null;
+            Line line = null;
+            string msg = "";
+            foreach (string raw in output.Split('\n'))
+            {
+                string l = raw.TrimEnd('\r');
+                if (l.StartsWith("N:")) { page = new Page(); job.pages.Add(page); line = null; }   // une entree par image, meme si sa lecture echoue
+                else if (l.StartsWith("P:") && page != null)
+                {
+                    string[] wh = l.Substring(2).Trim().Split('x');
+                    int pw, ph;
+                    if (wh.Length == 2 && int.TryParse(wh[0], out pw) && int.TryParse(wh[1], out ph)) { page.w = pw; page.h = ph; }
+                }
+                else if (l.StartsWith("L:") && page != null) { line = new Line(); page.lines.Add(line); }
+                else if (l.StartsWith("W:") && page != null && line != null)
+                {
+                    string[] f = l.Substring(2).Split(new[] { ' ' }, 5);
+                    int x, y, w, h;
+                    if (f.Length == 5 && int.TryParse(f[0], out x) && int.TryParse(f[1], out y) && int.TryParse(f[2], out w) && int.TryParse(f[3], out h))
+                    {
+                        string t = f[4].Trim();
+                        if (t.Length > 0) line.words.Add(new Word { text = t, x = x, y = y, w = w, h = h });
+                    }
+                }
+                else if (l.StartsWith("X:") && page != null) page.error = l.Substring(2).Trim();
+                else if (l.StartsWith("I:")) job.info = l.Substring(2).Trim();
+                else if (l.StartsWith("E:")) msg = l.Substring(2).Trim();
+            }
+            if (msg.Length > 0)
+            {
+                job.error = msg == "NOLANG"
+                    ? "Aucune langue avec reconnaissance de texte dans Windows (Parametres > Heure et langue > Langue : ajoute le francais)"
+                    : "Lecture impossible : " + (msg.Length > 160 ? msg.Substring(0, 160) : msg);
+                return;
+            }
+            err = err.Trim();
+            if (job.pages.Count == 0 && err.Length > 0 && !err.StartsWith("#< CLIXML") && exit != 0)
+                job.error = "Lecture impossible : " + (err.Length > 160 ? err.Substring(0, 160) : err);
+        }
+
+        static string Script(string path)
+        {
+            string p = path.Replace("'", "''");
+            return Head() +
+                "$bmp = Prep '" + p + "'\n" +
                 "try { Write-Output ('I:' + $bmp.PixelWidth + 'x' + $bmp.PixelHeight + ' ' + $eng.RecognizerLanguage.DisplayName) } catch { }\n" +
                 "$res = Await ($eng.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])\n" +
                 "foreach ($l in $res.Lines) { Write-Output ('L:' + $l.Text) }\n" +
                 "} catch { Write-Output ('E:' + $_.Exception.Message) }\n";
+        }
+
+        // plusieurs images, avec la position de chaque mot (en pixels de l'image d'origine)
+        static string BoxScript(List<string> paths)
+        {
+            var sb = new StringBuilder();
+            sb.Append(Head());
+            sb.Append("try { Write-Output ('I:' + $eng.RecognizerLanguage.DisplayName) } catch { }\n");
+            foreach (string path in paths)
+            {
+                string p = path.Replace("'", "''");
+                sb.Append("Write-Output 'N:'\n");
+                sb.Append("try {\n");
+                sb.Append("  $bmp = Prep '" + p + "'\n");
+                sb.Append("  Write-Output ('P:' + $global:ow + 'x' + $global:oh)\n");
+                sb.Append("  $res = Await ($eng.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])\n");
+                sb.Append("  foreach ($l in $res.Lines) {\n");
+                sb.Append("    Write-Output 'L:'\n");
+                sb.Append("    foreach ($wd in $l.Words) {\n");
+                sb.Append("      $r = $wd.BoundingRect\n");
+                sb.Append("      Write-Output ('W:' + [int]($r.X / $global:cf) + ' ' + [int]($r.Y / $global:cf) + ' ' + [int]($r.Width / $global:cf) + ' ' + [int]($r.Height / $global:cf) + ' ' + $wd.Text)\n");
+                sb.Append("    }\n");
+                sb.Append("  }\n");
+                sb.Append("} catch { Write-Output ('X:' + $_.Exception.Message) }\n");
+            }
+            sb.Append("} catch { Write-Output ('E:' + $_.Exception.Message) }\n");
+            return sb.ToString();
         }
 
         static void Run(string path, Job job)

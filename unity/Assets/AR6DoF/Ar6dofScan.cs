@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -11,22 +12,44 @@ using UnityEngine.UI;
 
 namespace AR6DoF
 {
-    public enum Ar6dofScanKind { Text, Url, Wifi, Contact, Event, Mail, Phone }
+    public enum Ar6dofScanKind { Text, Url, Wifi, Contact, Event, Mail, Phone, Geo, Sms, Otp, Scheme }
 
-    /// <summary>Ce que contient un QR code : classement (lien, Wi-Fi, contact, evenement...) et lecture des formats courants. Pur texte, aucun cout.</summary>
+    /// <summary>
+    /// Ce que contient un QR code : classement (lien, Wi-Fi, contact vCard ou MECARD, evenement, e-mail, telephone, SMS, position GPS, code d'authentification...) et lecture
+    /// des formats courants en clair. Pur texte, aucun cout. Seuls les liens http et https peuvent etre ouverts (et seulement au clic) : les autres adresses sont montrees, jamais lancees.
+    /// </summary>
     public static class Ar6dofScanText
     {
+        static readonly string[] SchemeNames = { "bitcoin:", "litecoin:", "ethereum:", "monero:", "upi:", "paypal:", "market:", "intent:", "whatsapp:", "tg:", "spotify:", "zoommtg:", "skype:", "facetime:" };
+
         public static Ar6dofScanKind Classify(string s)
         {
             if (string.IsNullOrEmpty(s)) return Ar6dofScanKind.Text;
             string t = s.TrimStart();
-            if (StartsWith(t, "http://") || StartsWith(t, "https://")) return Ar6dofScanKind.Url;
+            if (StartsWith(t, "http://") || StartsWith(t, "https://") || (StartsWith(t, "www.") && t.IndexOf(' ') < 0 && t.IndexOf('.', 4) > 4)) return Ar6dofScanKind.Url;
             if (StartsWith(t, "WIFI:")) return Ar6dofScanKind.Wifi;
             if (StartsWith(t, "BEGIN:VEVENT") || (StartsWith(t, "BEGIN:VCALENDAR") && t.IndexOf("BEGIN:VEVENT", StringComparison.OrdinalIgnoreCase) >= 0)) return Ar6dofScanKind.Event;
-            if (StartsWith(t, "BEGIN:VCARD") || StartsWith(t, "MECARD:")) return Ar6dofScanKind.Contact;
+            if (StartsWith(t, "BEGIN:VCARD") || StartsWith(t, "MECARD:") || StartsWith(t, "BIZCARD:")) return Ar6dofScanKind.Contact;
             if (StartsWith(t, "mailto:") || StartsWith(t, "MATMSG:")) return Ar6dofScanKind.Mail;
-            if (StartsWith(t, "tel:") || StartsWith(t, "SMSTO:") || StartsWith(t, "sms:")) return Ar6dofScanKind.Phone;
+            if (StartsWith(t, "tel:")) return Ar6dofScanKind.Phone;
+            if (StartsWith(t, "SMSTO:") || StartsWith(t, "sms:") || StartsWith(t, "MMSTO:") || StartsWith(t, "mms:")) return Ar6dofScanKind.Sms;
+            if (StartsWith(t, "geo:")) return Ar6dofScanKind.Geo;
+            if (StartsWith(t, "otpauth:") || StartsWith(t, "otpauth-migration:")) return Ar6dofScanKind.Otp;
+            int sch = t.IndexOf("://", StringComparison.Ordinal);
+            if (sch > 1 && sch <= 21 && IsSchemeName(t, sch)) return Ar6dofScanKind.Scheme;
+            for (int i = 0; i < SchemeNames.Length; i++) if (StartsWith(t, SchemeNames[i])) return Ar6dofScanKind.Scheme;
             return Ar6dofScanKind.Text;
+        }
+
+        static bool IsSchemeName(string t, int len)
+        {
+            if (!char.IsLetter(t[0])) return false;
+            for (int i = 0; i < len; i++)
+            {
+                char c = t[i];
+                if (!(char.IsLetterOrDigit(c) || c == '+' || c == '.' || c == '-')) return false;
+            }
+            return true;
         }
 
         public static string KindName(Ar6dofScanKind k)
@@ -39,31 +62,286 @@ namespace AR6DoF
                 case Ar6dofScanKind.Event: return "Evenement";
                 case Ar6dofScanKind.Mail: return "E-mail";
                 case Ar6dofScanKind.Phone: return "Telephone";
+                case Ar6dofScanKind.Sms: return "SMS";
+                case Ar6dofScanKind.Geo: return "Position GPS";
+                case Ar6dofScanKind.Otp: return "Code d'authentification";
+                case Ar6dofScanKind.Scheme: return "Adresse speciale (non ouverte)";
                 default: return "Texte";
             }
         }
 
         static bool StartsWith(string s, string p) { return s.StartsWith(p, StringComparison.OrdinalIgnoreCase); }
 
-        /// <summary>Texte a afficher : le Wi-Fi est decrit en clair, le reste est montre tel quel.</summary>
+        /// <summary>Adresse a ouvrir pour un lien (http ou https seulement ; « www.x.y » devient https://www.x.y), sinon une chaine vide.</summary>
+        public static string OpenTarget(string raw, Ar6dofScanKind k)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            string t = raw.Trim();
+            if (k == Ar6dofScanKind.Url)
+            {
+                if (StartsWith(t, "www.")) return "https://" + t;
+                return t;
+            }
+            if (k == Ar6dofScanKind.Geo)
+            {
+                double lat, lon;
+                if (GeoPoint(t, out lat, out lon))
+                    return "https://www.openstreetmap.org/?mlat=" + lat.ToString("0.#####", CultureInfo.InvariantCulture) + "&mlon=" + lon.ToString("0.#####", CultureInfo.InvariantCulture)
+                         + "#map=17/" + lat.ToString("0.#####", CultureInfo.InvariantCulture) + "/" + lon.ToString("0.#####", CultureInfo.InvariantCulture);
+            }
+            return "";
+        }
+
+        static bool GeoPoint(string t, out double lat, out double lon)
+        {
+            lat = 0; lon = 0;
+            string body = t.Length > 4 ? t.Substring(4) : "";
+            int cut = body.IndexOfAny(new[] { ';', '?' });
+            if (cut >= 0) body = body.Substring(0, cut);
+            string[] p = body.Split(',');
+            if (p.Length < 2) return false;
+            if (!double.TryParse(p[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lat)) return false;
+            if (!double.TryParse(p[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lon)) return false;
+            return Math.Abs(lat) <= 90 && Math.Abs(lon) <= 180;
+        }
+
+        /// <summary>Texte a afficher : les formats courants sont decrits en clair, le reste est montre tel quel.</summary>
         public static string Display(string s, Ar6dofScanKind k)
         {
-            if (k == Ar6dofScanKind.Wifi)
+            switch (k)
             {
-                string ssid = "", pass = "", type = "";
-                foreach (string f in SplitFields(s.Trim().Substring(5)))
-                {
-                    if (f.StartsWith("S:")) ssid = f.Substring(2);
-                    else if (f.StartsWith("P:")) pass = f.Substring(2);
-                    else if (f.StartsWith("T:")) type = f.Substring(2);
-                }
-                var sb = new StringBuilder();
-                sb.Append(Ar6dofLoc.T("Reseau")).Append(" : ").Append(ssid);
-                if (type.Length > 0) sb.Append('\n').Append(Ar6dofLoc.T("Securite")).Append(" : ").Append(type);
-                if (pass.Length > 0) sb.Append('\n').Append(Ar6dofLoc.T("Mot de passe")).Append(" : ").Append(pass);
-                return sb.ToString();
+                case Ar6dofScanKind.Wifi: return DisplayWifi(s);
+                case Ar6dofScanKind.Contact: return DisplayContact(s);
+                case Ar6dofScanKind.Mail: return DisplayMail(s);
+                case Ar6dofScanKind.Phone: return DisplayPhone(s);
+                case Ar6dofScanKind.Sms: return DisplaySms(s);
+                case Ar6dofScanKind.Geo: return DisplayGeo(s);
+                case Ar6dofScanKind.Otp: return DisplayOtp(s);
             }
             return s.Trim();
+        }
+
+        static void Add(StringBuilder sb, string label, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            if (sb.Length > 0) sb.Append('\n');
+            sb.Append(Ar6dofLoc.T(label)).Append(" : ").Append(value.Trim());
+        }
+
+        static string DisplayWifi(string s)
+        {
+            string ssid = "", pass = "", type = "";
+            foreach (string f in SplitFields(s.Trim().Substring(5)))
+            {
+                if (f.StartsWith("S:")) ssid = f.Substring(2);
+                else if (f.StartsWith("P:")) pass = f.Substring(2);
+                else if (f.StartsWith("T:")) type = f.Substring(2);
+            }
+            var sb = new StringBuilder();
+            Add(sb, "Reseau", ssid);
+            Add(sb, "Securite", type);
+            Add(sb, "Mot de passe", pass);
+            return sb.ToString();
+        }
+
+        // « %20 », « + » : texte d'un parametre d'adresse
+        static string Decode(string v)
+        {
+            if (string.IsNullOrEmpty(v)) return "";
+            try { return Uri.UnescapeDataString(v.Replace('+', ' ')); } catch (Exception) { return v; }
+        }
+
+        static string Query(string q, string key)
+        {
+            foreach (string part in q.Split('&'))
+            {
+                int eq = part.IndexOf('=');
+                if (eq <= 0) continue;
+                if (part.Substring(0, eq).Equals(key, StringComparison.OrdinalIgnoreCase)) return Decode(part.Substring(eq + 1));
+            }
+            return "";
+        }
+
+        static string DisplayMail(string s)
+        {
+            string t = s.Trim();
+            var sb = new StringBuilder();
+            if (StartsWith(t, "MATMSG:"))
+            {
+                foreach (string f in SplitFields(t.Substring(7)))
+                {
+                    if (StartsWith(f, "TO:")) Add(sb, "Destinataire", f.Substring(3));
+                    else if (StartsWith(f, "SUB:")) Add(sb, "Objet", f.Substring(4));
+                    else if (StartsWith(f, "BODY:")) Add(sb, "Message", f.Substring(5));
+                }
+                return sb.Length > 0 ? sb.ToString() : t;
+            }
+            string rest = t.Substring(7);
+            int qm = rest.IndexOf('?');
+            string to = Decode(qm >= 0 ? rest.Substring(0, qm) : rest);
+            string q = qm >= 0 ? rest.Substring(qm + 1) : "";
+            Add(sb, "Destinataire", to);
+            Add(sb, "Objet", Query(q, "subject"));
+            Add(sb, "Message", Query(q, "body"));
+            return sb.Length > 0 ? sb.ToString() : t;
+        }
+
+        static string DisplayPhone(string s)
+        {
+            string t = s.Trim();
+            var sb = new StringBuilder();
+            Add(sb, "Numero", Decode(t.Length > 4 ? t.Substring(4) : ""));
+            return sb.Length > 0 ? sb.ToString() : t;
+        }
+
+        static string DisplaySms(string s)
+        {
+            string t = s.Trim();
+            int colon = t.IndexOf(':');
+            string rest = colon >= 0 ? t.Substring(colon + 1) : t;
+            string num, msg = "";
+            if (StartsWith(t, "SMSTO:") || StartsWith(t, "MMSTO:"))
+            {
+                int c2 = rest.IndexOf(':');
+                num = c2 >= 0 ? rest.Substring(0, c2) : rest;
+                msg = c2 >= 0 ? rest.Substring(c2 + 1) : "";
+            }
+            else
+            {
+                int qm = rest.IndexOf('?');
+                num = qm >= 0 ? rest.Substring(0, qm) : rest;
+                if (qm >= 0) msg = Query(rest.Substring(qm + 1), "body");
+            }
+            var sb = new StringBuilder();
+            Add(sb, "Numero", Decode(num));
+            Add(sb, "Message", msg);
+            return sb.Length > 0 ? sb.ToString() : t;
+        }
+
+        static string DisplayGeo(string s)
+        {
+            double lat, lon;
+            var sb = new StringBuilder();
+            if (GeoPoint(s.Trim(), out lat, out lon)) Add(sb, "Position", lat.ToString("0.#####", CultureInfo.InvariantCulture) + ", " + lon.ToString("0.#####", CultureInfo.InvariantCulture));
+            return sb.Length > 0 ? sb.ToString() : s.Trim();
+        }
+
+        static string DisplayOtp(string s)
+        {
+            string t = s.Trim();
+            var sb = new StringBuilder();
+            if (!StartsWith(t, "otpauth://")) return t;   // lot de comptes exporte (otpauth-migration) : illisible, montre tel quel
+            string rest = t.Substring(10);
+            int qm = rest.IndexOf('?');
+            string path = Decode(qm >= 0 ? rest.Substring(0, qm) : rest);
+            string q = qm >= 0 ? rest.Substring(qm + 1) : "";
+            int sl = path.IndexOf('/');
+            Add(sb, "Compte", sl >= 0 ? path.Substring(sl + 1) : path);
+            Add(sb, "Emetteur", Query(q, "issuer"));
+            Add(sb, "Cle secrete", Query(q, "secret"));
+            return sb.Length > 0 ? sb.ToString() : t;
+        }
+
+        // ------------------------------------------------------------------ carte de visite (texte lu par l'OCR)
+        static readonly Regex MailRx = new Regex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.CultureInvariant);
+        static readonly Regex UrlRx = new Regex(@"(https?://\S+|www\.[A-Za-z0-9\-]+\.[A-Za-z.]+\S*)", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        static readonly Regex PhoneRx = new Regex(@"\+?\d[\d .\-/()]{6,}\d", RegexOptions.CultureInvariant);
+
+        /// <summary>Classe les lignes lues sur une carte de visite : e-mails, telephones, sites, puis le reste (nom, societe, adresse...) tel quel.</summary>
+        public static string CardText(List<string> lines)
+        {
+            var mails = new List<string>(); var phones = new List<string>(); var urls = new List<string>(); var rest = new List<string>();
+            foreach (string raw in lines)
+            {
+                string l = raw;
+                foreach (Match m in MailRx.Matches(l)) mails.Add(m.Value);
+                l = MailRx.Replace(l, " ");
+                foreach (Match m in UrlRx.Matches(l)) urls.Add(m.Value.TrimEnd('.', ',', ';'));
+                l = UrlRx.Replace(l, " ");
+                foreach (Match m in PhoneRx.Matches(l))
+                {
+                    int digits = 0;
+                    foreach (char c in m.Value) if (char.IsDigit(c)) digits++;
+                    if (digits >= 8) phones.Add(m.Value.Trim());
+                }
+                l = PhoneRx.Replace(l, " ");
+                l = Regex.Replace(l, @"\s+", " ").Trim(' ', '-', ':', ';', ',', '|');
+                if (l.Length >= 2) rest.Add(l);
+            }
+            var sb = new StringBuilder();
+            foreach (string v in rest) { if (sb.Length > 0) sb.Append('\n'); sb.Append(v); }
+            foreach (string v in phones) Add(sb, "Telephone", v);
+            foreach (string v in mails) Add(sb, "E-mail", v);
+            foreach (string v in urls) Add(sb, "Site", v);
+            return sb.ToString();
+        }
+
+        // ------------------------------------------------------------------ contacts vCard et MECARD
+        static string DisplayContact(string s)
+        {
+            string t = s.Trim();
+            var sb = new StringBuilder();
+            if (StartsWith(t, "MECARD:") || StartsWith(t, "BIZCARD:"))
+            {
+                string name = "", org = "", job = "", adr = "", note = "";
+                var tels = new List<string>(); var mails = new List<string>(); var urls = new List<string>();
+                foreach (string f in SplitFields(t.Substring(t.IndexOf(':') + 1)))
+                {
+                    int c = f.IndexOf(':');
+                    if (c <= 0) continue;
+                    string key = f.Substring(0, c).ToUpperInvariant(), val = f.Substring(c + 1);
+                    if (key == "N") { string[] nm = val.Split(','); name = nm.Length >= 2 ? (nm[1].Trim() + " " + nm[0].Trim()).Trim() : val; }
+                    else if (key == "ORG" || key == "C") org = val;
+                    else if (key == "TITLE" || key == "T") job = val;
+                    else if (key == "TEL") tels.Add(val);
+                    else if (key == "EMAIL") mails.Add(val);
+                    else if (key == "URL") urls.Add(val);
+                    else if (key == "ADR") adr = val.Replace(",", ", ").Trim().Trim(',').Trim();
+                    else if (key == "NOTE") note = val;
+                }
+                Add(sb, "Nom", name); Add(sb, "Societe", org); Add(sb, "Fonction", job);
+                foreach (string v in tels) Add(sb, "Telephone", v);
+                foreach (string v in mails) Add(sb, "E-mail", v);
+                foreach (string v in urls) Add(sb, "Site", v);
+                Add(sb, "Adresse", adr); Add(sb, "Note", note);
+                return sb.Length > 0 ? sb.ToString() : t;
+            }
+            // vCard : lignes « pliees » recollees, parametres (TYPE=...) ignores
+            var lines = new List<string>();
+            foreach (string raw in t.Replace("\r", "").Split('\n'))
+            {
+                if (raw.Length > 0 && (raw[0] == ' ' || raw[0] == '\t') && lines.Count > 0) lines[lines.Count - 1] += raw.Substring(1);
+                else lines.Add(raw);
+            }
+            string fn = "", n = "", org2 = "", title = "", adr2 = "", note2 = "";
+            var tel2 = new List<string>(); var mail2 = new List<string>(); var url2 = new List<string>();
+            foreach (string l in lines)
+            {
+                int colon = l.IndexOf(':');
+                if (colon <= 0) continue;
+                string key = l.Substring(0, colon);
+                int semi = key.IndexOf(';');
+                if (semi >= 0) key = key.Substring(0, semi);
+                key = key.ToUpperInvariant();
+                int dot = key.IndexOf('.');
+                if (dot >= 0) key = key.Substring(dot + 1);   // « item1.TEL »
+                string val = l.Substring(colon + 1).Trim();
+                if (key == "FN") fn = val;
+                else if (key == "N") { string[] nm = val.Split(';'); n = nm.Length >= 2 ? (nm[1].Trim() + " " + nm[0].Trim()).Trim() : val.Replace(";", " ").Trim(); }
+                else if (key == "ORG") org2 = val.Replace(";", ", ").Trim().Trim(',').Trim();
+                else if (key == "TITLE") title = val;
+                else if (key == "TEL") tel2.Add(val);
+                else if (key == "EMAIL") mail2.Add(val);
+                else if (key == "URL") url2.Add(val);
+                else if (key == "ADR") adr2 = val.Replace(";", " ").Replace("  ", " ").Trim();
+                else if (key == "NOTE") note2 = val.Replace("\\n", " ").Replace("\\N", " ");
+            }
+            Add(sb, "Nom", fn.Length > 0 ? fn : n); Add(sb, "Societe", org2); Add(sb, "Fonction", title);
+            foreach (string v in tel2) Add(sb, "Telephone", v);
+            foreach (string v in mail2) Add(sb, "E-mail", v);
+            foreach (string v in url2) Add(sb, "Site", v);
+            Add(sb, "Adresse", adr2); Add(sb, "Note", note2);
+            return sb.Length > 0 ? sb.ToString() : t;
         }
 
         // champs separes par ';' (l'antislash protege ; , : \)
@@ -304,8 +582,12 @@ namespace AR6DoF
         public string KeptImage = "";
         Task<string> qrTask;
         Ar6dofOcr.Job job;
-        bool wantOcr;
+        bool wantOcr, wantQr = true;
         List<Ar6dofParsedEvent> evCache;
+        /// <summary>Recoit la photo du scan (l'appelant la garde quelques secondes puis la detruit) ; sans cela elle est detruite tout de suite.</summary>
+        public Action<Texture2D> shotCb;
+        /// <summary>Carte de visite : le texte lu est classe en e-mail, telephone, site, reste.</summary>
+        public bool card;
         Ar6dofScanKind kind;
 
         public static string TempFolder { get { return Path.Combine(Path.GetTempPath(), "AR6DoF_scan"); } }
@@ -325,6 +607,7 @@ namespace AR6DoF
         {
             if (qr != null) return Ar6dofScanText.Display(qr, kind);
             if (lines.Count == 0) return "";
+            if (card) return Ar6dofScanText.CardText(lines);
             return string.Join("\n", lines.ToArray());
         }
 
@@ -424,7 +707,10 @@ namespace AR6DoF
             if (changed != null) changed();
         }
 
-        public void Start(bool ocr)
+        public void Start(bool ocr) { Start(true, ocr); }
+
+        /// <summary>'qr' : chercher un code QR ; 'ocr' : lire le texte (apres le QR s'il est cherche, sinon seul).</summary>
+        public void Start(bool qr, bool ocr)
         {
             var pt = dock != null ? dock.passthrough : null;
             gen++;
@@ -434,6 +720,7 @@ namespace AR6DoF
             Ar6dofNotifyService.Resolve("scan");
             if (pt == null || pt.PhotoBusy) { Fail("Camera indisponible : le passthrough n'est pas pret"); return; }
             wantOcr = ocr;
+            wantQr = qr || !ocr;
             int my = gen;
             phase = Phase.Countdown;
             status = Ar6dofLoc.F("Scan dans {0} s...", Mathf.CeilToInt(Delay));
@@ -455,7 +742,11 @@ namespace AR6DoF
 
         void OnPhoto(int my, List<string> files, Texture2D tex, string err)
         {
-            if (tex != null) UnityEngine.Object.Destroy(tex);
+            if (tex != null)
+            {
+                if (my == gen && shotCb != null && string.IsNullOrEmpty(err)) shotCb(tex);   // la fenetre montre la photo quelques secondes
+                else UnityEngine.Object.Destroy(tex);
+            }
             if (my != gen) { DeleteAll(files); return; }
             countSec = 0;
             if (!string.IsNullOrEmpty(err))
@@ -472,12 +763,18 @@ namespace AR6DoF
             var pt = dock != null ? dock.passthrough : null;
             info = pt != null ? pt.LastStackInfo : "";
             phase = Phase.Reading;
-            status = Ar6dofLoc.T("Lecture du code QR...");
+            status = Ar6dofLoc.T(wantQr ? "Lecture du code QR..." : "Lecture du texte...");
             // l'OCR supprime l'image qu'on lui donne : on lui prepare une copie avant tout
             if (wantOcr)
             {
                 try { pathB = Path.Combine(Path.GetDirectoryName(pathA), Path.GetFileNameWithoutExtension(pathA) + "_ocr.png"); File.Copy(pathA, pathB, true); }
                 catch (Exception) { pathB = null; }
+            }
+            if (!wantQr)   // texte seul : pas de recherche de QR
+            {
+                StartOcr();
+                if (changed != null) changed();
+                return;
             }
             // decodage de l'image sur le fil principal (une fois), calcul du QR dans un autre fil
             try
@@ -572,6 +869,9 @@ namespace AR6DoF
         protected readonly Ar6dofTranslator tr;
         protected string scanNote = "";
         int tlang = -1;
+        /// <summary>Mode Traduction : le texte lu est envoye tout seul au service de traduction (et seulement dans ce mode).</summary>
+        protected bool autoTranslate;
+        bool autoTried;
 
         protected Ar6dofScanWindow(Ar6dofDock d, string id, string name, string glyph, string desc, float width) : base(d, id, name, glyph, desc, width)
         {
@@ -581,7 +881,15 @@ namespace AR6DoF
 
         protected bool IsOpen { get { return canvas != null && canvas.gameObject.activeSelf; } }
 
-        protected virtual void OnScanChanged() { if (IsOpen) Rebuild(); }
+        protected virtual void OnScanChanged()
+        {
+            if (autoTranslate && !autoTried && scan.phase == Ar6dofScanSession.Phase.Done && scan.error.Length == 0)
+            {
+                string raw = scan.RawText();
+                if (raw.Length > 0) { autoTried = true; tr.Start(raw, TargetLang); }
+            }
+            if (IsOpen) Rebuild();
+        }
         void OnScanStatus() { if (IsOpen) Refresh(); }
 
         protected void TickScan() { scan.Tick(); tr.Tick(); }
@@ -591,14 +899,22 @@ namespace AR6DoF
             scan.Abort();
             tr.Clear();
             scanNote = "";
+            autoTried = false;
         }
 
-        protected void StartScan(bool ocr)
+        protected void StartScan(bool ocr) { StartScan(true, ocr, false); }
+
+        protected void StartScan(bool qr, bool ocr, bool card)
         {
             tr.Clear();
             scanNote = "";
-            scan.Start(ocr);
+            autoTried = false;
+            scan.card = card;
+            scan.Start(qr, ocr);
         }
+
+        /// <summary>Bouton « Nouveau scan » du resultat : par defaut le scan complet (QR puis texte) ; l'appareil photo relance le mode choisi.</summary>
+        protected virtual void Rescan() { StartScan(true); }
 
         public override void OnClosed()
         {
@@ -606,7 +922,7 @@ namespace AR6DoF
             base.OnClosed();
         }
 
-        int TargetLang
+        protected int TargetLang
         {
             get
             {
@@ -659,8 +975,39 @@ namespace AR6DoF
             Btn("Annuler", scan.Cancel, 52f, 22);
         }
 
-        /// <summary>Resultat d'un scan : QR decrit ou texte lu, Copier, Ouvrir le lien (QR http/https, seulement au clic), Traduire (en ligne, seulement au clic), calendrier.</summary>
-        protected void BuildScanResult(bool allowTranslate, bool allowCalendar)
+        /// <summary>Choix de la langue + traduction (en ligne) du texte 'raw', avec son resultat. En mode Traduction la requete part toute seule apres la lecture ; sinon seulement au clic.</summary>
+        void BuildTranslateBlock(string raw)
+        {
+            Section("Traduction");
+            var tb = BtnRow(52f, 20, "", (Action)(() =>
+                                    {
+                                        TargetLang = (TargetLang + 1) % Ar6dofTranslator.Codes.Length;
+                                        if (autoTranslate) { tr.Start(raw, TargetLang); Rebuild(); }   // mode Traduction : la nouvelle langue est appliquee tout de suite
+                                        else Refresh();
+                                    }),
+                                     "", (Action)(() => { if (tr.Busy) tr.Cancel(); else tr.Start(raw, TargetLang); Rebuild(); }));
+            var t0 = tb[0].GetComponentInChildren<Text>();
+            var t1 = tb[1].GetComponentInChildren<Text>();
+            refreshers.Add(() =>
+            {
+                t0.text = Ar6dofLoc.T("Vers") + " : " + Ar6dofTranslator.Names[TargetLang];
+                t1.text = Ar6dofLoc.T(tr.Busy ? "Annuler" : (autoTranslate ? "Traduire de nouveau" : "Traduire (en ligne)"));
+            });
+            Para(autoTranslate ? "Mode Traduction : le texte lu est envoye au service en ligne MyMemory pour etre traduit." : "Traduire envoie ce texte au service en ligne MyMemory. Rien n'est envoye avant ton clic.", 40, 15);
+            if (tr.Busy) Para("Traduction en cours...", 30, 18);
+            else if (tr.error.Length > 0) Para(tr.error, 56, 18);
+            else if (tr.result.Length > 0)
+            {
+                ParaFit(tr.result, 20, 10);
+                if (tr.truncated) Para("Texte long : seuls les 2500 premiers caracteres ont ete traduits.", 30, 15);
+                string trr = tr.result;
+                var cb = BtnRow(52f, 21, "Copier la traduction", (Action)(() => CopyTo(trr, 1)));
+                copyBtn2 = cb[0].GetComponentInChildren<Text>();
+            }
+        }
+
+        /// <summary>Resultat d'un scan : QR decrit ou texte lu, Copier, Ouvrir le lien / la carte (seulement au clic), Traduire (en ligne), calendrier. 'translationFirst' : la traduction passe avant le texte lu.</summary>
+        protected void BuildScanResult(bool allowTranslate, bool allowCalendar, bool translationFirst = false)
         {
             var s = scan;
             if (scanNote.Length > 0) Lbl(scanNote, 30, 19).MakeAccent();
@@ -673,43 +1020,26 @@ namespace AR6DoF
             }
             else
             {
-                string head = s.qr != null ? Ar6dofLoc.F("Code QR : {0}", Ar6dofLoc.T(Ar6dofScanText.KindName(s.Kind))) : Ar6dofLoc.T("Texte lu");
-                Lbl(head, 30, 20).MakeAccent();
-                ParaFit(body, 18, 9);
                 string raw = s.RawText();
-                bool url = s.qr != null && s.Kind == Ar6dofScanKind.Url;
+                bool textual = s.qr == null || s.Kind == Ar6dofScanKind.Text;
+                bool tBlock = allowTranslate && textual;
+                if (tBlock && translationFirst) BuildTranslateBlock(raw);
+                string head = s.qr != null ? Ar6dofLoc.F("Code QR : {0}", Ar6dofLoc.T(Ar6dofScanText.KindName(s.Kind))) : Ar6dofLoc.T(s.card ? "Carte de visite" : "Texte lu");
+                Lbl(head, 30, 20).MakeAccent();
+                ParaFit(body, 18, translationFirst ? 6 : 9);
+                // « Copier » : le texte lisible pour les formats decrits en clair (contact, e-mail...), le contenu brut pour le reste
+                bool readable = s.qr != null && (s.Kind == Ar6dofScanKind.Contact || s.Kind == Ar6dofScanKind.Mail || s.Kind == Ar6dofScanKind.Phone || s.Kind == Ar6dofScanKind.Sms || s.Kind == Ar6dofScanKind.Geo || s.Kind == Ar6dofScanKind.Otp);
+                string cp = readable || s.card ? body : raw;
+                string open = s.qr != null ? Ar6dofScanText.OpenTarget(raw, s.Kind) : "";
                 List<Button> bs;
-                if (url)
-                    bs = BtnRow(52f, 21, "Copier", (Action)(() => CopyTo(raw, 0)),
-                                         "Ouvrir le lien", (Action)(() => { try { Application.OpenURL(raw); } catch (Exception) { } }));
+                if (open.Length > 0)
+                    bs = BtnRow(52f, 21, "Copier", (Action)(() => CopyTo(cp, 0)),
+                                         s.Kind == Ar6dofScanKind.Geo ? "Ouvrir la carte" : "Ouvrir le lien", (Action)(() => { try { Application.OpenURL(open); } catch (Exception) { } }));
                 else
-                    bs = BtnRow(52f, 21, "Copier", (Action)(() => CopyTo(raw, 0)));
+                    bs = BtnRow(52f, 21, "Copier", (Action)(() => CopyTo(cp, 0)));
                 copyBtn = bs[0].GetComponentInChildren<Text>();
 
-                if (allowTranslate && (s.qr == null || s.Kind == Ar6dofScanKind.Text))
-                {
-                    Section("Traduction");
-                    var tb = BtnRow(52f, 20, "", (Action)(() => { TargetLang = (TargetLang + 1) % Ar6dofTranslator.Codes.Length; Refresh(); }),
-                                             "", (Action)(() => { if (tr.Busy) tr.Cancel(); else tr.Start(raw, TargetLang); Rebuild(); }));
-                    var t0 = tb[0].GetComponentInChildren<Text>();
-                    var t1 = tb[1].GetComponentInChildren<Text>();
-                    refreshers.Add(() =>
-                    {
-                        t0.text = Ar6dofLoc.T("Vers") + " : " + Ar6dofTranslator.Names[TargetLang];
-                        t1.text = Ar6dofLoc.T(tr.Busy ? "Annuler" : "Traduire (en ligne)");
-                    });
-                    Para("Traduire envoie ce texte au service en ligne MyMemory. Rien n'est envoye avant ton clic.", 40, 15);
-                    if (tr.Busy) Para("Traduction en cours...", 30, 18);
-                    else if (tr.error.Length > 0) Para(tr.error, 56, 18);
-                    else if (tr.result.Length > 0)
-                    {
-                        ParaFit(tr.result, 18, 9);
-                        if (tr.truncated) Para("Texte long : seuls les 2500 premiers caracteres ont ete traduits.", 30, 15);
-                        string trr = tr.result;
-                        var cb = BtnRow(52f, 21, "Copier la traduction", (Action)(() => CopyTo(trr, 1)));
-                        copyBtn2 = cb[0].GetComponentInChildren<Text>();
-                    }
-                }
+                if (tBlock && !translationFirst) BuildTranslateBlock(raw);
 
                 if (allowCalendar)
                 {
@@ -719,14 +1049,14 @@ namespace AR6DoF
                     if (n > 0) Btn(Ar6dofLoc.F("Ajouter au calendrier ({0})", n), AddToCalendar, 52f, 21);
                 }
             }
-            Btn("Nouveau scan", () => StartScan(true), 52f, 22);
+            Btn("Nouveau scan", Rescan, 52f, 22);
         }
 
         Text copyBtn, copyBtn2;
 
         protected override void OnRebuildStart() { copyBtn = null; copyBtn2 = null; }
 
-        void CopyTo(string text, int which)
+        protected void CopyTo(string text, int which)
         {
             try { GUIUtility.systemCopyBuffer = text; } catch (Exception) { }
             var t = which == 0 ? copyBtn : copyBtn2;

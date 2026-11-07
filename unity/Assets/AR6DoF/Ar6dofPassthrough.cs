@@ -409,6 +409,79 @@ namespace AR6DoF
         public void CancelPhoto() { cancelPhoto = true; }
         bool cancelPhoto;
 
+        // ------------------------------------------------------------------ prises en serie (panorama, planning, video, rafale)
+        /// <summary>Reglages d'une serie d'images : une image toutes les 'interval' secondes, au plus 'maxFrames' images ou 'maxSeconds' secondes.</summary>
+        public class SweepOptions
+        {
+            public int width = 960, height = 720;   // resolution d'un oeil
+            public int eye;                          // 0 = camera gauche, 1 = droite
+            public bool withUi;                      // en serie : la camera seule (la fenetre de l'appareil photo reste affichee)
+            public float interval = 1f;
+            public float delay;                      // minuteur avant la premiere image
+            public int maxFrames = 12;
+            public float maxSeconds = 120f;
+        }
+
+        bool stopSweep;
+
+        /// <summary>Demande la fin d'une serie en cours : les images deja prises sont gardees (contrairement a CancelPhoto qui annule).</summary>
+        public void StopSweep() { stopSweep = true; }
+
+        /// <summary>Tangente de la moitie du champ affiche : un pixel de la photo (x, y de -1 a 1 dans la hauteur) est le rayon (x * aspect * T, y * T, 1) du repere de HeadView.</summary>
+        public float DisplayTan { get { return Mathf.Tan(settings.displayFovDeg * 0.5f * Mathf.Deg2Rad); } }
+
+        /// <summary>
+        /// Prend une serie d'images de la camera (sans les interfaces). 'onFrame' recoit chaque image (texture EMPRUNTEE : detruite juste apres), l'orientation de la tete
+        /// a cet instant et le numero de l'image ; 'done' recoit null (fin normale ou StopSweep), "Annule" ou un message d'erreur, et est TOUJOURS appele.
+        /// </summary>
+        public void StartSweep(SweepOptions o, Action<int> count, Action<Texture2D, Quaternion, int> onFrame, Action<string> done)
+        {
+            if (PhotoBusy) return;
+            StartCoroutine(SweepRoutine(o, count, onFrame, done));
+        }
+
+        IEnumerator SweepRoutine(SweepOptions o, Action<int> count, Action<Texture2D, Quaternion, int> onFrame, Action<string> done)
+        {
+            PhotoBusy = true;
+            cancelPhoto = false;
+            stopSweep = false;
+            float end = Time.unscaledTime + Mathf.Max(0f, o.delay);
+            while (Time.unscaledTime < end && !cancelPhoto && !stopSweep)
+            {
+                if (count != null) count(Mathf.CeilToInt(end - Time.unscaledTime));
+                yield return null;
+            }
+            if (count != null) count(0);
+            string err = null;
+            int n = 0;
+            float t0 = Time.unscaledTime, next = t0;
+            var po = new PhotoOptions { withUi = o.withUi, eye = o.eye, width = o.width, height = o.height };
+            while (!cancelPhoto && !stopSweep && n < o.maxFrames && Time.unscaledTime - t0 < o.maxSeconds)
+            {
+                if (Time.unscaledTime < next) { yield return null; continue; }
+                yield return new WaitForEndOfFrame();
+                if (cancelPhoto || stopSweep) break;
+                Texture2D t = null;
+                try
+                {
+                    if (mat == null || compositeCam == null) throw new Exception("Passthrough pas pret");
+                    t = Shoot(o.withUi, po);
+                    Quaternion q = HeadView != null ? HeadView.rotation : Quaternion.identity;
+                    if (onFrame != null) onFrame(t, q, n);
+                    n++;
+                }
+                catch (Exception e) { err = e.Message; }
+                if (t != null) Destroy(t);
+                if (err != null) break;
+                next = Time.unscaledTime + Mathf.Max(0.02f, o.interval);
+            }
+            bool cancelled = cancelPhoto;
+            PhotoBusy = false;
+            cancelPhoto = false;
+            stopSweep = false;
+            if (done != null) done(err != null ? err : (cancelled ? "Annule" : null));
+        }
+
         IEnumerator PhotoRoutine(PhotoOptions o, float delaySec, Action<int> count, Action<bool> hideUi, Action<List<string>, Texture2D, string> done)
         {
             PhotoBusy = true;
