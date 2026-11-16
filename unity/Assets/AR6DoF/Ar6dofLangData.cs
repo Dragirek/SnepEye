@@ -1632,6 +1632,8 @@ namespace AR6DoF
             "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => Text read is too small (average height {0} px, at least 10 needed): move closer to the poster.",
             "Premiere ligne => First row",
             "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => The times on the poster are unreadable: they are counted from the first row. Set the time of this first row (the top of the time column).",
+            "Valable pour tous les ecrans et tous les menus. Par defaut : Quest, une seule rangee sous chaque fenetre (reduire, fermer, deplacer, options, taille). Avec Windows ou Mac, reduire et fermer vont dans le coin choisi et la poignee de taille est en bas a droite. => Applies to all screens and all menus. Default: Quest, a single row under each window (minimise, close, move, options, size). With Windows or Mac, minimise and close go in the chosen corner and the size handle is at the bottom right.",
+            "Quest => Quest",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3254,6 +3256,8 @@ namespace AR6DoF
             "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => El texto leido es demasiado pequeno (altura media {0} px, hacen falta al menos 10): acercate mas al cartel.",
             "Premiere ligne => Primera fila",
             "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Las horas del cartel son ilegibles: se cuentan desde la primera fila. Ajusta la hora de esa primera fila (la parte superior de la columna de horas).",
+            "Valable pour tous les ecrans et tous les menus. Par defaut : Quest, une seule rangee sous chaque fenetre (reduire, fermer, deplacer, options, taille). Avec Windows ou Mac, reduire et fermer vont dans le coin choisi et la poignee de taille est en bas a droite. => Vale para todas las pantallas y todos los menus. Por defecto: Quest, una sola fila bajo cada ventana (minimizar, cerrar, mover, opciones, tamano). Con Windows o Mac, minimizar y cerrar van en la esquina elegida y el tirador de tamano esta abajo a la derecha.",
+            "Quest => Quest",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4883,6 +4887,8 @@ namespace AR6DoF
             "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => Der gelesene Text ist zu klein (mittlere Hoehe {0} px, mindestens 10 noetig): geh naeher an das Plakat heran.",
             "Premiere ligne => Erste Zeile",
             "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Die Uhrzeiten des Plakats sind unlesbar: Sie werden ab der ersten Zeile gezaehlt. Stelle die Uhrzeit dieser ersten Zeile ein (oben in der Zeitspalte).",
+            "Valable pour tous les ecrans et tous les menus. Par defaut : Quest, une seule rangee sous chaque fenetre (reduire, fermer, deplacer, options, taille). Avec Windows ou Mac, reduire et fermer vont dans le coin choisi et la poignee de taille est en bas a droite. => Gilt fuer alle Bildschirme und alle Menues. Standard: Quest, eine einzige Reihe unter jedem Fenster (minimieren, schliessen, verschieben, Optionen, Groesse). Bei Windows oder Mac sitzen Minimieren und Schliessen in der gewaehlten Ecke und der Groessengriff unten rechts.",
+            "Quest => Quest",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6512,6 +6518,8 @@ namespace AR6DoF
             "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => Il testo letto e troppo piccolo (altezza media {0} px, ne servono almeno 10): avvicinati di piu al manifesto.",
             "Premiere ligne => Prima riga",
             "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Gli orari del manifesto sono illeggibili: vengono contati dalla prima riga. Imposta l'orario di questa prima riga (la parte alta della colonna degli orari).",
+            "Valable pour tous les ecrans et tous les menus. Par defaut : Quest, une seule rangee sous chaque fenetre (reduire, fermer, deplacer, options, taille). Avec Windows ou Mac, reduire et fermer vont dans le coin choisi et la poignee de taille est en bas a droite. => Vale per tutti gli schermi e tutti i menu. Predefinito: Quest, una sola riga sotto ogni finestra (riduci, chiudi, sposta, opzioni, dimensione). Con Windows o Mac, riduci e chiudi vanno nell'angolo scelto e la maniglia di dimensione e in basso a destra.",
+            "Quest => Quest",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -8140,6 +8148,8 @@ namespace AR6DoF
             "Texte lu trop petit (hauteur moyenne {0} px, il en faut au moins 10) : rapproche-toi davantage de l'affiche. => O texto lido e pequeno demais (altura media {0} px, sao necessarios pelo menos 10): aproxime-se mais do cartaz.",
             "Premiere ligne => Primeira linha",
             "Les heures de l'affiche sont illisibles : elles sont comptees depuis la premiere ligne. Regle l'heure de cette premiere ligne (le haut de la colonne des heures). => Os horarios do cartaz estao ilegiveis: sao contados a partir da primeira linha. Ajuste o horario dessa primeira linha (o topo da coluna de horarios).",
+            "Valable pour tous les ecrans et tous les menus. Par defaut : Quest, une seule rangee sous chaque fenetre (reduire, fermer, deplacer, options, taille). Avec Windows ou Mac, reduire et fermer vont dans le coin choisi et la poignee de taille est en bas a droite. => Vale para todas as telas e todos os menus. Padrao: Quest, uma unica fileira sob cada janela (minimizar, fechar, mover, opcoes, tamanho). Com Windows ou Mac, minimizar e fechar ficam no canto escolhido e a alca de tamanho fica embaixo a direita.",
+            "Quest => Quest",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

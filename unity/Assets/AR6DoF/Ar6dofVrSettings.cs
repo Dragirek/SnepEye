@@ -1881,12 +1881,13 @@ namespace AR6DoF
                 float c = 0f;
                 float top = OpenCard(a.rt, ref c, "Style des boutons de fenetre");
                 float y = Next(ref c, 48f, 12f);
-                chromeStyleButtons.Add(Btn(a.rt, -164f, y, 320f, "Windows", () => { Ar6dofSettings.Current.chromeStyle = 0; Touch(); }, 24));
-                chromeStyleButtons.Add(Btn(a.rt, 164f, y, 320f, "Mac", () => { Ar6dofSettings.Current.chromeStyle = 1; Touch(); }, 24));
+                chromeStyleButtons.Add(Btn(a.rt, -216f, y, 208f, "Windows", () => { Ar6dofSettings.Current.chromeStyle = 0; Touch(); }, 24));
+                chromeStyleButtons.Add(Btn(a.rt, 0f, y, 208f, "Mac", () => { Ar6dofSettings.Current.chromeStyle = 1; Touch(); }, 24));
+                chromeStyleButtons.Add(Btn(a.rt, 216f, y, 208f, "Quest", () => { Ar6dofSettings.Current.chromeStyle = 2; Touch(); }, 24));
                 CloseCard(a.rt, top, ref c);
                 a.h = -c;
             }
-            var b = NewSec(page, "FenPos", 2, null);
+            var b = NewSec(page, "FenPos", 2, () => Ar6dofSettings.Current.chromeStyle != 2);   // le style Quest n'a pas de coin : tout est sous la fenetre
             {
                 float c = 0f;
                 float top = OpenCard(b.rt, ref c, "Position de Reduire / Fermer");
@@ -1906,7 +1907,7 @@ namespace AR6DoF
                 float c = 0f;
                 float top = OpenCard(d.rt, ref c, null);
                 StepRow(d.rt, ref c, "Taille des boutons de fenetre (%)", 60f, 250f, 1f, 5f, 10f, () => Mathf.Round(Ar6dofSettings.Current.chromeScale * 100f), v => { Ar6dofSettings.Current.chromeScale = v / 100f; Touch(); }, "0");
-                Para(d.rt, ref c, "Valable pour tous les ecrans et tous les menus. Par defaut : Windows, en haut a droite. Le redimensionnement se fait par la poignee unique en bas a droite de chaque fenetre.", 96f);
+                Para(d.rt, ref c, "Valable pour tous les ecrans et tous les menus. Par defaut : Quest, une seule rangee sous chaque fenetre (reduire, fermer, deplacer, options, taille). Avec Windows ou Mac, reduire et fermer vont dans le coin choisi et la poignee de taille est en bas a droite.", 128f);
                 CloseCard(d.rt, top, ref c);
                 d.h = -c;
             }

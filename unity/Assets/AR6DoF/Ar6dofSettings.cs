@@ -100,7 +100,8 @@ namespace AR6DoF
         public float keyboardScale = 1f;
 
         // Boutons de fenêtre (fermer / réduire) de tous les écrans et menus
-        public int chromeStyle = 0;        // 0 = style Windows, 1 = style Mac
+        public int chromeStyle = 2;        // 0 = style Windows, 1 = style Mac, 2 = style Quest (une seule rangee sous la fenetre, par defaut)
+        public int chromeV = 0;            // 1 : le style Quest est devenu le style d'origine (une seule fois pour les anciens fichiers)
         public int chromeCorner = 1;       // 0 haut gauche, 1 haut droite, 2 bas gauche, 3 bas droite
         public float chromeScale = 1f;     // taille des boutons réduire / fermer / redimensionner (1 = normal)
 
@@ -202,6 +203,8 @@ namespace AR6DoF
             d.dockBatteryStyle = Mathf.Clamp(d.dockBatteryStyle, 0, 2);
             d.dockFaceStyle = Mathf.Clamp(d.dockFaceStyle, 0, 5);
             d.dateFormat = Mathf.Clamp(d.dateFormat, 0, Ar6dofClockFmt.DateFormats.Length - 1);
+            if (d.chromeV < 1) { d.chromeStyle = 2; d.chromeV = 1; }   // nouveau style d'origine : Quest
+            d.chromeStyle = Mathf.Clamp(d.chromeStyle, 0, 2);
             if (d.version < 2)
             {   // anciens fichiers : si le style n'a jamais été changé (cyan d'origine), on passe au nouveau style d'usine Eclipse
                 var g = d.global;

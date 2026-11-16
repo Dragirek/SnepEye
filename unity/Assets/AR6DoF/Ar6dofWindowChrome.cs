@@ -451,6 +451,10 @@ namespace AR6DoF
         public static float EdgeGap { get { return Gap; } }
         float lastS = -1f;
         Ar6dofChromeButton bMin, bClose, bResize, bMove, bSet, bReset;
+        Renderer bBack;                       // style Quest : la capsule qui reunit la rangee de boutons sous la fenetre
+        float lastBackW = -1f, lastBackH = -1f;
+        readonly Transform[] qT = new Transform[6];
+        readonly float[] qW = new float[6];
         bool lastSetOn;
         Ar6dofPassthrough pt;
         float grabDist;
@@ -508,6 +512,18 @@ namespace AR6DoF
             bMove = MakeBtn(Ar6dofChromeButton.Kind.Move, "grip");
             bSet = MakeBtn(Ar6dofChromeButton.Kind.Settings, "gear");
             bReset = MakeBtn(Ar6dofChromeButton.Kind.ResetSize, "reset");
+            var back = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            back.name = "Capsule";
+            var bmc = back.GetComponent<MeshCollider>();
+            if (bmc != null) Destroy(bmc);
+            back.transform.SetParent(group.transform, false);
+            bBack = back.GetComponent<Renderer>();
+            Shader bsh = Ar6dofTheme.RoundedShader;
+            if (bsh == null) bsh = Shader.Find("Sprites/Default");
+            bBack.sharedMaterial = new Material(bsh);
+            bBack.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            bBack.receiveShadows = false;
+            back.SetActive(false);
             group.SetActive(false);
         }
 
@@ -555,8 +571,14 @@ namespace AR6DoF
         void ApplyShape()
         {
             var d = Ar6dofSettings.Current;
-            bool mac = d.chromeStyle == 1;
-            int corner = mac ? 999 : Mathf.Min(Ar6dofSettings.StyleFor(elem).corner, 10);
+            bool mac = d.chromeStyle == 1, quest = d.chromeStyle == 2;
+            int corner = (mac || quest) ? 999 : Mathf.Min(Ar6dofSettings.StyleFor(elem).corner, 10);
+            if (bBack != null)
+            {
+                var stq = Ar6dofSettings.StyleFor(elem);
+                bBack.sharedMaterial.color = new Color(stq.bg.r, stq.bg.g, stq.bg.b, Mathf.Clamp(stq.alpha, 0.55f, 1f) * 0.9f);
+                lastBackW = -1f;   // la taille est reposee au prochain placement
+            }
             foreach (var b in new[] { bMin, bClose, bResize, bSet, bReset })
             {
                 Ar6dofTheme.SetRoundedSize(b.bg.sharedMaterial, S, S, corner);
@@ -653,6 +675,42 @@ namespace AR6DoF
                 bool on = settingsOn != null && settingsOn();
                 if (on != lastSetOn) { lastSetOn = on; bSet.toggled = on; bSet.Refresh(); }
             }
+            bool quest = d.chromeStyle == 2;
+            if (bBack.gameObject.activeSelf != quest) bBack.gameObject.SetActive(quest);
+            if (quest) LayoutQuest(hs, hasClose, hasMin, canReset);
+        }
+
+        /// <summary>
+        /// Style Quest : tout est dans UNE rangee centree sous la fenetre, dans une capsule : Reduire, Fermer, barre de deplacement, Options (roue),
+        /// taille d'origine, redimensionner. Meme ordre pour toutes les fenetres ; seuls les boutons qui existent pour cette fenetre sont poses.
+        /// </summary>
+        void LayoutQuest(Vector2 hs, bool hasClose, bool hasMin, bool hasReset)
+        {
+            float s = S, pad = Gap * 1.5f;
+            int n = 0;
+            if (hasMin) { qT[n] = bMin.transform; qW[n++] = s; }
+            if (hasClose) { qT[n] = bClose.transform; qW[n++] = s; }
+            if (canMove) { qT[n] = bMove.transform; qW[n++] = s * MoveLen; }
+            if (onSettings != null) { qT[n] = bSet.transform; qW[n++] = s; }
+            if (hasReset) { qT[n] = bReset.transform; qW[n++] = s; }
+            qT[n] = bResize.transform; qW[n++] = s;
+            float total = (n - 1) * pad;
+            for (int i = 0; i < n; i++) total += qW[i];
+            float y = -hs.y - Gap - s * 0.5f - Gap;      // un peu plus bas que les autres styles : la capsule depasse du bouton de Gap
+            float x = -total * 0.5f;
+            for (int i = 0; i < n; i++)
+            {
+                qT[i].localPosition = new Vector3(x + qW[i] * 0.5f, y, 0f);
+                x += qW[i] + pad;
+            }
+            float bw = total + 2f * Gap * 1.5f, bh = s + 2f * Gap;
+            if (Mathf.Abs(bw - lastBackW) > 1e-5f || Mathf.Abs(bh - lastBackH) > 1e-5f)
+            {
+                lastBackW = bw; lastBackH = bh;
+                bBack.transform.localScale = new Vector3(bw, bh, 1f);
+                Ar6dofTheme.SetRoundedSize(bBack.sharedMaterial, bw, bh, 999);
+            }
+            bBack.transform.localPosition = new Vector3(0f, y, 0.004f);   // derriere les boutons
         }
 
         // ---- actions
