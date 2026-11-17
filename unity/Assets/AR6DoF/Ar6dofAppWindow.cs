@@ -394,6 +394,20 @@ namespace AR6DoF
             return b;
         }
 
+        /// <summary>Interrupteur de son : le libelle a gauche et, a droite, un bouton a icone (haut-parleur, ou haut-parleur barre quand le son est coupe).</summary>
+        protected Button MuteRow(string label, Func<bool> get, Action<bool> set, float h = 52f, int fs = 22)
+        {
+            float cy = RowY(h);
+            float bw = Mathf.Max(h * 1.6f, 90f);
+            Ar6dofVrUi.Label(content, label, new Vector2(-(bw + 8f) * 0.5f, cy), new Vector2(IW - bw - 8f, h), fs, TextAnchor.MiddleLeft);
+            Text t;
+            Button b = Ar6dofVrUi.MakeButton(content, "", new Vector2(IW * 0.5f - bw * 0.5f, cy), new Vector2(bw, h), () => { set(!get()); Refresh(); }, out t, fs);
+            Image icon = GlyphOn(b, get() ? "speaker" : "mute", label, 0.66f);
+            Button bb = b;
+            refreshers.Add(() => { icon.sprite = Ar6dofDock.Glyph(get() ? "speaker" : "mute"); Ar6dofTheme.SetSelected(bb, get()); });
+            return b;
+        }
+
         protected Slider SliderRow(string label, float min, float max, Func<float> get, Action<float> set, Func<float, string> fmt, float h = 54f, bool whole = false)
         {
             float cy = RowY(h);

@@ -205,7 +205,7 @@ namespace AR6DoF
             items.Add("Regles");
             items.Add((Action)(() => ToggleRules(true)));
             BtnRow(44f, 20, items.ToArray());
-            if (withSound) ToggleRow("Son", () => SoundOn, v => SoundOn = v, 44f, 20);
+            if (withSound) MuteRow("Son", () => SoundOn, v => SoundOn = v, 46f, 20);
             if (Is3D) ToggleRow("Plateau lie au menu (il suit la fenetre)", () => LinkOn, v => LinkOn = v, 44f, 20);
             if (Is3D) Para("Le jeu est pose a cote du menu : vise-le au laser et garde le bouton appuye sur le socle pour le deplacer. Cacher le menu garde le jeu.", 44, 17);
         }

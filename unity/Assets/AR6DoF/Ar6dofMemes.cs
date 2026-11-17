@@ -7,7 +7,7 @@ namespace AR6DoF
 {
     /// <summary>
     /// DVD (categorie Memes du Hub) : un logo « DVD » qui rebondit sur UN ecran statique pose dans le monde (plat, ultra-large, incurve, ancien, portrait).
-    /// Rien n'existe ni ne tourne tant qu'aucun ecran n'est pose ; l'ecran pose reste dans le monde meme quand la fenetre est rangee.
+    /// Rien n'existe ni ne tourne tant qu'aucun ecran n'est pose ; l'ecran pose reste dans le monde quand la fenetre est seulement reduite ; la fermer (croix, ou toucher son icone du Hub) le retire.
     /// </summary>
     public class Ar6dofMemesApp : Ar6dofAppWindow
     {
@@ -26,6 +26,13 @@ namespace AR6DoF
         }
 
         protected override bool CanHideMenu { get { return Ar6dofDvdWorld.Screens.Count > 0; } }
+
+        /// <summary>Fermee (pas reduite) : l'ecran pose disparait aussi, il ne reste pas dans le monde sans fenetre pour le retirer.</summary>
+        public override void OnClosed()
+        {
+            Ar6dofDvdWorld.Clear();
+            base.OnClosed();
+        }
 
         void PlaceScreen(int type)
         {
@@ -72,7 +79,7 @@ namespace AR6DoF
             SliderRow("Vitesse", 0.04f, 0.6f, () => Ar6dofDvdWorld.Speed, v => Ar6dofDvdWorld.Speed = v, v => Mathf.RoundToInt(v * 100f) + " %", 50f);
             SliderRow("Taille du logo", 0.05f, 0.35f, () => Ar6dofDvdWorld.LogoSize, v => Ar6dofDvdWorld.LogoSize = v, v => Mathf.RoundToInt(v * 100f) + " %", 50f);
             ToggleRow("Change de couleur a chaque rebond", () => Ar6dofDvdWorld.ColorChange, v => Ar6dofDvdWorld.ColorChange = v, 46f, 20);
-            ToggleRow("Son des rebonds", () => Ar6dofDvdWorld.BounceSound, v => Ar6dofDvdWorld.BounceSound = v, 46f, 20);
+            MuteRow("Son des rebonds", () => Ar6dofDvdWorld.BounceSound, v => Ar6dofDvdWorld.BounceSound = v, 46f, 20);
             Para("Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux).", 44, 16);
         }
 

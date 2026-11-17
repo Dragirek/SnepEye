@@ -207,6 +207,17 @@ namespace AR6DoF
                             }
                             break;
                         }
+                        case "mute":
+                        {
+                            // enceinte barree : meme boitier que « speaker », puis une croix a la place des ondes
+                            float[] mx = { 12f, 23f, 36f, 36f, 23f, 12f, 12f }, my = { 25f, 25f, 15f, 49f, 39f, 39f, 25f };
+                            float md = 99f;
+                            for (int k = 0; k < 6; k++) md = Mathf.Min(md, SegDist(fx, fy, mx[k], my[k], mx[k + 1], my[k + 1]));
+                            md = Mathf.Min(md, SegDist(fx, fy, 43f, 24f, 57f, 40f));
+                            md = Mathf.Min(md, SegDist(fx, fy, 57f, 24f, 43f, 40f));
+                            a = Mathf.Clamp01(2.6f - md);
+                            break;
+                        }
                         case "weather":
                         {
                             // nuage devant un soleil a rayons

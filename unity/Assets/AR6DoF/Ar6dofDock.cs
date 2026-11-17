@@ -230,6 +230,7 @@ namespace AR6DoF
                 reveal = 1f;
                 if (!feetInit) FollowFeet(true);
                 ApplyReveal();
+                if (dockHidden.Count > 0 || dockShown) { dockShown = false; RestoreDockHidden(); }   // sans suivi le dock reste toujours visible : on ne cache rien
                 return;
             }
 
@@ -258,6 +259,76 @@ namespace AR6DoF
             if (!feetInit || far) FollowFeet(true);
             else if (reveal <= 0.02f) FollowFeet(false);
             ApplyReveal();
+            DockOverlapTick();
+        }
+
+        // ------------------------------------------------------------------ menus proches du dock
+        /// <summary>Rayon (metres) dans lequel les menus ouverts sont caches quand le dock apparait, pour qu'ils ne se superposent pas.</summary>
+        public const float DockHideRadius = 0.5f;
+        readonly Dictionary<Ar6dofDockApp, Canvas> dockHidden = new Dictionary<Ar6dofDockApp, Canvas>();
+        bool dockShown;
+
+        static Canvas CanvasOf(Ar6dofDockApp a)
+        {
+            var ca = a as CanvasApp; var dm = a as DeviceMenu; var aw = a as Ar6dofAppWindow;
+            return ca != null ? ca.canvas : (dm != null ? dm.canvas : (aw != null ? aw.canvas : null));
+        }
+
+        /// <summary>Distance (m) entre le dock et la fenetre : plus proche point de la fenetre par rapport au centre et aux deux bouts du dock.</summary>
+        float DistanceToDock(Canvas c)
+        {
+            var wrt = (RectTransform)c.transform;
+            float half = barRt != null ? barRt.sizeDelta.x * 0.5f : 0f;
+            Transform dt = canvas.transform;
+            float best = float.MaxValue;
+            for (int i = 0; i < 3; i++)
+            {
+                Vector3 p = dt.TransformPoint(new Vector3((i - 1) * half, 0f, 0f));
+                Vector3 lp = wrt.InverseTransformPoint(p);
+                Rect r = wrt.rect;
+                Vector3 onRect = wrt.TransformPoint(new Vector3(Mathf.Clamp(lp.x, r.xMin, r.xMax), Mathf.Clamp(lp.y, r.yMin, r.yMax), 0f));
+                best = Mathf.Min(best, Vector3.Distance(onRect, p));
+            }
+            return best;
+        }
+
+        /// <summary>Le dock apparait : les menus ouverts a moins de 50 cm disparaissent (sans etre fermes) et reviennent quand il s'efface. Un menu ouvert pendant que le dock est la n'est pas touche.</summary>
+        void DockOverlapTick()
+        {
+            if (!dockShown && reveal > 0.35f)
+            {
+                dockShown = true;
+                foreach (var a in ExtraApps())
+                {
+                    if (a == null || !a.open || a == kbApp || a == notifApp || animating.Contains(a)) continue;
+                    var c = CanvasOf(a);
+                    if (c == null || !c.enabled || !c.gameObject.activeInHierarchy) continue;
+                    if (DistanceToDock(c) > DockHideRadius) continue;
+                    c.enabled = false;      // un Canvas desactive n'est ni dessine ni vise par le laser
+                    dockHidden[a] = c;
+                }
+            }
+            else if (dockShown && reveal < 0.12f)
+            {
+                dockShown = false;
+                RestoreDockHidden();
+            }
+        }
+
+        void RestoreDockHidden()
+        {
+            foreach (var kv in dockHidden) if (kv.Value != null) kv.Value.enabled = true;
+            dockHidden.Clear();
+        }
+
+        /// <summary>Appui sur l'icone d'un menu cache par le dock : il revient (au lieu d'etre range). Vrai si c'etait le cas.</summary>
+        bool UnhideFromDock(Ar6dofDockApp a)
+        {
+            Canvas c;
+            if (a == null || !dockHidden.TryGetValue(a, out c)) return false;
+            dockHidden.Remove(a);
+            if (c != null) c.enabled = true;
+            return true;
         }
 
         void ApplyReveal()
@@ -900,6 +971,7 @@ namespace AR6DoF
         public void Toggle(Ar6dofDockApp app)
         {
             if (app == null || animating.Contains(app) || !app.Alive) return;
+            if (UnhideFromDock(app)) return;
             StartCoroutine(Animate(app, !app.open));
         }
 
@@ -907,6 +979,7 @@ namespace AR6DoF
         public void Summon(Ar6dofDockApp app)
         {
             if (app == null || !built || !app.Alive || animating.Contains(app)) return;
+            UnhideFromDock(app);
             if (app.open) { MoveNear(app); return; }
             StartCoroutine(SummonRoutine(app));
         }
@@ -1056,6 +1129,7 @@ namespace AR6DoF
         public void TileToggle(Ar6dofDockApp a)
         {
             if (a == null || animating.Contains(a)) return;
+            if (UnhideFromDock(a)) return;
             if (a.open) CloseApp(a); else Toggle(a);
         }
 
@@ -1066,6 +1140,7 @@ namespace AR6DoF
         public void CloseApp(Ar6dofDockApp app)
         {
             if (app == null || !built || animating.Contains(app)) return;
+            UnhideFromDock(app);   // un menu cache par le dock puis ferme : son Canvas est reactive avant l'animation
             var win = app as Ar6dofAppWindow;
             bool dynamic = (win != null && windows.Contains(win)) || app is DeviceMenu;
             if (!dynamic) { if (app.open) Toggle(app); return; }
