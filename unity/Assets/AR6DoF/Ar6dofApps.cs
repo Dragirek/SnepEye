@@ -79,6 +79,9 @@ namespace AR6DoF
             new Ar6dofAppEntry { id = "mines", title = "Demineur", glyph = "mines", yaw = -125f, game = true,
                 desc = "Demineur : ouvre toutes les cases sans mine et pose des drapeaux sur les autres. Trois tailles.",
                 make = d => new Ar6dofMinesApp(d) },
+            new Ar6dofAppEntry { id = "piano", title = "Piano", glyph = "piano", yaw = -161f, game = true,
+                desc = "Piano de deux octaves : joue au laser, ecoute des morceaux ou apprends-les touche par touche.",
+                make = d => new Ar6dofPianoApp(d) },
         };
 
         public static Ar6dofAppEntry Find(string id)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace AR6DoF
@@ -227,6 +228,62 @@ namespace AR6DoF
                 go = null;
                 return false;
             }
+        }
+
+        // ---------------------------------------------------------------- notes de musique (piano)
+        public const int Timbres = 4;   // 0 piano, 1 orgue, 2 synthe, 3 cloche
+        static readonly Dictionary<int, AudioClip> notes = new Dictionary<int, AudioClip>();
+
+        /// <summary>Une note (numero MIDI : 60 = do central) fabriquee au premier besoin, puis gardee.</summary>
+        static AudioClip NoteClip(int midi, int timbre)
+        {
+            int key = timbre * 256 + midi;
+            AudioClip c;
+            if (notes.TryGetValue(key, out c) && c != null) return c;
+            float f = 440f * Mathf.Pow(2f, (midi - 69) / 12f);
+            float dur = (timbre == 0 || timbre == 3) ? 1.7f : 0.9f;
+            var d = new float[(int)(dur * SR)];
+            // partiels : (rapport de frequence, amplitude, vitesse d'extinction)
+            float[,] p;
+            switch (timbre)
+            {
+                case 1: p = new float[,] { { 1f, 1f, 0.6f }, { 2f, 0.55f, 0.6f }, { 3f, 0.3f, 0.8f }, { 4f, 0.25f, 0.8f }, { 6f, 0.12f, 1f } }; break;
+                case 2: p = new float[,] { { 1f, 1f, 2.2f }, { 2f, 0.5f, 2.6f }, { 3f, 0.33f, 3f }, { 4f, 0.25f, 3.4f }, { 5f, 0.2f, 3.8f }, { 6f, 0.16f, 4.2f } }; break;
+                case 3: p = new float[,] { { 1f, 1f, 1.8f }, { 2.76f, 0.45f, 2.6f }, { 5.4f, 0.25f, 3.6f }, { 8.93f, 0.12f, 5f } }; break;
+                default: p = new float[,] { { 1f, 1f, 2.4f }, { 2f, 0.5f, 3.2f }, { 3f, 0.28f, 4.2f }, { 4f, 0.14f, 5.5f }, { 5f, 0.07f, 7f } }; break;
+            }
+            float att = timbre == 1 ? 0.02f : 0.004f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = (float)i / SR;
+                float v = 0f;
+                for (int k = 0; k < p.GetLength(0); k++)
+                {
+                    float fk = f * p[k, 0];
+                    if (fk > SR * 0.45f) continue;                       // pas de repliement de frequences
+                    float ex = timbre == 1 ? Mathf.Min(1f, (dur - t) / 0.12f) : Mathf.Exp(-t * p[k, 2]);
+                    v += p[k, 1] * ex * Mathf.Sin(2f * Mathf.PI * fk * t);
+                }
+                float env = Mathf.Min(1f, t / att) * Mathf.Min(1f, (dur - t) / 0.04f);   // attaque courte, fin adoucie (pas de claquement)
+                d[i] = v * env * 0.28f;
+            }
+            c = Make("Ar6dofNote" + key, d);
+            notes[key] = c;
+            return c;
+        }
+
+        /// <summary>Joue une note ; plusieurs notes se superposent.</summary>
+        public void Note(int midi, int timbre, float vol = 1f)
+        {
+            if (!on || volume <= 0.001f || !Ensure()) return;
+            fx.PlayOneShot(NoteClip(Mathf.Clamp(midi, 24, 108), Mathf.Clamp(timbre, 0, Timbres - 1)), Mathf.Clamp01(vol * volume));
+        }
+
+        /// <summary>Libere les notes fabriquees (a la fermeture du piano).</summary>
+        public static void ClearNotes()
+        {
+            foreach (var kv in notes) if (kv.Value != null) UnityEngine.Object.Destroy(kv.Value);
+            notes.Clear();
         }
 
         public void Play(Id id, float vol = 1f)
