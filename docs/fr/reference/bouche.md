@@ -1,0 +1,9 @@
+[← Retour à l'index](../index.md)
+
+# Mouth tracking (bouche)
+
+Une caméra de bouche (`mouthcam` dans `ar6dof_config.txt`, -1 = aucune) -> paramètres de la bouche -> Unity (UDP 9886 données, 9887 commandes, 9888 évènements).
+Indépendant de l'eye tracking (l'un sans l'autre, ou les deux). Désactivé par défaut : aucun thread ni caméra. Deux méthodes :
+- **Modèle IA (recommandé)** : pose un modèle ONNX de 45 paramètres compatible *Project Babble* sous le nom **`babble_model.onnx`** à côté de `ar6dof_probe.exe` (ou `model=chemin` dans `ar6dof_mouth.txt`). `ar6dof_probe` le charge avec le module IA d'OpenCV (feature `dnn` de `vcpkg.json`) et envoie les 45 paramètres façon ARKit / VRChat (`jawOpen`, `mouthSmileLeft/Right`, `mouthFunnel`, `mouthPucker`, `tongueOut`, `cheekPuff`...) dans un paquet `MTH2` (196 octets, `src/mouth_math.h`). Entrée du modèle : image grise 224x224 (zone `roi`, `rotate`, `flip` de `ar6dof_mouth.txt`), valeurs de sortie 0..1. **Le modèle n'est PAS fourni** : la licence de Project Babble est non commerciale par défaut, lis-la avant de l'utiliser ; il a été entraîné sur la caméra de leur casque, donc cadre ta caméra de la même façon (mâchoire et bouche, infrarouge si possible). L'aperçu montre exactement ce que voit le modèle. Étalonnage : *neutre* (visage détendu) puis *expressions* (8 s de toutes les expressions, met chaque paramètre à l'échelle 0..1).
+- **Détection classique** (sans fichier modèle) : cavité sombre de la bouche -> ouverture, largeur, côté, étalonnage en 4 poses. Approximatif, à régler selon l'éclairage (`ar6dof_mouth.txt`).
+Côté Unity : `Ar6dofMouthTracker.Instance.GetShapes(float[45])` (noms et index dans `Ar6dofMouthShapes`), et `Ar6dofMouthDisplay` dessine la bouche sur les **écrans du costume** (1 écran de face, ou 2 écrans de côté), avec déformation réglable (museau long, écran incurvé, ouverture en coin). Tout est coupé tant que rien n'est activé.
