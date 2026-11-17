@@ -224,7 +224,7 @@ namespace AR6DoF
             var name = Ar6dofVrUi.Label(content, StripNames[c], new Vector2(cx, -(top + 18f)), new Vector2(StripW - 8f, 30f), 22);
             name.fontStyle = FontStyle.Bold;
             if (master) name.MakeAccent();
-            name.gameObject.AddComponent<Ar6dofFitText>().Init(name, 22);
+            Ar6dofFitText.Ensure(name, 22);
 
             // fader + vu-mètre vertical
             float fy = -(top + 36f + FaderH * 0.5f);
@@ -294,7 +294,7 @@ namespace AR6DoF
             if (labelW > 0f)
             {
                 var l = Ar6dofVrUi.Label(content, Ar6dofLoc.T(label), new Vector2(x + labelW * 0.5f, cy), new Vector2(labelW, h), 17, TextAnchor.MiddleLeft);
-                l.gameObject.AddComponent<Ar6dofFitText>().Init(l, 17);
+                Ar6dofFitText.Ensure(l, 17);
                 x += labelW + g;
             }
             float vw = w - (labelW > 0f ? labelW + g : 0f) - 2f * bw - 2f * g;

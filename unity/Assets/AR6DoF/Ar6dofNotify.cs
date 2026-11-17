@@ -262,7 +262,7 @@ namespace AR6DoF
             if (a == null || !a.MusicActive) return;
             Section("Musique en cours");
             var nameLbl = Lbl("", 34, 22);
-            nameLbl.gameObject.AddComponent<Ar6dofFitText>().Init(nameLbl, 22);
+            Ar6dofFitText.Ensure(nameLbl, 22);
             var timeLbl = Lbl("", 28, 18);
             var pb = BtnRow(56f, 22, "", (Action)(() => { a.PrevTrack(); }),
                                      "", (Action)(() => { if (a.MusicActive) a.PauseMusic(!a.Meters.MusicPaused); }),
@@ -330,10 +330,10 @@ namespace AR6DoF
                 float tw = rowW - 84f;
                 var t1 = Ar6dofVrUi.Label(rrt, n.title, new Vector2(30f, 15f), new Vector2(tw, 30f), 21, TextAnchor.MiddleLeft);
                 t1.fontStyle = FontStyle.Bold;
-                t1.gameObject.AddComponent<Ar6dofFitText>().Init(t1, 21);
+                Ar6dofFitText.Ensure(t1, 21);
                 string sub = Ar6dofClockFmt.Time(n.time, h24, false) + (n.text.Length > 0 ? "  -  " + n.text : "");
                 var t2 = Ar6dofVrUi.Label(rrt, sub, new Vector2(30f, -15f), new Vector2(tw, 26f), 17, TextAnchor.MiddleLeft);
-                t2.gameObject.AddComponent<Ar6dofFitText>().Init(t2, 17);
+                Ar6dofFitText.Ensure(t2, 17);
                 Text l1;
                 var xb = BtnAt(IW * 0.5f - 28f, cy, 56f, 66f, "", () => { svc.Remove(n); Rebuild(); }, out l1, 20);
                 GlyphOn(xb, "close", "Effacer", 0.5f);

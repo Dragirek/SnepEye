@@ -28,4 +28,4 @@ Choisis ce que tu veux faire. Chaque page est courte et indépendante.
 | [Historique v60 et v61](reference/historique-v60-v61.md) | Anciennes notes de version |
 
 ## Principe
-`ar6dof_app.exe` règle et lance `ar6dof_probe.exe` (caméra + IMU + suivi 6DoF). Unity reçoit la pose et l'image, et affiche tout dans le casque. Les options facultatives (yeux, bouche, audio, caméras supplémentaires) ne consomment **rien** tant qu'elles sont désactivées.
+`ar6dof_app.exe` règle et lance `ar6dof_probe.exe` (caméra + IMU + suivi 6DoF). Unity reçoit la pose et l'image, et affiche tout dans le casque. Les options facultatives (yeux, bouche, audio, caméras supplémentaires) ne consomment **rien** tant qu'elles sont désactivées. La page **Aide** de `ar6dof_app.exe` (dernière de la liste) montre en images animées le choix conseillé à chaque étape.

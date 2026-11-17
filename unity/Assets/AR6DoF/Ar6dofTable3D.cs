@@ -148,6 +148,29 @@ namespace AR6DoF
             root.transform.SetPositionAndRotation(pos, Quaternion.Euler(-22f, yaw, 0f));
         }
 
+        /// <summary>Pose la table A COTE de la fenetre du jeu (du cote ou tu regardes), un peu sous le regard, tournee comme toi : jeu et menu forment un seul ensemble.</summary>
+        public void PlaceBeside(Transform win)
+        {
+            if (win == null) { Place(); return; }
+            Transform h = HeadT();
+            Vector3 head = h != null ? h.position : win.position + Vector3.up * 0.3f;
+            Vector3 f = h != null ? h.forward : Vector3.forward;
+            f.y = 0f;
+            if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
+            f.Normalize();
+            var rc = win as RectTransform;
+            float halfW = rc != null ? rc.rect.width * 0.5f * Mathf.Abs(win.lossyScale.x) : 0.3f;
+            Vector3 right = win.right;
+            right.y = 0f;
+            if (right.sqrMagnitude < 1e-4f) right = Vector3.right;
+            right.Normalize();
+            float side = Vector3.Dot(head + f * 0.75f - win.position, right) >= 0f ? 1f : -1f;
+            Vector3 pos = win.position + right * side * (halfW + 0.42f);
+            pos.y = head.y - 0.34f;
+            float yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
+            root.transform.SetPositionAndRotation(pos, Quaternion.Euler(-22f, yaw, 0f));
+        }
+
         // ---------------------------------------------------------------- socle
         public void SetSlab(float cx, float cz, float w, float d)
         {

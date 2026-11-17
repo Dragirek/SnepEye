@@ -984,11 +984,13 @@ int main(int argc, char** argv) {
   // Ouverture de la caméra avec la cadence demandée. On MESURE la cadence reçue ;
   // si elle est trop basse avec un backend, on essaie l'autre (MSMF / DirectShow).
   cv::VideoCapture cap;
-  int camApi = cv::CAP_MSMF, mfDirect = 0;
+  int camApi = cv::CAP_MSMF, mfDirect = 0, trackMode = 0, monoDepthCm = 150;
   {
     const int apis[2] = {cv::CAP_MSMF, cv::CAP_DSHOW};
     const char* names[2] = {"MSMF", "DSHOW"};
     int first = AskInt("backend", "Backend camera (0 = MSMF, 1 = DSHOW ; l'autre est essaye si la cadence est trop basse)", 0, 0, 1);
+    trackMode = AskInt("trackmode", "Suivi : 0 = stereo (les deux cameras, recommande), 1 = monocamera (camera gauche seule, profondeur mesuree par le mouvement : experimental)", 0, 0, 1);
+    monoDepthCm = AskInt("monodepth", "Monocamera : profondeur moyenne supposee de la scene au depart, en cm (sert a fixer l'echelle ; l'echelle se corrige ensuite dans Unity)", 150, 30, 1000);
     mfDirect = AskInt("mfdirect", "Lecteur camera direct Media Foundation (1 = oui : moins de latence et de CPU, JPEG decode par libjpeg-turbo ; 0 = OpenCV)", 1, 0, 1);
     // La télécommande Bluetooth démarre APRÈS toutes les questions (ses messages ne se mélangent plus aux réponses)
     if (!noBle) ar6ble::Start(9878, [](const std::string& m) { std::cout << m << std::endl; });
@@ -1416,6 +1418,11 @@ int main(int argc, char** argv) {
         smallFor = want;
         if (trackReady) {
           vo.reset(new StereoVO(Kt, Bt));
+          if (trackMode == 1) {
+            vo->SetMono(true, monoDepthCm / 100.0);
+            std::cout << "[suivi] MONOCAMERA (experimental) : camera gauche seule, profondeur de depart " << monoDepthCm
+                      << " cm. L'echelle des deplacements depend de cette valeur : corrige-la dans Unity (Tete > Echelle des deplacements).\n";
+          }
           haveLast = false;
         } else {
           trackMsg = "rectification de travail impossible : " + (e1.empty() ? std::string("calibration incompatible") : e1);
@@ -1423,15 +1430,16 @@ int main(int argc, char** argv) {
         }
       }
       if (trackReady) {
+        const bool mono = trackMode == 1;   // monocamera : l'image de droite n'est ni convertie, ni reduite, ni rectifiee
         cv::Mat gl, gr, sl, sr;
         ToGray(left, gl);
-        ToGray(right, gr);
+        if (!mono) ToGray(right, gr);
         if (wk != gl.size()) {
           cv::resize(gl, sl, wk, 0, 0, cv::INTER_AREA);
-          cv::resize(gr, sr, wk, 0, 0, cv::INTER_AREA);
+          if (!mono) cv::resize(gr, sr, wk, 0, 0, cv::INTER_AREA);
         } else {
           sl = gl;
-          sr = gr;
+          if (!mono) sr = gr;
         }
         // Image sombre (typiquement 120 i/s : exposition courte, ou pièce peu éclairée) : peu de points accrochables et le suivi décroche.
         // Gain simple, le même pour les deux images (le suivi compare gauche et droite). Sans effet sur une image normalement exposée.
@@ -1441,9 +1449,8 @@ int main(int argc, char** argv) {
             const double gain = std::min(3.0, 100.0 / std::max(mean, 20.0));
             cv::Mat ga, gb;
             sl.convertTo(ga, -1, gain);
-            sr.convertTo(gb, -1, gain);
             sl = ga;
-            sr = gb;
+            if (!mono) { sr.convertTo(gb, -1, gain); sr = gb; }
             static bool warned = false;
             if (!warned && gain > 1.5) {
               warned = true;
@@ -1453,7 +1460,7 @@ int main(int argc, char** argv) {
           }
         }
         cv::remap(sl, tl, rectT.mapL1, rectT.mapL2, cv::INTER_LINEAR);
-        cv::remap(sr, tr, rectT.mapR1, rectT.mapR2, cv::INTER_LINEAR);
+        if (!mono) cv::remap(sr, tr, rectT.mapR1, rectT.mapR2, cv::INTER_LINEAR);
       }
     }
     // ---- Tracking 6DoF ----

@@ -49,7 +49,18 @@ class StereoVO {
       : K_(K), B_(baseline_m), maxPts_(maxPts), depthMax_(depthMax) {}
 
   int nPoints() const { return (int)p2_.size(); }
-  const std::vector<cv::Point3d>& Points3D() const { return p3_; }  // points suivis, repère V
+  // points suivis, repère V (en monocaméra : seulement ceux dont la profondeur a été mesurée par le mouvement)
+  const std::vector<cv::Point3d>& Points3D() const { return mono_ ? refinedPts_ : p3_; }
+
+  // Monocaméra : l'image de droite n'est pas utilisée. Un nouveau point reçoit d'abord une profondeur supposée (médiane de la scène déjà mesurée,
+  // sinon assumedDepth_m), puis sa vraie profondeur est calculée par triangulation entre l'endroit où on l'a vu la première fois et la pose actuelle,
+  // dès que la tête s'est assez déplacée. L'échelle de départ dépend donc de assumedDepth_m (réglable avec « Echelle des déplacements » dans Unity).
+  void SetMono(bool on, double assumedDepth_m = 1.5) {
+    mono_ = on;
+    assumedDepth_ = assumedDepth_m;
+  }
+  bool IsMono() const { return mono_; }
+  int nRefined() const { int n = 0; for (const auto& m : mi_) n += m.refined ? 1 : 0; return n; }
 
   void Reset() {
     R = cv::Matx33d::eye();
@@ -60,6 +71,8 @@ class StereoVO {
     prev_.release();
     p2_.clear();
     p3_.clear();
+    mi_.clear();
+    refinedPts_.clear();
   }
 
   // left/right : images rectifiées 8 bits, même taille. dRcam : rotation de la
@@ -74,9 +87,10 @@ class StereoVO {
     // Aucun point suivi (image sombre/unie au démarrage, tous perdus) : OpenCV
     // refuse un tableau vide dans le KLT (assertion = arrêt du programme).
     // On cherche de nouveaux points et on réessaie à l'image suivante.
-    if (p2_.empty() || p2_.size() != p3_.size()) {
+    if (p2_.empty() || p2_.size() != p3_.size() || (mono_ && mi_.size() != p2_.size())) {
       p2_.clear();
       p3_.clear();
+      mi_.clear();
       prev_ = left.clone();
       AddPoints(left, right);
       state = kLost;
@@ -108,6 +122,7 @@ class StereoVO {
 
     std::vector<cv::Point2f> q2;
     std::vector<cv::Point3d> q3;
+    std::vector<MonoInfo> qm;
     for (size_t i = 0; i < n; i++) {
       if (!st[i] || !st2[i]) continue;
       double dx = bk[i].x - p2_[i].x, dy = bk[i].y - p2_[i].y;
@@ -115,15 +130,18 @@ class StereoVO {
       if (nxt[i].x <= 0 || nxt[i].x >= left.cols || nxt[i].y <= 0 || nxt[i].y >= left.rows) continue;
       q2.push_back(nxt[i]);
       q3.push_back(p3_[i]);
+      if (mono_) qm.push_back(mi_[i]);
     }
     p2_.swap(q2);
     p3_.swap(q3);
+    if (mono_) mi_.swap(qm);
 
     if (p2_.size() < 12) {  // trop peu de points : on repart de zéro (pose conservée)
       state = kLost;
       prev_ = left.clone();
       p2_.clear();
       p3_.clear();
+      mi_.clear();
       AddPoints(left, right);
       return;
     }
@@ -132,8 +150,22 @@ class StereoVO {
     cv::Rodrigues(cv::Mat(Rcw), rvec);
     tvec = (cv::Mat_<double>(3, 1) << tcw[0], tcw[1], tcw[2]);
     std::vector<int> inl;
-    bool ok = cv::solvePnPRansac(p3_, p2_, Km, cv::noArray(), rvec, tvec, true, 120, 2.0f, 0.995, inl,
-                                 cv::SOLVEPNP_ITERATIVE);
+    // Monocaméra : quand assez de points ont une profondeur mesurée, seuls ceux-là servent à la pose (les autres ont une profondeur supposée)
+    std::vector<int> sel;
+    if (mono_ && nRefined() >= 25) {
+      for (size_t i = 0; i < mi_.size(); i++) if (mi_[i].refined) sel.push_back((int)i);
+    }
+    bool ok;
+    if (!sel.empty()) {
+      std::vector<cv::Point3d> s3;
+      std::vector<cv::Point2f> s2;
+      for (int i : sel) { s3.push_back(p3_[i]); s2.push_back(p2_[i]); }
+      std::vector<int> inSel;
+      ok = cv::solvePnPRansac(s3, s2, Km, cv::noArray(), rvec, tvec, true, 120, 2.0f, 0.995, inSel, cv::SOLVEPNP_ITERATIVE);
+      for (int k : inSel) inl.push_back(sel[k]);
+    } else {
+      ok = cv::solvePnPRansac(p3_, p2_, Km, cv::noArray(), rvec, tvec, true, 120, 2.0f, 0.995, inl, cv::SOLVEPNP_ITERATIVE);
+    }
     if (!ok || inl.size() < 12) {
       state = kLost;
       prev_ = left.clone();
@@ -157,12 +189,16 @@ class StereoVO {
     // On ne garde que les points cohérents avec la pose (inliers)
     std::vector<char> keep(p2_.size(), 0);
     for (int i : inl) keep[i] = 1;
+    if (mono_ && !sel.empty())   // monocaméra : les points encore sans profondeur mesurée restent (ils n'ont pas servi à la pose)
+      for (size_t i = 0; i < mi_.size(); i++) if (!mi_[i].refined) keep[i] = 1;
     std::vector<cv::Point2f> k2;
     std::vector<cv::Point3d> k3;
+    std::vector<MonoInfo> km;
     for (size_t i = 0; i < p2_.size(); i++)
-      if (keep[i]) { k2.push_back(p2_[i]); k3.push_back(p3_[i]); }
+      if (keep[i]) { k2.push_back(p2_[i]); k3.push_back(p3_[i]); if (mono_) km.push_back(mi_[i]); }
     p2_.swap(k2);
     p3_.swap(k3);
+    if (mono_) { mi_.swap(km); RefineMono(); }
     nInliers = (int)inl.size();
     state = kOk;
     prev_ = left.clone();
@@ -197,7 +233,78 @@ class StereoVO {
     }
   }
 
+  struct MonoInfo {
+    cv::Vec3d c0;      // centre de la caméra (repère V) quand le point a été vu la première fois
+    cv::Vec3d d0;      // direction du rayon à ce moment (repère V, unitaire)
+    bool refined;      // profondeur mesurée par triangulation
+  };
+
+  cv::Vec3d RayV(const cv::Point2f& p) const {
+    cv::Vec3d r(((double)p.x - K_(0, 2)) / K_(0, 0), ((double)p.y - K_(1, 2)) / K_(1, 1), 1.0);
+    cv::Vec3d w = R * r;
+    return w * (1.0 / std::max(1e-12, std::sqrt(w.dot(w))));
+  }
+
+  // Profondeur typique de la scène vue maintenant : médiane des points déjà mesurés, sinon la profondeur supposée.
+  double SceneDepth() const {
+    std::vector<double> z;
+    const cv::Matx33d Rcw = R.t();
+    for (size_t i = 0; i < mi_.size(); i++) {
+      if (!mi_[i].refined) continue;
+      const cv::Vec3d pc = Rcw * (cv::Vec3d(p3_[i].x, p3_[i].y, p3_[i].z) - t);
+      if (pc[2] > 0.2 && pc[2] < 15.0) z.push_back(pc[2]);
+    }
+    if (z.size() < 8) return assumedDepth_;
+    std::nth_element(z.begin(), z.begin() + z.size() / 2, z.end());
+    return z[z.size() / 2];
+  }
+
+  void AddPointsMono(const cv::Mat& left) {
+    int need = maxPts_ - (int)p2_.size();
+    if (need <= 10) return;
+    cv::Mat mask(left.size(), CV_8U, cv::Scalar(255));
+    for (const auto& p : p2_) cv::circle(mask, cv::Point((int)p.x, (int)p.y), 14, cv::Scalar(0), -1);
+    std::vector<cv::Point2f> c;
+    cv::goodFeaturesToTrack(left, c, need, 0.01, 10, mask);
+    if (c.empty()) return;
+    const double z = SceneDepth();
+    for (const auto& p : c) {
+      const cv::Vec3d Xc(((double)p.x - K_(0, 2)) / K_(0, 0) * z, ((double)p.y - K_(1, 2)) / K_(1, 1) * z, z);
+      const cv::Vec3d Xw = R * Xc + t;
+      p2_.push_back(p);
+      p3_.push_back(cv::Point3d(Xw[0], Xw[1], Xw[2]));
+      mi_.push_back(MonoInfo{t, RayV(p), false});
+    }
+  }
+
+  // Triangulation entre le rayon de la première vue et le rayon actuel (points les plus proches de deux droites). Acceptée seulement si la tête s'est
+  // assez déplacée (>= 2 cm, >= 1 degré de parallaxe) et si les deux rayons se croisent presque (écart < 3 % de la distance).
+  void RefineMono() {
+    refinedPts_.clear();
+    for (size_t i = 0; i < mi_.size(); i++) {
+      MonoInfo& m = mi_[i];
+      if (!m.refined) {
+        const cv::Vec3d d1 = RayV(p2_[i]);
+        const cv::Vec3d w0 = m.c0 - t;
+        const double b = m.d0.dot(d1);
+        if (cv::norm(t - m.c0) < 0.02 || b > 0.99985) continue;
+        const double den = 1.0 - b * b;
+        if (den < 1e-9) continue;
+        const double dd = m.d0.dot(w0), ee = d1.dot(w0);
+        const double s0 = (b * ee - dd) / den, s1 = (ee - b * dd) / den;
+        if (s0 < 0.2 || s1 < 0.2 || s0 > 20.0 || s1 > 20.0) continue;
+        const cv::Vec3d P = m.c0 + m.d0 * s0, Q = t + d1 * s1;
+        if (cv::norm(P - Q) > 0.03 * s1) continue;
+        const cv::Vec3d X = 0.5 * (P + Q);
+        p3_[i] = cv::Point3d(X[0], X[1], X[2]);
+        m.refined = true;
+      }
+      if (m.refined) refinedPts_.push_back(p3_[i]);
+    }
+  }
+
   void AddPoints(const cv::Mat& left, const cv::Mat& right) {
+    if (mono_) { AddPointsMono(left); return; }
     int need = maxPts_ - (int)p2_.size();
     if (need <= 10) return;
     cv::Mat mask(left.size(), CV_8U, cv::Scalar(255));
@@ -222,4 +329,8 @@ class StereoVO {
   cv::Mat prev_;
   std::vector<cv::Point2f> p2_;
   std::vector<cv::Point3d> p3_;
+  bool mono_ = false;
+  double assumedDepth_ = 1.5;
+  std::vector<MonoInfo> mi_;                 // en monocaméra : une entrée par point de p2_ / p3_
+  std::vector<cv::Point3d> refinedPts_;
 };

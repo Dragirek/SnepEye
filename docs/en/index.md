@@ -23,7 +23,7 @@ Pick what you want to do. Each page is short and standalone.
 | **Extra cameras** | Night vision, thermal, mirror view | [Extra cameras](../fr/reference/cameras-supplementaires.md) |
 | **Interface** | VR taskbar (dock), movable windows, window-button styles Windows / Mac / Quest | [Dock](../fr/reference/dock-et-fenetres.md) |
 
-Optional features cost **nothing** while they are switched off.
+Optional features cost **nothing** while they are switched off. The control app also has a **Help** page (last in the left list) with animated diagrams that show the recommended choice for each step.
 
 ## Troubleshooting
 - **No Actions tab / no Artifacts section / no download button:** see the last section of the [beginner guide](getting-started.md).

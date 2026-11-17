@@ -278,7 +278,8 @@ namespace AR6DoF
             o.cam.farClipPlane = 10f;
             o.cam.clearFlags = CameraClearFlags.SolidColor;
             o.cam.cullingMask = 1 << DrawLayer;
-            o.cam.stereoTargetEye = StereoTargetEyeMask.None;   // jamais dans le casque
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null)
+                o.cam.stereoTargetEye = StereoTargetEyeMask.None;   // jamais dans le casque (ignoré, avec avertissement, sous SRP : la caméra à texture ne va de toute façon pas à l'écran du casque)
             o.cam.allowMSAA = false;
             o.cam.allowHDR = false;
             o.cam.useOcclusionCulling = false;

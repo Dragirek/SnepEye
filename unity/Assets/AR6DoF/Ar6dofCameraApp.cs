@@ -139,7 +139,6 @@ namespace AR6DoF
         Ar6dofPassthrough Pt { get { return dock.passthrough; } }
 
         // texte d'etat, rafraichi par le dock toutes les 0,25 s
-        void RefreshSafe() { if (canvas != null && canvas.gameObject.activeSelf) Refresh(); }
 
         // texture de l'apercu : deux yeux cote a cote, chacun au format de l'oeil de la camera (se refait si la resolution de la camera change)
         void EnsurePreview()

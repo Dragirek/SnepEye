@@ -8,6 +8,9 @@
 //  4. Parmi les taches : taille plausible, bien pleine (solidité), pas trop allongée ; la plus ronde et la plus grosse gagne.
 //  5. Centre = centre de gravité de l'enveloppe convexe (précis au sous-pixel, insensible aux reflets et aux cils).
 //  6. Reflet : le petit point le plus clair près de la pupille, centre pondéré par la luminosité.
+//  7. Affinage du contour (c.refine) : 32 rayons partent du centre ; sur chacun on cherche, au 1/10 de pixel, l'endroit où la luminosité passe à mi-chemin
+//     entre l'intérieur de la pupille et l'iris. Une ellipse ajustée sur ces points donne le centre et le rayon, indépendamment du seuil et des
+//     paupières qui mordent un peu sur la pupille (rayons aberrants écartés). Gain mesuré : tests/eye_pupil_test.cpp.
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -24,6 +27,7 @@ struct PupilConfig {
   double minSolidity = 0.80;
   double minAspect = 0.50;
   int glintMin = 200;          // luminosité mini d'un reflet
+  bool refine = true;          // affinage du contour au sous-pixel (étape 7) ; false = centre de l'enveloppe convexe seul
 };
 
 struct PupilResult {
@@ -72,6 +76,7 @@ class PupilDetector {
     res.py = m.m01 / m.m00 + y0;
     res.area = best.area;
     res.radius = std::sqrt(best.area / CV_PI);
+    if (c_.refine) Refine(gray, &res);
     have_ = true; cx_ = res.px; cy_ = res.py; r_ = res.radius; misses_ = 0;
     FindGlint(gray, &res);
     return res;
@@ -141,6 +146,89 @@ class PupilDetector {
     return out;
   }
 
+
+  // Luminosité interpolée (bilinéaire) ; hors image : le bord.
+  static double Sample(const cv::Mat& g, double x, double y) {
+    x = std::min(std::max(x, 0.0), g.cols - 1.001);
+    y = std::min(std::max(y, 0.0), g.rows - 1.001);
+    const int ix = (int)x, iy = (int)y;
+    const double fx = x - ix, fy = y - iy;
+    const uchar* p0 = g.ptr<uchar>(iy);
+    const uchar* p1 = g.ptr<uchar>(iy + 1);
+    return (p0[ix] * (1 - fx) + p0[ix + 1] * fx) * (1 - fy) + (p1[ix] * (1 - fx) + p1[ix + 1] * fx) * fy;
+  }
+
+  // Affinage : voir l'étape 7 en tête de fichier. Ne change rien si le résultat n'est pas cohérent avec la détection de départ.
+  void Refine(const cv::Mat& gray, PupilResult* r) {
+    const double r0 = r->radius;
+    if (r0 < 4.0) return;
+    const int pad = (int)std::ceil(2.4 * r0) + 4;
+    const int x0 = std::max(0, (int)(r->px - pad)), x1 = std::min(gray.cols, (int)(r->px + pad) + 1);
+    const int y0 = std::max(0, (int)(r->py - pad)), y1 = std::min(gray.rows, (int)(r->py + pad) + 1);
+    if (x1 - x0 < 12 || y1 - y0 < 12) return;
+    cv::blur(gray(cv::Rect(x0, y0, x1 - x0, y1 - y0)), rblur_, cv::Size(3, 3));
+    const double cx = r->px - x0, cy = r->py - y0;
+    const int N = 32;
+    const double s0 = 0.45 * r0, s1 = 2.1 * r0, ds = 0.4;
+    const int ns = (int)((s1 - s0) / ds) + 1;
+    prof_.assign((size_t)N * ns, 0.0);
+    std::vector<double> inner;
+    for (int k = 0; k < N; k++) {
+      const double a = 2.0 * CV_PI * k / N, ca = std::cos(a), sa = std::sin(a);
+      for (int i = 0; i < ns; i++) {
+        const double s = s0 + i * ds;
+        prof_[(size_t)k * ns + i] = Sample(rblur_, cx + s * ca, cy + s * sa);
+        if (s <= 0.75 * r0) inner.push_back(prof_[(size_t)k * ns + i]);
+      }
+    }
+    if (inner.size() < 8) return;
+    std::nth_element(inner.begin(), inner.begin() + inner.size() / 2, inner.end());
+    const double lin = inner[inner.size() / 2];   // médiane : le reflet qui peut se trouver dans la pupille ne la fausse pas
+    std::vector<double> outer;
+    for (int k = 0; k < N; k++)
+      for (int i = 0; i < ns; i++)
+        if (s0 + i * ds >= 1.45 * r0) outer.push_back(prof_[(size_t)k * ns + i]);
+    if (outer.empty()) return;
+    std::nth_element(outer.begin(), outer.begin() + outer.size() / 2, outer.end());
+    const double lout = outer[outer.size() / 2];
+    if (lout - lin < 12.0) return;                // pas assez de contraste entre pupille et iris : on garde la détection de départ
+    const double mid = 0.5 * (lin + lout);
+    std::vector<cv::Point2f> pts;
+    std::vector<double> rad;
+    for (int k = 0; k < N; k++) {
+      const double a = 2.0 * CV_PI * k / N, ca = std::cos(a), sa = std::sin(a);
+      for (int i = 1; i < ns; i++) {
+        const double a0 = prof_[(size_t)k * ns + i - 1], a1 = prof_[(size_t)k * ns + i];
+        if (a0 < mid && a1 >= mid) {   // première montée au-dessus du niveau moyen : le bord de la pupille
+          const double f = (mid - a0) / std::max(1e-6, a1 - a0);
+          const double s = s0 + (i - 1 + f) * ds;
+          pts.emplace_back((float)(cx + s * ca), (float)(cy + s * sa));
+          rad.push_back(s);
+          break;
+        }
+      }
+    }
+    if (pts.size() < 14) return;
+    std::vector<double> sr = rad;
+    std::nth_element(sr.begin(), sr.begin() + sr.size() / 2, sr.end());
+    const double med = sr[sr.size() / 2];
+    std::vector<cv::Point2f> good;
+    for (size_t i = 0; i < pts.size(); i++)
+      if (std::fabs(rad[i] - med) < 0.3 * med) good.push_back(pts[i]);   // paupière, cil, rayon qui sort de la pupille : écartés
+    if (good.size() < 12) return;
+    const cv::RotatedRect e = cv::fitEllipse(good);
+    const double ma = std::max(e.size.width, e.size.height), mi = std::min(e.size.width, e.size.height);
+    if (mi < 0.6 * ma) return;
+    const double er = 0.25 * (e.size.width + e.size.height);
+    if (er < 0.7 * r0 || er > 1.4 * r0) return;
+    const double ex = e.center.x + x0, ey = e.center.y + y0;
+    if (std::hypot(ex - r->px, ey - r->py) > 0.35 * r0) return;
+    r->px = ex;
+    r->py = ey;
+    r->radius = er;
+    r->area = CV_PI * er * er;
+  }
+
   // Reflet infrarouge : petit point très clair dans la zone de la pupille
   void FindGlint(const cv::Mat& gray, PupilResult* r) {
     const int W = gray.cols, H = gray.rows;
@@ -183,7 +271,8 @@ class PupilDetector {
   }
 
   PupilConfig c_;
-  cv::Mat kOpen_, kClose_, blur_, bin_, gbin_, glab_;
+  cv::Mat kOpen_, kClose_, blur_, bin_, gbin_, glab_, rblur_;
+  std::vector<double> prof_;
   std::vector<std::vector<cv::Point>> contours_;
   bool have_ = false;
   double cx_ = 0, cy_ = 0, r_ = 0;

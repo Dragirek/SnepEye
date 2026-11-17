@@ -12,3 +12,10 @@ Les ports série portent le nom que Windows leur donne (Gestionnaire de périph�
 
 ## Unity : chemin de la sonde
 Renseigner une fois *Launcher > Exe Path* (ou laisser `ar6dof_probe-win64` à côté du projet) suffit : le chemin est retenu, et *AR6DoF > Vérifier l'installation* utilise ce même chemin pour chercher `camera_model.json` et `ar6dof_screen.dll`. Maintenir une icône du dock 1 s fait apparaître l'écran près de toi.
+
+## Page Aide de `ar6dof_app.exe`
+Dernière page de la navigation : cinq diapositives animées (démarrage, stéréo ou une caméra, calibration, yeux et bouche, dans le casque) qui montrent à chaque fois le choix conseillé. Clique sur *Suivant* / *Précédent* ou sur les points. Le dessin vient de `src/app/help_draw.h` ; `tests/help_draw_test.cpp` en écrit les images pour les vérifier.
+
+## Journal : « arret du programme » après une déconnexion Bluetooth
+La ligne d'arrêt qui suit la fin d'une session BLE est une **fin normale** (la télécommande s'est déconnectée ou le suivi a été arrêté), pas une erreur.
+

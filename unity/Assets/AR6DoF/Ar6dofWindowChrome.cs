@@ -393,8 +393,9 @@ namespace AR6DoF
         {
             pressed = true;
             Refresh();
-            if (kind == Kind.Resize) chrome.ResizeBegin(world);
-            else if (kind == Kind.Move) chrome.MoveBegin(world, button);
+            if (kind == Kind.Resize) { Ar6dofUiSound.Play(Ar6dofUiSnd.Grab); chrome.ResizeBegin(world); }
+            else if (kind == Kind.Move) { Ar6dofUiSound.Play(Ar6dofUiSnd.Grab); chrome.MoveBegin(world, button); }
+            else if (kind == Kind.Settings || kind == Kind.ResetSize) Ar6dofUiSound.Play(Ar6dofUiSnd.Click, 0.8f);
         }
 
         public void OnPointerUp(Vector3 world, int button)
@@ -402,8 +403,8 @@ namespace AR6DoF
             bool was = pressed;
             pressed = false;
             Refresh();
-            if (kind == Kind.Resize) { if (was) chrome.ResizeEnd(); return; }
-            if (kind == Kind.Move) { if (was) chrome.MoveEnd(); return; }
+            if (kind == Kind.Resize) { if (was) { Ar6dofUiSound.Play(Ar6dofUiSnd.Drop); chrome.ResizeEnd(); } return; }
+            if (kind == Kind.Move) { if (was) { Ar6dofUiSound.Play(Ar6dofUiSnd.Drop); chrome.MoveEnd(); } return; }
             if (was && hover) chrome.Click(kind);   // clic = appuyé ET relâché sur le bouton
         }
 

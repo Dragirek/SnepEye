@@ -717,7 +717,7 @@ namespace AR6DoF
             {
                 x += bw + gap;
                 var b6 = Ar6dofVrUi.MakeButton(iconsRoot, "Vue : Normale", new Vector2(x, y), new Vector2(bw, bh), () => { if (camHub != null) camHub.CycleView(); ApplyReveal(); }, out lbl, 20);
-                lbl.gameObject.AddComponent<Ar6dofFitText>().Init(lbl, 20);
+                Ar6dofFitText.Ensure(lbl, 20);
                 viewLbl = lbl;
                 Tip(b6, "Change la vue : camera normale, puis vision nocturne et thermique (cameras activees dans Reglages > Image > Cameras)");
             }
@@ -855,7 +855,7 @@ namespace AR6DoF
                 gi.raycastTarget = false;
                 Ar6dofTheme.Attach(g, Ar6dofRole.Text);
                 var nl = Ar6dofVrUi.Label(rt, Ar6dofLoc.T(a.title), new Vector2(0f, -32f), new Vector2(size, 24f), 15);
-                nl.gameObject.AddComponent<Ar6dofFitText>().Init(nl, 15);
+                Ar6dofFitText.Ensure(nl, 15);
             }
             else
             {
@@ -945,6 +945,7 @@ namespace AR6DoF
                 bool scrolled = RevealApp(app);     // l'icone doit etre visible dans la barre (defilement) pour que l'animation parte d'elle
                 if (!wasDocked || scrolled) RebuildIcons();
             }
+            Ar6dofUiSound.Play(show ? Ar6dofUiSnd.Open : (closing.Contains(app) ? Ar6dofUiSnd.Close : Ar6dofUiSnd.Minimize));
             Transform t = app.AnimRoot;
             RectTransform icon;
             iconOf.TryGetValue(app, out icon);

@@ -25,6 +25,8 @@ namespace AR6DoF
             base.Destroy();
         }
 
+        protected override bool CanHideMenu { get { return Ar6dofDvdWorld.Screens.Count > 0; } }
+
         void PlaceScreen(int type)
         {
             Ar6dofDvdWorld.Place(type, Ar6dofDvdWorld.ScreenWidth);

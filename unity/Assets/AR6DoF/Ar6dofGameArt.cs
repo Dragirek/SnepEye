@@ -119,12 +119,6 @@ namespace AR6DoF
             return Cached("disc", () => ToSprite(Render("#fff; c 32 32 31", 64, "ffffff", "", 0f, Color.white), Vector4.zero));
         }
 
-        /// <summary>Dessin libre (autres applications) : memes formes, mis en cache sous 'key'.</summary>
-        public static Sprite FromSpec(string key, string spec, int n, float outline, Color outlineColor)
-        {
-            return Cached("x" + key, () => ToSprite(Render(spec, n, "ffffff", "", outline, outlineColor), Vector4.zero));
-        }
-
         // ---------------------------------------------------------------- rendu
         sealed class Op
         {

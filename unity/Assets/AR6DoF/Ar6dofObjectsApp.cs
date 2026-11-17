@@ -35,6 +35,8 @@ namespace AR6DoF
             world.Load();
         }
 
+        protected override bool CanHideMenu { get { return world.items.Count > 0; } }
+
         public override void Destroy()
         {
             world.Dispose();

@@ -38,6 +38,7 @@
 
 #include "calib_view.h"
 #include "devices.h"
+#include "help_draw.h"
 #include "frame_share_core.h"
 
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -60,6 +61,8 @@ std::vector<std::pair<HWND, int>> g_stepCtl;   // contrôle de la page Calibrati
 int g_buildSteps = 0;              // masque appliqué aux contrôles et cartes en cours de création (0 = toutes les étapes)
 int g_calStep = 0;                 // étape affichée de la page Calibration (calview::Step)
 int g_dpi = 96;
+int g_helpSlide = 0;               // page Aide : diapositive affichée
+DWORD g_helpStart = 0;             // instant (GetTickCount) où elle est apparue : fait avancer l'animation
 bool g_loading = false;            // vrai pendant qu'on remplit les champs (pas de réaction aux changements)
 bool g_running = false;
 DWORD g_stopDeadline = 0;          // arrêt demandé : instant (GetTickCount) après lequel on force
@@ -89,7 +92,7 @@ struct Loc { HWND h; const wchar_t* fr; const wchar_t* en; };
 std::vector<Loc> g_loc;
 
 enum {
-  ID_LANG = 100, ID_CAMTYPE, ID_CAM, ID_CAM_REFRESH, ID_CAMR_REFRESH, ID_EYEL_REFRESH, ID_EYER_REFRESH, ID_MOUTH_REFRESH, ID_CAMR, ID_CAMHINT, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT,
+  ID_LANG = 100, ID_CAMTYPE, ID_CAM, ID_CAM_REFRESH, ID_CAMR_REFRESH, ID_EYEL_REFRESH, ID_EYER_REFRESH, ID_MOUTH_REFRESH, ID_CAMR, ID_CAMHINT, ID_MODE, ID_W, ID_H, ID_FPS, ID_BACKEND, ID_MFDIRECT, ID_TRACKMODE, ID_MONODEPTH,
   ID_PORT, ID_PORT_REFRESH, ID_CALDIR, ID_CALBROWSE, ID_BASE, ID_IMUSTAT, ID_MOUNTMSG,
   ID_UDP, ID_SHARE, ID_BLE, ID_AUTOTRACK,
   ID_EYE, ID_EYEL, ID_EYER, ID_EYEFPS, ID_EYEBACK, ID_EYE_CAL, ID_EYE_RECENTER, ID_EYE_CLEAR, ID_EYE_FOV, ID_EYESTAT,
@@ -103,10 +106,11 @@ enum {
   ID_CAL_MSG, ID_CAL_TIPT, ID_CAL_TIPB, ID_CAL_CALC, ID_CAL_SWAP, ID_CAL_CANCEL, ID_CAL_COMP, ID_CAL_RES, ID_CAL_WARN, ID_CAL_RNOTE, ID_CAL_APPLY, ID_CAL_TOVERIFY, ID_CAL_REDO,
   ID_CAL_VTXT, ID_CAL_VDIST, ID_CAL_VMEASURE, ID_CAL_VFIX, ID_CAL_VBACK,
   ID_CAL_GFX_BAR, ID_CAL_GFX_PV, ID_CAL_GFX_TIP, ID_CAL_GFX_GOALS, ID_CAL_GFX_EX, ID_CAL_GFX_PV2, ID_CAL_GFX_VB,
-  ID_NAV0 = 300   // 9 pages : ID_NAV0 .. ID_NAV0 + 8
+  ID_HELP,
+  ID_NAV0 = 300   // 10 pages : ID_NAV0 .. ID_NAV0 + 9
 };
-const int kNavCount = 9;
-enum { PG_CAM = 0, PG_CALIB, PG_SENSORS, PG_UNITY, PG_EYES, PG_MOUTH, PG_TRACK, PG_LOG, PG_ADV };
+const int kNavCount = 10;
+enum { PG_CAM = 0, PG_CALIB, PG_SENSORS, PG_UNITY, PG_EYES, PG_MOUTH, PG_TRACK, PG_LOG, PG_ADV, PG_HELP };
 
 // Modes courants proposés seulement quand la caméra ne répond pas à la question « quels modes as-tu ? » (déjà utilisée par ar6dof_probe, par exemple).
 struct Preset { int w, h, fps; };
@@ -310,6 +314,14 @@ void FillBackends(int id) {
   SetSel(id, sel >= 0 ? sel : 0);
 }
 
+void FillTrackModes(int id) {
+  int sel = GetSel(id);
+  ClearCombo(id);
+  AddItem(id, Tr(L"Stéréo : les deux caméras (recommandé)", L"Stereo: both cameras (recommended)"));
+  AddItem(id, Tr(L"Monocaméra : caméra gauche seule (expérimental)", L"Mono camera: left camera only (experimental)"));
+  SetSel(id, sel >= 0 ? sel : 0);
+}
+
 void FillCams(int id, bool withNone) {
   int sel = GetSel(id);
   ClearCombo(id);
@@ -508,6 +520,8 @@ void ConfigToFields() {
   UpdateCamType();
   RebuildModes(g_cfg.find("width") == g_cfg.end());   // première utilisation : on propose un mode que la caméra a vraiment
   SetSel(ID_BACKEND, CfgInt("backend", 0) == 1 ? 1 : 0);
+  SetSel(ID_TRACKMODE, CfgInt("trackmode", 0) == 1 ? 1 : 0);
+  SetText(ID_MONODEPTH, std::to_wstring(CfgInt("monodepth", 150)));
   SetChecked(ID_MFDIRECT, CfgInt("mfdirect", 1) != 0);   // lecteur direct par défaut : repli automatique sur OpenCV si la caméra ne le supporte pas
 
   std::string pn = CfgStr("portname", "");
@@ -590,6 +604,8 @@ bool SaveFields() {
   if (!ReadInt(ID_MOUTHFPS, 10, 120, L"Cadence de la bouche", L"Mouth frame rate", &mfps)) return false;
   if (!ReadInt(ID_EYE_FOV, 10, 150, L"Champ de vision de l'écran", L"Screen field of view", &fov)) return false;
   if (!ReadInt(ID_THREADS, 1, 16, L"Threads de calcul", L"Compute threads", &thr)) return false;
+  int mdepth = 150;
+  if (!ReadInt(ID_MONODEPTH, 30, 1000, L"Profondeur supposée", L"Assumed depth", &mdepth)) return false;
 
   bool two = IsTwoCams();
   if (two && GetSel(ID_CAM) == GetSel(ID_CAMR)) {
@@ -610,6 +626,8 @@ bool SaveFields() {
   g_cfg["fps"] = std::to_string(f);
   g_cfg["backend"] = std::to_string(GetSel(ID_BACKEND) == 1 ? 1 : 0);
   g_cfg["mfdirect"] = IsChecked(ID_MFDIRECT) ? "1" : "0";
+  g_cfg["trackmode"] = GetSel(ID_TRACKMODE) == 1 ? "1" : "0";
+  g_cfg["monodepth"] = std::to_string(mdepth);
   std::string cd = W2A(GetText(ID_CALDIR));
   g_cfg["calibdir"] = cd.empty() ? "-" : cd;
   std::string base = W2A(GetText(ID_BASE));
@@ -768,9 +786,9 @@ void FillRound(HDC dc, RECT r, int rad, COLORREF fill, COLORREF line, bool outli
   if (outline) DeleteObject(p);
 }
 
-const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Calibration", L"Capteurs", L"Unity", L"Yeux", L"Bouche", L"Suivi", L"Journal", L"Avancé"};
-const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Calibration", L"Sensors", L"Unity", L"Eyes", L"Mouth", L"Tracking", L"Log", L"Advanced"};
-const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE80A", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE76E", L"\xE768", L"\xE8A5", L"\xE713"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
+const wchar_t* kNavFr[kNavCount] = {L"Caméra", L"Calibration", L"Capteurs", L"Unity", L"Yeux", L"Bouche", L"Suivi", L"Journal", L"Avancé", L"Aide"};
+const wchar_t* kNavEn[kNavCount] = {L"Camera", L"Calibration", L"Sensors", L"Unity", L"Eyes", L"Mouth", L"Tracking", L"Log", L"Advanced", L"Help"};
+const wchar_t* kNavIcon[kNavCount] = {L"\xE722", L"\xE80A", L"\xE9D9", L"\xE71B", L"\xE7B3", L"\xE76E", L"\xE768", L"\xE8A5", L"\xE713", L"\xE897"};   // Segoe Fluent Icons : appareil photo, capteur, lien, œil, lecture, réglages
 
 // Fond de la fenêtre : titre de l'application, titre de la page et cartes de la page affichée.
 void PaintChrome(HDC dc) {
@@ -881,6 +899,7 @@ void ShowPage(int p) {
   g_page = std::min(std::max(p, 0), kNavCount - 1);
   for (const auto& pc : g_pageCtl) ShowWindow(pc.first, (pc.second < 0 || pc.second == g_page) ? SW_SHOW : SW_HIDE);
   if (g_page == PG_CALIB) CalApplyStep();
+  if (g_page == PG_HELP) g_helpStart = GetTickCount();   // l'animation repart du début
   RedrawWindow(g_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
@@ -2026,6 +2045,7 @@ void ApplyLanguage() {
   FillCamTypes();
   FillModes();
   FillBackends(ID_BACKEND);
+  FillTrackModes(ID_TRACKMODE);
   FillBackends(ID_EYEBACK);
   FillBackends(ID_MOUTHBACK);
   FillCams(ID_EYEL, true);
@@ -2094,6 +2114,77 @@ void OnCamTypeChanged() {
 
 // ------------------------------------------------------------------ construction de la fenêtre
 const int kClientW = 940, kClientH = 752;   // taille de la zone cliente à 96 ppp (réduite automatiquement si l'écran est trop petit)
+
+// ------------------------------------------------------------------ page Aide
+// Le dessin (diagrammes animés) est fait par helpdraw::Draw dans un tampon de pixels (src/app/help_draw.h, testé sous Linux) ;
+// on le copie ici puis on écrit les textes par-dessus avec nos polices.
+COLORREF HelpRef(helpdraw::Rgb c) { return RGB((c >> 16) & 255, (c >> 8) & 255, c & 255); }
+helpdraw::Rgb HelpRgb(COLORREF c) { return ((helpdraw::Rgb)GetRValue(c) << 16) | ((helpdraw::Rgb)GetGValue(c) << 8) | (helpdraw::Rgb)GetBValue(c); }
+
+LRESULT CALLBACK HelpProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+  switch (m) {
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC dc = BeginPaint(h, &ps);
+      RECT rc;
+      GetClientRect(h, &rc);
+      if (rc.right > 16 && rc.bottom > 16) {
+        const double k = rc.right / helpdraw::kW;
+        helpdraw::Theme th = {HelpRgb(g_pal.bg), HelpRgb(g_pal.card), HelpRgb(g_pal.border), HelpRgb(g_pal.text), HelpRgb(g_pal.dim), HelpRgb(g_accent), g_dark ? 0x4CC38Au : 0x2E9E5Bu};
+        helpdraw::Raster ras(rc.right, rc.bottom, k);
+        helpdraw::Draw(ras, th, g_helpSlide, (double)(GetTickCount() - g_helpStart) / 1000.0, g_en);
+        HDC mem = CreateCompatibleDC(dc);
+        HBITMAP bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
+        HGDIOBJ old = SelectObject(mem, bmp);
+        BITMAPINFO bi;
+        memset(&bi, 0, sizeof(bi));
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = ras.Width();
+        bi.bmiHeader.biHeight = -ras.Height();   // négatif : lignes de haut en bas
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        SetDIBitsToDevice(mem, 0, 0, ras.Width(), ras.Height(), 0, 0, 0, ras.Height(), ras.Data(), &bi, DIB_RGB_COLORS);
+        SetBkMode(mem, TRANSPARENT);
+        for (const helpdraw::TextItem& t : ras.texts) {
+          SelectObject(mem, t.style == 1 ? g_fontTitle : g_font);
+          SetTextColor(mem, HelpRef(t.col));
+          RECT tr = {(LONG)std::lround(t.x * k), (LONG)std::lround(t.y * k), (LONG)std::lround((t.x + t.w) * k), (LONG)std::lround((t.y + t.h) * k)};
+          const UINT fl = DT_WORDBREAK | DT_NOPREFIX | ((t.align & 1) ? DT_CENTER : (t.align & 2) ? DT_RIGHT : DT_LEFT);
+          if (t.align & 4) {   // centré verticalement : on mesure d'abord le texte
+            RECT cr = tr;
+            DrawTextW(mem, t.s.c_str(), -1, &cr, fl | DT_CALCRECT);
+            const LONG spare = (tr.bottom - tr.top) - (cr.bottom - cr.top);
+            if (spare > 0) tr.top += spare / 2;
+          }
+          DrawTextW(mem, t.s.c_str(), -1, &tr, fl);
+        }
+        BitBlt(dc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
+        SelectObject(mem, old);
+        DeleteObject(bmp);
+        DeleteDC(mem);
+      }
+      EndPaint(h, &ps);
+      return 0;
+    }
+    case WM_LBUTTONDOWN: {
+      RECT rc;
+      GetClientRect(h, &rc);
+      const double k = rc.right > 0 ? rc.right / helpdraw::kW : 1.0;
+      const int hit = helpdraw::HitTest((short)LOWORD(l) / k, (short)HIWORD(l) / k);
+      if (hit == -1) g_helpSlide = (g_helpSlide + helpdraw::kSlides - 1) % helpdraw::kSlides;
+      else if (hit == 1) g_helpSlide = (g_helpSlide + 1) % helpdraw::kSlides;
+      else if (hit >= 100) g_helpSlide = std::min(hit - 100, helpdraw::kSlides - 1);
+      else return 0;
+      g_helpStart = GetTickCount();
+      InvalidateRect(h, nullptr, FALSE);
+      return 0;
+    }
+  }
+  return DefWindowProcW(h, m, w, l);
+}
 
 void CreateControls() {
   // Disposition : navigation à gauche (x 0..204), page à droite (cartes de x 224 à 916), barre du bas (y 704..738). Contrôles posés à la main, en pixels à 96 ppp.
@@ -2346,6 +2437,19 @@ void CreateControls() {
   Combo(X + C0, 248, CR, ID_BACKEND);
   Check(L"Lecteur direct Media Foundation (moins de latence et de CPU)", L"Direct Media Foundation reader (lower latency and CPU)", X + PAD, 288, CWd - 2 * PAD, ID_MFDIRECT);
 
+  CardBox(L"Mode de suivi", L"Tracking mode", X, 348, CWd, 190);
+  Label(L"Suivi avec", L"Track with", X + PAD, 394, 160);
+  Combo(X + C0, 390, CR, ID_TRACKMODE);
+  Label(L"Profondeur de départ (cm)", L"Starting depth (cm)", X + PAD, 434, 200);
+  Edit(X + C0, 430, 70, ID_MONODEPTH, true);
+  Mk(L"STATIC", L"Stéréo : la profondeur vient des deux caméras, le suivi est précis et à la bonne échelle. Monocaméra : une seule caméra sert au suivi (moins de calcul) ; la profondeur est mesurée en bougeant la tête, donc l'échelle dépend de la profondeur de départ (distance moyenne des objets de la pièce) et se corrige ensuite dans Unity. Pris en compte au prochain démarrage du suivi.",
+     L"Stereo: depth comes from both cameras, tracking is precise and at the right scale. Mono camera: a single camera is used for tracking (less computation); depth is measured by moving your head, so the scale depends on the starting depth (average distance of objects in the room) and is then corrected in Unity. Applied the next time tracking starts.",
+     SS_LEFT | SS_NOPREFIX, X + PAD, 470, CWd - 2 * PAD, 62, 0);
+
+  // ---- page 9 : Aide (diagrammes animés, dessinés par HelpProc)
+  g_buildPage = PG_HELP;
+  Mk(L"AR6Help", nullptr, nullptr, 0, X, 62, 692, 612, ID_HELP);
+
   g_buildPage = -1;
 }
 
@@ -2529,6 +2633,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_TIMER:
       if (w == 2) {   // 15 fois par seconde : ne fait rien tant qu'aucun aperçu n'est demandé
         OnFastTick();
+        if (g_page == PG_HELP) InvalidateRect(H(ID_HELP), nullptr, FALSE);   // animation de l'aide
         if (g_page == PG_CALIB || g_cp.starting) CalPoll();
         if (g_startAfterSvc) { static int n = 0; if (++n % 4 == 0) UpdateState(); }
         return 0;
@@ -2639,6 +2744,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     gc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     gc.lpszClassName = L"AR6CalGfx";
     RegisterClassW(&gc);
+    WNDCLASSW hc;   // page Aide : diagrammes animés
+    memset(&hc, 0, sizeof(hc));
+    hc.lpfnWndProc = HelpProc;
+    hc.hInstance = inst;
+    hc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    hc.lpszClassName = L"AR6Help";
+    RegisterClassW(&hc);
   }
 
   const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
@@ -2678,6 +2790,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   g_loading = true;
   FillCamTypes();
   FillBackends(ID_BACKEND);
+  FillTrackModes(ID_TRACKMODE);
   FillBackends(ID_EYEBACK);
   FillBackends(ID_MOUTHBACK);
   FillCams(ID_CAM, false);
@@ -2689,6 +2802,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
   g_loading = false;
   ConfigToFields();
   SendMessageW(H(ID_THREADS), EM_SETLIMITTEXT, 2, 0);
+  SendMessageW(H(ID_MONODEPTH), EM_SETLIMITTEXT, 4, 0);
   UpdateState();
   CalUpdateUi();
   RefreshLog();

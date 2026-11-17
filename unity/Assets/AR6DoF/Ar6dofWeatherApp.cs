@@ -467,7 +467,7 @@ namespace AR6DoF
             var th = t.GetComponent<Ar6dofThemed>();
             if (th != null) UnityEngine.Object.Destroy(th);   // la couleur suit le ciel (clair / sombre), pas le thème des menus
             if (bold) t.fontStyle = FontStyle.Bold;
-            t.gameObject.AddComponent<Ar6dofFitText>().Init(t, fs);
+            Ar6dofFitText.Ensure(t, fs);
             return t;
         }
 
@@ -680,10 +680,10 @@ namespace AR6DoF
                     float x = -IW * 0.5f + cw * 0.5f + c * (cw + 6f);
                     var cell = Box(content, new Vector2(x, cy), new Vector2(cw, ch), Ar6dofRole.Band, 14);
                     tileTitle[i] = L(cell, TileNames[i], 0f, 14f, cw - 16f, 20f, 14, TextAnchor.MiddleLeft);
-                    tileTitle[i].gameObject.AddComponent<Ar6dofFitText>().Init(tileTitle[i], 14);
+                    Ar6dofFitText.Ensure(tileTitle[i], 14);
                     var v = L(cell, TileValue(i, n), 0f, -9f, cw - 16f, 26f, 20, TextAnchor.MiddleLeft);
                     v.fontStyle = FontStyle.Bold;
-                    v.gameObject.AddComponent<Ar6dofFitText>().Init(v, 20);
+                    Ar6dofFitText.Ensure(v, 20);
                     tileVal[i] = v;
                 }
             }

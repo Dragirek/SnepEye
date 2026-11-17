@@ -34,10 +34,10 @@ namespace AR6DoF
         //   Style      > Couleurs, Forme, Fenetres, Clavier (sous-pages propres a Style)
         //   Interface  > Dock, Langue, Performances
         // Chaque sous-page est une PAGE (défilement et textes vivants à elle) ; Enregistrer / Annuler / Par defaut ne touchent que la page affichée.
-        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PgMouth = 10, PgCams = 11, PageCount = 12;
+        const int PgView = 0, PgOptics = 1, PgScreens = 2, PgHead = 3, PgRemote = 4, PgEyes = 5, PgStyle = 6, PgDock = 7, PgLang = 8, PgPerf = 9, PgMouth = 10, PgCams = 11, PgSound = 12, PageCount = 13;
         static readonly string[] TabNames = { "Image", "Ecrans", "Appareils", "Style", "Interface" };
-        static readonly int[][] TabPages = { new[] { PgView, PgOptics, PgCams }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes, PgMouth }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf } };
-        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances", "Bouche", "Cameras" };
+        static readonly int[][] TabPages = { new[] { PgView, PgOptics, PgCams }, new[] { PgScreens }, new[] { PgHead, PgRemote, PgEyes, PgMouth }, new[] { PgStyle }, new[] { PgDock, PgLang, PgPerf, PgSound } };
+        static readonly string[] PageNames = { "Affichage", "Optique", "Ecrans", "Tete", "Telecommande", "Yeux", "Style", "Dock", "Langue", "Performances", "Bouche", "Cameras", "Sons" };
         static int TabOf(int pg)
         {
             for (int t = 0; t < TabPages.Length; t++) foreach (int p in TabPages[t]) if (p == pg) return t;
@@ -205,6 +205,7 @@ namespace AR6DoF
             BuildDock(pages[PgDock]);
             BuildLanguage(pages[PgLang]);
             BuildPerf(pages[PgPerf]);
+            BuildSounds(pages[PgSound]);
             imgSaved = ImgJson();
             BuildBottom();
             BuildScrollControls();
@@ -448,12 +449,40 @@ namespace AR6DoF
             c = bottom - 18f;
         }
 
-        /// <summary>Curseur avec son texte au-dessus, à l'endroit (x, y) et de largeur w. Le texte est aligné à gauche, au même bord que le curseur.</summary>
+        /// <summary>Pas d'un réglage d'après son format d'affichage : "0" = 1, "0.0" = 0,1, "0.00" ou "0.##" = 0,01, "0.000" = 0,001.</summary>
+        static float StepFromFmt(string fmt)
+        {
+            if (string.IsNullOrEmpty(fmt)) return 0.01f;
+            int dot = fmt.IndexOf('.');
+            if (dot < 0) return 1f;
+            return Mathf.Pow(10f, -(fmt.Length - dot - 1));
+        }
+
+        /// <summary>
+        /// Curseur avec son texte au-dessus, à l'endroit (x, y) et de largeur w, et un bouton - et un bouton + de chaque côté : un clic = un cran
+        /// (réglages sensibles : on évite de glisser le curseur, qui change tout d'un coup). Le texte est aligné à gauche, au même bord que le curseur.
+        /// </summary>
         Slider SliderAt(RectTransform page, float x, float y, float w, string label, float min, float max, Func<float> get, Action<float> set, string fmt = "0.##")
         {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
             Text lbl = Ar6dofVrUi.Label(page, "", new Vector2(x, y + 22f), new Vector2(w, 30f), 22, TextAnchor.MiddleLeft);
-            Action upd = () => lbl.text = Ar6dofLoc.T(label) + " : " + get().ToString(fmt);
-            var s = Ar6dofVrUi.MakeSlider(page, new Vector2(x, y - 16f), new Vector2(w, 40f), min, max, get(), v => { set(v); upd(); });
+            Action upd = () => lbl.text = Ar6dofLoc.T(label) + " : " + get().ToString(fmt, inv);
+            const float bw = 46f, gap = 6f;
+            float sw = w - 2f * (bw + gap);
+            float step = StepFromFmt(fmt);
+            Slider s = null;
+            Action<float> nudge = dir =>
+            {
+                float q = Mathf.Clamp(Mathf.Round(get() / step) * step + dir * step, min, max);
+                q = Mathf.Round(q * 10000f) / 10000f;
+                set(q);
+                if (s != null) s.SetValueWithoutNotify(q);
+                upd();
+            };
+            Text t1, t2;
+            Ar6dofVrUi.MakeButton(page, "-", new Vector2(x - w * 0.5f + bw * 0.5f, y - 16f), new Vector2(bw, 40f), () => nudge(-1f), out t1, 24);
+            Ar6dofVrUi.MakeButton(page, "+", new Vector2(x + w * 0.5f - bw * 0.5f, y - 16f), new Vector2(bw, 40f), () => nudge(1f), out t2, 24);
+            s = Ar6dofVrUi.MakeSlider(page, new Vector2(x, y - 16f), new Vector2(sw, 40f), min, max, get(), v => { set(v); upd(); });
             refreshers.Add(() => { s.SetValueWithoutNotify(Mathf.Clamp(get(), min, max)); upd(); });
             upd();
             return s;
@@ -489,10 +518,11 @@ namespace AR6DoF
             upd();
         }
 
-        /// <summary>Un curseur sur toute la largeur, posé sous le curseur c.</summary>
+        /// <summary>Un curseur sur toute la largeur, posé sous le curseur c, avec - et + de chaque côté (un cran par clic, le cran vient du format).</summary>
         void SliderRow(RectTransform page, ref float c, string label, float min, float max, Func<float> get, Action<float> set, string fmt = "0.##")
         {
-            SliderAt(page, 0f, Next(ref c, 74f, 10f), CW, label, min, max, get, set, fmt);
+            float st = StepFromFmt(fmt);
+            StepRow(page, ref c, label, min, max, st, st, st, get, set, fmt);
         }
 
         /// <summary>Case à cocher : un petit carré SUR LE CÔTÉ, le texte à droite du carré (aligné à gauche, jamais dans le carré).</summary>
@@ -601,6 +631,7 @@ namespace AR6DoF
         static readonly string[] DockFields = { "dockAtFeet", "dockDistance", "dockRevealStart", "dockRevealFull", "uiScale", "dockScale", "dockTilt", "dockSeatedDrop", "keyboardScale", "dockShowClock", "dockClockStyle", "dockFaceStyle", "dockShowDate", "dockShowBattery", "dockBatteryStyle", "clock24h", "clockSeconds", "dateFormat" };
         static readonly string[] LangFields = { "language" };
         static readonly string[] PerfFields = { "perfFps", "perfAa", "perfRenderScale" };
+        static readonly string[] SoundFields = { "uiSound", "uiSoundVolume", "uiSoundTheme", "uiSoundClick", "uiSoundWindow", "uiSoundMove", "uiSoundSlider" };
         static readonly string[] ViewImgFields = { "displayFovDeg", "ipdShift", "captureDelayMs", "useCalibration", "reproject", "autoDelay", "clampEdges", "flipComposite", "denoise", "sharpen" };
         static readonly string[] OpticsImgFields = { "left", "right", "linkEyes", "swapEyes", "layout", "centerOnImage" };
 
@@ -614,6 +645,7 @@ namespace AR6DoF
                 case PgDock: return DockFields;
                 case PgLang: return LangFields;
                 case PgPerf: return PerfFields;
+                case PgSound: return SoundFields;
                 case PgStyle: return styleSub >= 3 ? KbFields : styleSub == 2 ? ChromeFields : LookFields;
                 default: return null;
             }
@@ -1204,6 +1236,46 @@ namespace AR6DoF
             CloseCard(page, top, ref c);
 
             Finish(PgRemote, c);
+        }
+
+        // ================================================================== SONS (onglet Interface)
+        readonly List<Button> soundThemeBtns = new List<Button>();
+
+        void BuildSounds(RectTransform page)
+        {
+            float c = BeginPage(page, PgSound);
+            float top = OpenCard(page, ref c, "Sons de l'interface");
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Activer les sons (clic, ouvrir, fermer, deplacer)", () => Ar6dofSettings.Current.uiSound, v => { Ar6dofSettings.Current.uiSound = v; Touch(); }, 620f);
+            StepRow(page, ref c, "Volume des sons (%)", 0f, 100f, 5f, 5f, 5f, () => Mathf.Round(Ar6dofSettings.Current.uiSoundVolume * 100f), v => { Ar6dofSettings.Current.uiSoundVolume = v / 100f; Touch(); }, "0");
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Style des sons");
+            float ty = Next(ref c, 46f, 12f);
+            for (int i = 0; i < Ar6dofUiSound.ThemeNames.Length; i++)
+            {
+                int ti = i;
+                soundThemeBtns.Add(Btn(page, Col3(i), ty, 208f, Ar6dofUiSound.ThemeNames[i], () => { Ar6dofSettings.Current.uiSoundTheme = ti; Touch(); Ar6dofUiSound.Preview(Ar6dofUiSnd.Open); }, 20, 46f));
+            }
+            refreshers.Add(() => { for (int i = 0; i < soundThemeBtns.Count; i++) Ar6dofTheme.SetSelected(soundThemeBtns[i], Ar6dofSettings.Current.uiSoundTheme == i); });
+            Para(page, ref c, "Doux : sons ronds et discrets. Cristal : plus aigus, comme de petites cloches. Retro : bips de console.", 52f, 19);
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Quels sons jouer");
+            Toggle(page, 0f, Next(ref c, 48f, 8f), "Boutons et interrupteurs", () => Ar6dofSettings.Current.uiSoundClick, v => { Ar6dofSettings.Current.uiSoundClick = v; Touch(); }, 620f);
+            Toggle(page, 0f, Next(ref c, 48f, 8f), "Ouvrir, fermer et reduire une fenetre", () => Ar6dofSettings.Current.uiSoundWindow, v => { Ar6dofSettings.Current.uiSoundWindow = v; Touch(); }, 620f);
+            Toggle(page, 0f, Next(ref c, 48f, 8f), "Saisir et poser une fenetre ou un ecran", () => Ar6dofSettings.Current.uiSoundMove, v => { Ar6dofSettings.Current.uiSoundMove = v; Touch(); }, 620f);
+            Toggle(page, 0f, Next(ref c, 48f, 12f), "Crans des curseurs", () => Ar6dofSettings.Current.uiSoundSlider, v => { Ar6dofSettings.Current.uiSoundSlider = v; Touch(); }, 620f);
+            CloseCard(page, top, ref c);
+
+            top = OpenCard(page, ref c, "Essayer");
+            float ey = Next(ref c, 46f, 12f);
+            Btn(page, Col4(0), ey, 156f, "Clic", () => Ar6dofUiSound.Preview(Ar6dofUiSnd.Click), 19, 46f);
+            Btn(page, Col4(1), ey, 156f, "Ouvrir", () => Ar6dofUiSound.Preview(Ar6dofUiSnd.Open), 19, 46f);
+            Btn(page, Col4(2), ey, 156f, "Fermer", () => Ar6dofUiSound.Preview(Ar6dofUiSnd.Close), 19, 46f);
+            Btn(page, Col4(3), ey, 156f, "Poser", () => Ar6dofUiSound.Preview(Ar6dofUiSnd.Drop), 19, 46f);
+            CloseCard(page, top, ref c);
+
+            Finish(PgSound, c);
         }
 
         // ================================================================== PERFORMANCES (onglet Interface)
@@ -2400,7 +2472,7 @@ namespace AR6DoF
         {
             float y = Next(ref c, 48f, 12f);
             Text lbl = Ar6dofVrUi.Label(p, "", new Vector2(0f, y), new Vector2(CW - 160f, 48f), 22, TextAnchor.MiddleCenter);
-            lbl.gameObject.AddComponent<Ar6dofFitText>().Init(lbl, 22);
+            Ar6dofFitText.Ensure(lbl, 22);
             Action upd = () =>
             {
                 string g = get();
@@ -2446,7 +2518,7 @@ namespace AR6DoF
             Para(page, ref c, "La camera normale (celle du tracking) ne change jamais. Ajoute ici une camera de vision nocturne, thermique ou autre (derriere ta tete...). Rien ne tourne tant qu'une camera n'est pas utilisee ; le bouton Vue du dock n'apparait que s'il y en a une activee.", 112f, 18);
             float y = Next(ref c, 48f, 12f);
             Text selLbl = Ar6dofVrUi.Label(page, "", new Vector2(0f, y), new Vector2(CW - 160f, 48f), 22, TextAnchor.MiddleCenter);
-            selLbl.gameObject.AddComponent<Ar6dofFitText>().Init(selLbl, 22);
+            Ar6dofFitText.Ensure(selLbl, 22);
             Text t;
             Ar6dofVrUi.MakeButton(page, "<", new Vector2(-CW * 0.5f + 36f, y), new Vector2(72f, 48f), () => { var h = Cams; if (h != null && h.cams.Count > 0) { camSel = (camSel + h.cams.Count - 1) % h.cams.Count; RefreshAll(); } }, out t, 26);
             Ar6dofVrUi.MakeButton(page, ">", new Vector2(CW * 0.5f - 36f, y), new Vector2(72f, 48f), () => { var h = Cams; if (h != null && h.cams.Count > 0) { camSel = (camSel + 1) % h.cams.Count; RefreshAll(); } }, out t, 26);

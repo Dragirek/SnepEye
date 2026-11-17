@@ -184,7 +184,7 @@ namespace AR6DoF
 
             string shown = translate || title == "Nouvel appareil" ? Ar6dofLoc.T(title) : title;
             var nl = Ar6dofVrUi.Label(rt, shown, new Vector2(0f, -42f), new Vector2(w - 10f, 28f), 18);
-            nl.gameObject.AddComponent<Ar6dofFitText>().Init(nl, 18);
+            Ar6dofFitText.Ensure(nl, 18);
 
             // pas d'infobulle : le nom et l'icone suffisent
 

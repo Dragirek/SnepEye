@@ -854,22 +854,6 @@ namespace AR6DoF
             return Ar6dofMath.Mul3(Ry, Rx);
         }
 
-        // Rotation minimale (ancienne méthode, elle ajoutait du roulis). Conservée pour mémoire.
-        static double[] RotFromTo(double[] a, double[] b)
-        {
-            double vx = a[1] * b[2] - a[2] * b[1], vy = a[2] * b[0] - a[0] * b[2], vz = a[0] * b[1] - a[1] * b[0];
-            double c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-            double s = Math.Sqrt(vx * vx + vy * vy + vz * vz);
-            var R = new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-            if (s < 1e-12) return R;
-            double kx = vx / s, ky = vy / s, kz = vz / s;
-            double th = Math.Atan2(s, c), sn = Math.Sin(th), cs = 1.0 - Math.Cos(th);
-            double[] Km = { 0, -kz, ky, kz, 0, -kx, -ky, kx, 0 };
-            double[] K2 = Mul3(Km, Km);
-            for (int i = 0; i < 9; i++) R[i] += sn * Km[i] + cs * K2[i];
-            return R;
-        }
-
         // ------------------------------------------------------------------ réglages (F1)
         void LoadSettings()
         {
@@ -919,8 +903,6 @@ namespace AR6DoF
         public int SourceHeight { get { return reader.Height; } }
         public int UploadsPerSec { get { return uploadsPerSec; } }
         public float MaxFovNoBlackDeg { get { return MaxFovNoBlack(); } }
-        public void ReloadSettings() { LoadSettings(); }
-        public void ResetSettings() { var f = settings.fallbackHorizontalFovDeg; settings = new Ar6dofPassthroughSettings { fallbackHorizontalFovDeg = f }; }
 
         void OnGUI()
         {

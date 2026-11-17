@@ -111,6 +111,7 @@ namespace AR6DoF
             t.raycastTarget = false;
             Ar6dofTheme.Attach(rt.gameObject, Ar6dofRole.Text);
             Ar6dofLocText.Attach(t, text);
+            Ar6dofFitText.Ensure(t, fontSize);   // un texte trop long (autres langues) rétrécit au lieu de dépasser de son menu
             return t;
         }
 
@@ -136,9 +137,9 @@ namespace AR6DoF
             var b = rt.gameObject.AddComponent<Button>();
             b.targetGraphic = img;
             Ar6dofTheme.Attach(rt.gameObject, Ar6dofRole.Button, 24);
+            b.onClick.AddListener(() => Ar6dofUiSound.Play(Ar6dofUiSnd.Click));
             if (onClick != null) b.onClick.AddListener(onClick);
             label = Label(rt, text, Vector2.zero, size, fontSize, TextAnchor.MiddleCenter);
-            label.gameObject.AddComponent<Ar6dofFitText>().Init(label, fontSize);   // un texte trop long rétrécit au lieu de dépasser du bouton
             return b;
         }
 
@@ -171,6 +172,7 @@ namespace AR6DoF
             s.minValue = min;
             s.maxValue = max;
             s.SetValueWithoutNotify(Mathf.Clamp(value, min, max));
+            s.onValueChanged.AddListener(v => Ar6dofUiSound.Play(Ar6dofUiSnd.Tick));
             if (onChange != null) s.onValueChanged.AddListener(onChange);
             return s;
         }
@@ -249,35 +251,74 @@ namespace AR6DoF
         }
     }
 
-    /// <summary>Réduit la taille d'un texte (une seule ligne) pour qu'il tienne dans sa zone, sans jamais dépasser sa taille de départ. Se remet à jour quand le texte change.</summary>
+    /// <summary>
+    /// Réduit la taille d'un texte pour qu'il tienne dans sa zone, sans jamais dépasser sa taille de départ (au plus 45 % de réduction) :
+    /// texte sur une ligne (largeur) ou paragraphe qui revient à la ligne (hauteur). Se remet à jour quand le texte ou la zone change.
+    /// Si le code change lui-même la taille de police après coup, la nouvelle taille devient la taille de départ.
+    /// </summary>
     public class Ar6dofFitText : MonoBehaviour
     {
         Text t;
-        int baseSize, minSize;
+        int baseSize, minSize, applied;
         string last;
-        float lastW = -1f;
+        float lastW = -1f, lastH = -1f;
 
         public void Init(Text text, int size)
         {
             t = text;
+            SetBase(size);
+        }
+
+        /// <summary>Ajoute le composant au texte s'il n'y est pas déjà (jamais deux : ils se disputeraient la taille), puis règle sa taille de départ.</summary>
+        public static void Ensure(Text text, int size)
+        {
+            if (text == null) return;
+            var f = text.GetComponent<Ar6dofFitText>();
+            if (f == null) f = text.gameObject.AddComponent<Ar6dofFitText>();
+            f.Init(text, size);
+        }
+
+        void SetBase(int size)
+        {
             baseSize = size;
+            applied = size;
             minSize = Mathf.Max(9, Mathf.RoundToInt(size * 0.55f));
+            last = null;
         }
 
         void LateUpdate()
         {
             if (t == null) return;
+            if (t.fontSize != applied) SetBase(t.fontSize);   // le code a changé la taille : on part de la sienne
             string cur = t.text;
-            float w = ((RectTransform)transform).rect.width;
-            if ((object)cur == (object)last && Mathf.Abs(w - lastW) < 0.5f) return;
+            var rt = (RectTransform)transform;
+            float w = rt.rect.width, h = rt.rect.height;
+            if (string.Equals(cur, last) && Mathf.Abs(w - lastW) < 0.5f && Mathf.Abs(h - lastH) < 0.5f) return;
             last = cur;
             lastW = w;
-            if (string.IsNullOrEmpty(cur) || t.horizontalOverflow != HorizontalWrapMode.Overflow) return;
-            float avail = w - 14f;
-            if (avail < 20f) return;
-            t.fontSize = baseSize;
-            float pw = t.preferredWidth;
-            if (pw > avail) t.fontSize = Mathf.Max(minSize, Mathf.FloorToInt(baseSize * avail / pw));
+            lastH = h;
+            if (string.IsNullOrEmpty(cur)) return;
+            if (t.horizontalOverflow == HorizontalWrapMode.Overflow)
+            {
+                float avail = w - 14f;
+                if (avail < 20f) return;
+                t.fontSize = baseSize;
+                float pw = t.preferredWidth;
+                if (pw > avail) t.fontSize = Mathf.Max(minSize, Mathf.FloorToInt(baseSize * avail / pw));
+            }
+            else
+            {
+                if (h < 16f || w < 20f) return;
+                t.fontSize = baseSize;
+                float ph = t.preferredHeight;
+                if (ph > h + 2f)
+                {
+                    int size = Mathf.Max(minSize, Mathf.FloorToInt(baseSize * Mathf.Sqrt(h / ph)));
+                    t.fontSize = size;
+                    for (int i = 0; i < 4 && size > minSize && t.preferredHeight > h + 2f; i++) t.fontSize = --size;
+                }
+            }
+            applied = t.fontSize;
         }
     }
 

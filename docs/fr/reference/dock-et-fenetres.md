@@ -7,3 +7,10 @@
 
 ## Dessins par code (cadrans, visuels du son, icônes météo, courbes)
 Les maillages de `Graphic` personnalisés ne s'affichaient pas dans les menus VR (cadrans de l'Horloge, visuels de la table de mixage, ciel et icônes de la Météo restaient invisibles ; cause non identifiée). Ces dessins passent maintenant par `Ar6dofRasterGfx` (un `RawImage`) : le dessin est calculé en maillage virtuel puis rempli triangle par triangle dans une texture (sur-échantillonnage 2x pour lisser les bords, 0,5x pour le ciel), et redessiné seulement quand il change.
+
+## Menus, jeux et réglages sensibles (v82–v86)
+- **Texte qui dépasse** : tous les textes des menus se réduisent tout seuls pour tenir dans leur cadre (jusqu'à environ la moitié de leur taille), sans coût tant que rien ne change.
+- **Boutons − et +** : à côté des curseurs de réglage (IPD, contrôle précis...), un appui change d'un seul cran, sans avoir à viser le curseur.
+- **Jeu et menu liés** : le plateau 3D d'un jeu se pose à côté de sa fenêtre et la suit (case « Plateau lié au menu » dans la fenêtre du jeu). Le bouton **Cacher le menu** (jeux, objets 3D, mèmes) ne laisse que le titre et ce bouton ; le jeu reste, le menu revient avec **Montrer le menu**.
+- **Sons de l'interface** : Paramètres > Interface > Sons (volume, style Doux / Cristal / Rétro, quels événements). Les sons sont fabriqués par le code (aucun fichier audio) et ne coûtent rien quand ils sont désactivés.
+

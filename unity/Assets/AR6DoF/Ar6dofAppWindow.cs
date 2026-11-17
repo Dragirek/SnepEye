@@ -154,6 +154,14 @@ namespace AR6DoF
         public bool HasSettings { get { return UsesMic || UsesOutput; } }
         bool settingsOpen;
         public bool SettingsOpen { get { return settingsOpen; } }
+
+        // ---- menu cache : une application dont l'objet vit dans le monde (jeu, ecran DVD, objets 3D) peut reduire sa fenetre a sa barre de titre
+        bool menuHidden;
+        Text menuBtnLbl;
+        /// <summary>Vrai si l'application a un objet dans le monde : la fenetre propose alors « Cacher le menu » (le jeu ou l'objet reste, le menu disparait).</summary>
+        protected virtual bool CanHideMenu { get { return false; } }
+        public bool MenuHidden { get { return menuHidden && CanHideMenu; } }
+        public void ToggleMenu() { menuHidden = !menuHidden; Rebuild(); }
         public void ToggleSettings()
         {
             if (!HasSettings || canvas == null) return;
@@ -241,11 +249,29 @@ namespace AR6DoF
                     y += 48f + Gap;
                     if (settingsOpen && HasSettings) BuildAudioSettings();
                     else BuildMain();
+                    if (CanHideMenu && !settingsOpen) AddMenuToggle(t);
                     break;
             }
             Ar6dofVrUi.FitHeight(canvas, y + 10f);
             OnRebuilt();
             Refresh();
+        }
+
+        /// <summary>Bouton « Cacher le menu » / « Montrer le menu » a droite du titre ; menu cache = seuls le titre et ce bouton restent (le reste est rendu invisible et la fenetre se reduit).</summary>
+        void AddMenuToggle(Text titleLbl)
+        {
+            const float bw = 220f;
+            titleLbl.rectTransform.sizeDelta = new Vector2(IW - bw - 8f, 48f);
+            titleLbl.rectTransform.anchoredPosition = new Vector2(-(bw + 8f) * 0.5f, -(14f + 24f));
+            Button b = Ar6dofVrUi.MakeButton(content, menuHidden ? "Montrer le menu" : "Cacher le menu", new Vector2(IW * 0.5f - bw * 0.5f, -(14f + 24f)), new Vector2(bw, 42f), () => ToggleMenu(), out menuBtnLbl, 19);
+            if (!menuHidden) return;
+            for (int i = 0; i < content.childCount; i++)
+            {
+                var ch = content.GetChild(i);
+                if (ch == titleLbl.transform || ch == b.transform) continue;
+                ch.gameObject.SetActive(false);
+            }
+            y = 14f + 48f + Gap;
         }
 
         /// <summary>Appele apres chaque reconstruction de la fenetre (tous ses elements sont crees).</summary>
@@ -374,9 +400,9 @@ namespace AR6DoF
             float lw = IW * 0.34f, vw = IW * 0.17f, sw = IW - lw - vw - 16f;
             float x0 = -IW * 0.5f;
             var lab = Ar6dofVrUi.Label(content, label, new Vector2(x0 + lw * 0.5f, cy), new Vector2(lw, h), 22, TextAnchor.MiddleLeft);
-            lab.gameObject.AddComponent<Ar6dofFitText>().Init(lab, 22);
+            Ar6dofFitText.Ensure(lab, 22);
             var val = Ar6dofVrUi.Label(content, "", new Vector2(IW * 0.5f - vw * 0.5f, cy), new Vector2(vw, h), 21, TextAnchor.MiddleRight);
-            val.gameObject.AddComponent<Ar6dofFitText>().Init(val, 21);
+            Ar6dofFitText.Ensure(val, 21);
             Slider s = null;
             s = Ar6dofVrUi.MakeSlider(content, new Vector2(x0 + lw + 8f + sw * 0.5f, cy), new Vector2(sw, 40f), min, max, get(), v =>
             {

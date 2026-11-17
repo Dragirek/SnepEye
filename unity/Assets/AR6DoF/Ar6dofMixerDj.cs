@@ -54,7 +54,7 @@ namespace AR6DoF
                 Color col = d == 0 ? DjColA : DjColB;
                 float cy = RowY(28f);
                 var t = Ar6dofVrUi.Label(content, "", new Vector2(0f, cy), new Vector2(IW, 28f), 20, TextAnchor.MiddleLeft);
-                t.gameObject.AddComponent<Ar6dofFitText>().Init(t, 20);
+                Ar6dofFitText.Ensure(t, 20);
                 t.color = col;
                 t.fontStyle = FontStyle.Bold;
                 djTitle[d] = t;
