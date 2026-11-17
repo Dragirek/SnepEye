@@ -106,7 +106,29 @@ namespace AR6DoF
         public void SetVisible(bool v)
         {
             visible = v;
-            if (keysRoot != null) keysRoot.gameObject.SetActive(v);
+            if (keysRoot != null) keysRoot.gameObject.SetActive(v && !dockHidden);
+        }
+
+        bool dockHidden;
+
+        /// <summary>Cache le clavier (sans le ranger) pendant que le dock est affiche et le recouvrirait : le dock n'a jamais besoin du clavier.</summary>
+        public bool DockHidden
+        {
+            get { return dockHidden; }
+            set
+            {
+                if (dockHidden == value) return;
+                dockHidden = value;
+                if (keysRoot != null) keysRoot.gameObject.SetActive(visible && !dockHidden);
+            }
+        }
+
+        /// <summary>Repere et rectangle (local, centre sur l'origine) du clavier, pour mesurer sa distance au dock.</summary>
+        public bool TryGetRect(out Transform t, out Rect r)
+        {
+            t = keysRoot;
+            r = new Rect(-kbHalf, kbHalf * 2f);
+            return keysRoot != null && visible && !dockHidden;
         }
 
         // ------------------------------------------------------------------ disposition
@@ -220,7 +242,7 @@ namespace AR6DoF
                 }
             foreach (var k in keys) k.Refresh();
             RefreshAll();
-            keysRoot.gameObject.SetActive(visible);
+            keysRoot.gameObject.SetActive(visible && !dockHidden);
             // boutons de fenêtre communs à tous les menus : réduire, fermer, redimensionner (coin bas droit) et barre de déplacement
             kbHalf = new Vector2(maxW * 0.5f, ((rows.Count - 1) * pitch + keySize) * 0.5f);
             if (chrome != null) Destroy(chrome.gameObject);

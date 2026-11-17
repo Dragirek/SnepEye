@@ -6,8 +6,8 @@ using UnityEngine.UI;
 namespace AR6DoF
 {
     /// <summary>
-    /// La table des jeux 3D : un socle pose dans le monde (devant toi, un peu en dessous du regard, incline vers toi) qui porte le plateau, les des ou la machine a sous.
-    /// Le socle se deplace au laser (garder le bouton appuye). Rien n'existe tant qu'un jeu 3D n'est pas ouvert ; tout est detruit a la fermeture de la fenetre.
+    /// La table des jeux 3D : le plateau, les des ou la machine a sous, poses AU-DESSUS de la fenetre du jeu (AttachAbove) : meme orientation, meme echelle, ils bougent,
+    /// grandissent, se reduisent ensemble. Plus de socle a saisir : tout se gere avec la fenetre. Rien n'existe tant qu'un jeu 3D n'est pas ouvert ; tout est detruit a la fermeture de la fenetre.
     /// </summary>
     public sealed class Ar6dofTable3D
     {
@@ -29,7 +29,7 @@ namespace AR6DoF
         readonly Renderer slabRend;
         readonly Color slabCol;
         float minX, maxX, minZ, maxZ;
-        bool hasBounds;
+        bool hasBounds, showSlab;
         Ar6dofFestive fest;
 
         /// <summary>Pieces d'or et confettis (cree au premier gain seulement).</summary>
@@ -74,9 +74,6 @@ namespace AR6DoF
             slabRend.sharedMaterial = mat;
             slabRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             slabRend.receiveShadows = false;
-            sg.AddComponent<BoxCollider>().size = Vector3.one;
-            var h = sg.AddComponent<Ar6dofTableHandle>();
-            h.table = this;
             slab = sg.transform;
             slab.gameObject.SetActive(false);
             Paint(slabRend, slabColor, 0f);
@@ -148,27 +145,26 @@ namespace AR6DoF
             root.transform.SetPositionAndRotation(pos, Quaternion.Euler(-22f, yaw, 0f));
         }
 
-        /// <summary>Pose la table A COTE de la fenetre du jeu (du cote ou tu regardes), un peu sous le regard, tournee comme toi : jeu et menu forment un seul ensemble.</summary>
-        public void PlaceBeside(Transform win)
+        /// <summary>
+        /// Attache la table AU-DESSUS de la fenetre : le bord proche du plateau repose juste au-dessus du haut de la fenetre, le plateau est tourne comme elle (vers toi)
+        /// et suit son echelle ('refScale' = echelle de la fenetre quand la table a ete creee). A appeler a chaque image : deplacer, agrandir ou reduire la fenetre fait suivre la table.
+        /// </summary>
+        public void AttachAbove(Transform win, float refScale)
         {
-            if (win == null) { Place(); return; }
+            if (win == null || !hasBounds) return;
             Transform h = HeadT();
-            Vector3 head = h != null ? h.position : win.position + Vector3.up * 0.3f;
-            Vector3 f = h != null ? h.forward : Vector3.forward;
-            f.y = 0f;
-            if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
-            f.Normalize();
-            var rc = win as RectTransform;
-            float halfW = rc != null ? rc.rect.width * 0.5f * Mathf.Abs(win.lossyScale.x) : 0.3f;
-            Vector3 right = win.right;
-            right.y = 0f;
-            if (right.sqrMagnitude < 1e-4f) right = Vector3.right;
-            right.Normalize();
-            float side = Vector3.Dot(head + f * 0.75f - win.position, right) >= 0f ? 1f : -1f;
-            Vector3 pos = win.position + right * side * (halfW + 0.42f);
-            pos.y = head.y - 0.34f;
-            float yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
-            root.transform.SetPositionAndRotation(pos, Quaternion.Euler(-22f, yaw, 0f));
+            Vector3 away = win.forward;
+            Vector3 toHead = (h != null ? h.position : win.position - away) - win.position;
+            if (Vector3.Dot(away, toHead) > 0f) away = -away;        // le plateau est du cote de la fenetre qui te regarde
+            away.y = 0f;
+            if (away.sqrMagnitude < 1e-4f) away = Vector3.forward;
+            away.Normalize();
+            Quaternion rot = Quaternion.LookRotation(away, Vector3.up) * Quaternion.Euler(-22f, 0f, 0f);
+            float s = refScale > 1e-6f ? Mathf.Clamp(win.lossyScale.x / refScale, 0.02f, 4f) : 1f;
+            Vector3 anchor = win.position + Vector3.up * (0.04f * s);
+            Vector3 nearMid = new Vector3((minX + maxX) * 0.5f, 0f, minZ) * s;
+            root.transform.SetPositionAndRotation(anchor - rot * nearMid, rot);
+            root.transform.localScale = Vector3.one * s;
         }
 
         // ---------------------------------------------------------------- socle
@@ -176,6 +172,7 @@ namespace AR6DoF
         {
             hasBounds = true;
             minX = cx - w * 0.5f; maxX = cx + w * 0.5f; minZ = cz - d * 0.5f; maxZ = cz + d * 0.5f;
+            showSlab = true;      // dessus de table (tapis des des, caisse de la machine a sous) ; les plateaux n'ont pas de socle
             ApplySlab();
         }
 
@@ -185,7 +182,7 @@ namespace AR6DoF
             x0 -= margin; x1 += margin; z0 -= margin; z1 += margin;
             if (!hasBounds) { hasBounds = true; minX = x0; maxX = x1; minZ = z0; maxZ = z1; }
             else { minX = Mathf.Min(minX, x0); maxX = Mathf.Max(maxX, x1); minZ = Mathf.Min(minZ, z0); maxZ = Mathf.Max(maxZ, z1); }
-            ApplySlab();
+            if (showSlab) ApplySlab();
         }
 
         void ApplySlab()
@@ -194,8 +191,6 @@ namespace AR6DoF
             slab.localScale = new Vector3(maxX - minX, 0.014f, maxZ - minZ);
             slab.localPosition = new Vector3((minX + maxX) * 0.5f, -0.007f, (minZ + maxZ) * 0.5f);
         }
-
-        public void SlabGlow(float g) { Paint(slabRend, slabCol, g); }
 
         // ---------------------------------------------------------------- contenu
         public Ar6dofBoard3D AddBoard(int n, float cell, float cx, float cz, Action<int> click) { return AddBoard(n, n, cell, cx, cz, click); }
@@ -230,7 +225,7 @@ namespace AR6DoF
         {
             for (int i = content.childCount - 1; i >= 0; i--) UnityEngine.Object.Destroy(content.GetChild(i).gameObject);
             ticks.Clear(); shots.Clear(); labels.Clear(); pops.Clear();
-            hasBounds = false;
+            hasBounds = false; showSlab = false;
             slab.gameObject.SetActive(false);
         }
 
@@ -276,40 +271,6 @@ namespace AR6DoF
             for (int i = 0; i < owned.Count; i++) if (owned[i] != null) UnityEngine.Object.Destroy(owned[i]);
             owned.Clear(); ticks.Clear(); shots.Clear(); labels.Clear(); pops.Clear();
             fest = null;
-        }
-    }
-
-    /// <summary>Le socle de la table : se deplace au laser.</summary>
-    public sealed class Ar6dofTableHandle : MonoBehaviour, IAr6dofPointerTarget, IAr6dofPointerDrag
-    {
-        public Ar6dofTable3D table;
-        bool dragging, hover;
-        float dist;
-        Vector3 offset;
-
-        public void OnPointerEnter() { hover = true; if (table != null) table.SlabGlow(0.1f); }
-        public void OnPointerExit() { hover = false; if (table != null && !dragging) table.SlabGlow(0f); }
-        public void OnPointerHover(Vector3 worldPoint) { }
-
-        public void OnPointerDown(Vector3 worldPoint, int button)
-        {
-            dragging = true;
-            if (table != null) table.SlabGlow(0.22f);
-            dist = Vector3.Distance(Ar6dofPointer.LastRay.origin, worldPoint);
-            offset = table.root.transform.position - worldPoint;
-        }
-
-        public void OnPointerUp(Vector3 worldPoint, int button)
-        {
-            if (!dragging) return;
-            dragging = false;
-            if (table != null) table.SlabGlow(hover ? 0.1f : 0f);
-        }
-
-        public void OnDrag(Ray ray)
-        {
-            if (!dragging || table == null) return;
-            table.root.transform.position = ray.GetPoint(dist) + offset;
         }
     }
 

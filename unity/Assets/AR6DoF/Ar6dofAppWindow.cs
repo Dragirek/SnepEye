@@ -260,19 +260,22 @@ namespace AR6DoF
         /// <summary>Bouton « Cacher le menu » / « Montrer le menu » a droite du titre ; menu cache = seuls le titre et ce bouton restent (le reste est rendu invisible et la fenetre se reduit).</summary>
         void AddMenuToggle(Text titleLbl)
         {
-            const float bw = 220f;
-            titleLbl.rectTransform.sizeDelta = new Vector2(IW - bw - 8f, 48f);
-            titleLbl.rectTransform.anchoredPosition = new Vector2(-(bw + 8f) * 0.5f, -(14f + 24f));
-            Button b = Ar6dofVrUi.MakeButton(content, menuHidden ? "Montrer le menu" : "Cacher le menu", new Vector2(IW * 0.5f - bw * 0.5f, -(14f + 24f)), new Vector2(bw, 42f), () => ToggleMenu(), out menuBtnLbl, 19);
-            if (!menuHidden) return;
-            for (int i = 0; i < content.childCount; i++)
+            if (!menuHidden)
             {
-                var ch = content.GetChild(i);
-                if (ch == titleLbl.transform || ch == b.transform) continue;
-                ch.gameObject.SetActive(false);
+                const float bw = 220f;
+                titleLbl.rectTransform.sizeDelta = new Vector2(IW - bw - 8f, 48f);
+                titleLbl.rectTransform.anchoredPosition = new Vector2(-(bw + 8f) * 0.5f, -(14f + 24f));
+                Ar6dofVrUi.MakeButton(content, "Cacher le menu", new Vector2(IW * 0.5f - bw * 0.5f, -(14f + 24f)), new Vector2(bw, 42f), () => ToggleMenu(), out menuBtnLbl, 19);
+                return;
             }
-            y = 14f + 48f + Gap;
+            // menu cache : tout disparait sauf un petit bouton « Montrer le menu » ; la fenetre se reduit a la taille de ce bouton (le jeu, lui, reste au-dessus)
+            for (int i = 0; i < content.childCount; i++) content.GetChild(i).gameObject.SetActive(false);
+            SetWidth(CompactWidth);
+            Ar6dofVrUi.MakeButton(content, "Montrer le menu", new Vector2(0f, -(10f + 24f)), new Vector2(IW, 48f), () => ToggleMenu(), out menuBtnLbl, 20);
+            y = 10f + 48f + 2f;
         }
+
+        const float CompactWidth = 280f;
 
         /// <summary>Appele apres chaque reconstruction de la fenetre (tous ses elements sont crees).</summary>
         protected virtual void OnRebuilt() { }

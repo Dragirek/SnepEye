@@ -231,6 +231,7 @@ namespace AR6DoF
                 if (!feetInit) FollowFeet(true);
                 ApplyReveal();
                 if (dockHidden.Count > 0 || dockShown) { dockShown = false; RestoreDockHidden(); }   // sans suivi le dock reste toujours visible : on ne cache rien
+                FollowNotifTick();
                 return;
             }
 
@@ -260,6 +261,15 @@ namespace AR6DoF
             else if (reveal <= 0.02f) FollowFeet(false);
             ApplyReveal();
             DockOverlapTick();
+            FollowNotifTick();
+        }
+
+        /// <summary>Le panneau des notifications fait partie du dock : il reste pose au-dessus de lui (il le suit quand il bouge) et n'est visible que quand le dock l'est.</summary>
+        void FollowNotifTick()
+        {
+            if (notifApp == null || !notifApp.open || notifApp.canvas == null) return;
+            if (!animating.Contains(notifApp)) PlaceAboveDock(notifApp.canvas.transform);
+            notifApp.canvas.enabled = reveal > 0.05f;
         }
 
         // ------------------------------------------------------------------ menus proches du dock
@@ -274,19 +284,17 @@ namespace AR6DoF
             return ca != null ? ca.canvas : (dm != null ? dm.canvas : (aw != null ? aw.canvas : null));
         }
 
-        /// <summary>Distance (m) entre le dock et la fenetre : plus proche point de la fenetre par rapport au centre et aux deux bouts du dock.</summary>
-        float DistanceToDock(Canvas c)
+        /// <summary>Distance (m) entre le dock et un rectangle (dans le repere de 't') : plus proche point du rectangle par rapport au centre et aux deux bouts du dock.</summary>
+        float DistanceToDock(Transform t, Rect r)
         {
-            var wrt = (RectTransform)c.transform;
             float half = barRt != null ? barRt.sizeDelta.x * 0.5f : 0f;
             Transform dt = canvas.transform;
             float best = float.MaxValue;
             for (int i = 0; i < 3; i++)
             {
                 Vector3 p = dt.TransformPoint(new Vector3((i - 1) * half, 0f, 0f));
-                Vector3 lp = wrt.InverseTransformPoint(p);
-                Rect r = wrt.rect;
-                Vector3 onRect = wrt.TransformPoint(new Vector3(Mathf.Clamp(lp.x, r.xMin, r.xMax), Mathf.Clamp(lp.y, r.yMin, r.yMax), 0f));
+                Vector3 lp = t.InverseTransformPoint(p);
+                Vector3 onRect = t.TransformPoint(new Vector3(Mathf.Clamp(lp.x, r.xMin, r.xMax), Mathf.Clamp(lp.y, r.yMin, r.yMax), 0f));
                 best = Mathf.Min(best, Vector3.Distance(onRect, p));
             }
             return best;
@@ -303,10 +311,14 @@ namespace AR6DoF
                     if (a == null || !a.open || a == kbApp || a == notifApp || animating.Contains(a)) continue;
                     var c = CanvasOf(a);
                     if (c == null || !c.enabled || !c.gameObject.activeInHierarchy) continue;
-                    if (DistanceToDock(c) > DockHideRadius) continue;
+                    if (DistanceToDock(c.transform, ((RectTransform)c.transform).rect) > DockHideRadius) continue;
                     c.enabled = false;      // un Canvas desactive n'est ni dessine ni vise par le laser
                     dockHidden[a] = c;
                 }
+                // le clavier se cache aussi s'il recouvre le dock (aucune fonction du dock n'en a besoin) ; il revient avec lui
+                Transform kt; Rect kr;
+                if (keyboard != null && kbApp != null && kbApp.open && !animating.Contains(kbApp) && keyboard.TryGetRect(out kt, out kr) && DistanceToDock(kt, kr) <= DockHideRadius)
+                    keyboard.DockHidden = true;
             }
             else if (dockShown && reveal < 0.12f)
             {
@@ -319,11 +331,17 @@ namespace AR6DoF
         {
             foreach (var kv in dockHidden) if (kv.Value != null) kv.Value.enabled = true;
             dockHidden.Clear();
+            if (keyboard != null) keyboard.DockHidden = false;
         }
 
         /// <summary>Appui sur l'icone d'un menu cache par le dock : il revient (au lieu d'etre range). Vrai si c'etait le cas.</summary>
         bool UnhideFromDock(Ar6dofDockApp a)
         {
+            if (a != null && a == kbApp && keyboard != null && keyboard.DockHidden)
+            {
+                keyboard.DockHidden = false;
+                return a.open;           // cache puis touche : il revient ; s'il etait range, l'appui l'ouvre normalement
+            }
             Canvas c;
             if (a == null || !dockHidden.TryGetValue(a, out c)) return false;
             dockHidden.Remove(a);
@@ -462,7 +480,7 @@ namespace AR6DoF
             appsApp = new Ar6dofAppsApp(this);
             AdoptWindow(appsApp, 0f);
             notifApp = new Ar6dofNotifyApp(this);
-            AdoptWindow(notifApp, 0f);
+            if (pointer != null) pointer.AddCanvas(notifApp.canvas);   // pas de barre de fenetre : le panneau est lie au dock, il le suit et s'efface avec lui
             notifApp.place = t => PlaceAboveDock(t);
             foreach (var e in Ar6dofCatalog.Entries)
             {
@@ -558,6 +576,7 @@ namespace AR6DoF
         /// <summary>Affiche le clavier virtuel (appelé quand un champ de texte est cliqué).</summary>
         public void ShowKeyboard()
         {
+            if (keyboard != null) keyboard.DockHidden = false;   // un champ de texte vient d'etre touche : le clavier doit etre visible
             if (kbApp != null && !kbApp.open && !animating.Contains(kbApp)) Toggle(kbApp);
         }
 

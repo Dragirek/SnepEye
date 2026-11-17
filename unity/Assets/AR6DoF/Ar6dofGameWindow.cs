@@ -11,7 +11,7 @@ namespace AR6DoF
     /// </summary>
     public abstract class Ar6dofGameWindow : Ar6dofAppWindow
     {
-        const string Pref = "ar6dof_games_3d", PrefSound = "ar6dof_games_sound", PrefVol = "ar6dof_games_volume", PrefLink = "ar6dof_games_link";
+        const string Pref = "ar6dof_games_3d", PrefSound = "ar6dof_games_sound", PrefVol = "ar6dof_games_volume";
         protected Ar6dofTable3D table;
         protected readonly Ar6dofGameSound snd = new Ar6dofGameSound();
         bool failed;
@@ -35,38 +35,15 @@ namespace AR6DoF
             set { try { PlayerPrefs.SetFloat(PrefVol, Mathf.Clamp01(value)); } catch (Exception) { } }
         }
 
-        /// <summary>Plateau lie a la fenetre : pose a cote d'elle et la suit quand elle est deplacee (par defaut oui).</summary>
-        public static bool LinkOn
-        {
-            get { try { return PlayerPrefs.GetInt(PrefLink, 1) != 0; } catch (Exception) { return true; } }
-            set { try { PlayerPrefs.SetInt(PrefLink, value ? 1 : 0); } catch (Exception) { } }
-        }
-
-        Matrix4x4 lastWin;
-        bool haveWin;
-
         /// <summary>Le menu cache est possible quand le jeu est pose en 3D (le plateau reste, le menu se reduit a sa barre de titre).</summary>
         protected override bool CanHideMenu { get { return Is3D && table != null; } }
 
-        /// <summary>La table suit la fenetre : tout deplacement de la fenetre (au laser, menus qui te suivent...) est applique tel quel a la table.</summary>
+        float refScale = 1f;        // echelle de la fenetre quand la table a ete creee : la table la suit (reduire / agrandir la fenetre fait de meme pour le jeu)
+
+        /// <summary>La table est posee au-dessus de la fenetre, a chaque image : deplacer, reduire ou agrandir la fenetre fait suivre le jeu.</summary>
         void FollowWindow()
         {
-            if (canvas == null) return;
-            Transform ct = canvas.transform;
-            Matrix4x4 now = Matrix4x4.TRS(ct.position, ct.rotation, Vector3.one);
-            if (haveWin && table != null && LinkOn)
-            {
-                Matrix4x4 d = now * lastWin.inverse;
-                Vector3 dp = d.GetColumn(3);
-                Quaternion dr = d.rotation;
-                if (dp.sqrMagnitude > 1e-10f || Quaternion.Angle(dr, Quaternion.identity) > 1e-3f)
-                {
-                    Transform r = table.root.transform;
-                    r.SetPositionAndRotation(d.MultiplyPoint3x4(r.position), dr * r.rotation);
-                }
-            }
-            lastWin = now;
-            haveWin = true;
+            if (canvas != null && table != null) table.AttachAbove(canvas.transform, refScale);
         }
 
         /// <summary>De combien de metres sous ta tete se trouve le sol : la hauteur des yeux connue du suivi (sol detecte / verrouille), sinon celle des reglages.</summary>
@@ -165,8 +142,7 @@ namespace AR6DoF
                 try
                 {
                     table = new Ar6dofTable3D(slab);
-                    if (LinkOn) table.PlaceBeside(canvas != null ? canvas.transform : null);
-                    haveWin = false;
+                    refScale = canvas != null ? canvas.transform.lossyScale.x : 1f;
                 }
                 catch (Exception e) { Fail3D(e); }
             }
@@ -197,17 +173,11 @@ namespace AR6DoF
             var items = new List<object>();
             items.Add(Ar6dofLoc.T("Vue") + " : " + (Is3D ? "3D" : "2D"));
             items.Add((Action)ToggleView);
-            if (Is3D)
-            {
-                items.Add("Ramener le plateau");
-                items.Add((Action)(() => { if (table != null) { if (LinkOn) table.PlaceBeside(canvas != null ? canvas.transform : null); else table.Place(); haveWin = false; } }));
-            }
             items.Add("Regles");
             items.Add((Action)(() => ToggleRules(true)));
             BtnRow(44f, 20, items.ToArray());
             if (withSound) MuteRow("Son", () => SoundOn, v => SoundOn = v, 46f, 20);
-            if (Is3D) ToggleRow("Plateau lie au menu (il suit la fenetre)", () => LinkOn, v => LinkOn = v, 44f, 20);
-            if (Is3D) Para("Le jeu est pose a cote du menu : vise-le au laser et garde le bouton appuye sur le socle pour le deplacer. Cacher le menu garde le jeu.", 44, 17);
+            if (Is3D) Para("Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu.", 44, 17);
         }
 
         // ---------------------------------------------------------------- regles

@@ -1678,6 +1678,7 @@ namespace AR6DoF
             "Bien ! => Good!",
             "Bravo ! Morceau termine. => Well done! Tune finished.",
             "Pas cette touche : cherche la verte. => Not that key: look for the green one.",
+            "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => The game sits above this menu: move, shrink or enlarge the window with its bottom bar and the game follows. Hiding the menu keeps only the game.",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3346,6 +3347,7 @@ namespace AR6DoF
             "Bien ! => Bien!",
             "Bravo ! Morceau termine. => Bravo! Melodia terminada.",
             "Pas cette touche : cherche la verte. => Esa no: busca la verde.",
+            "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => El juego esta encima de este menu: mueve, reduce o agranda la ventana con su barra inferior y el juego la sigue. Ocultar el menu deja solo el juego.",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -5021,6 +5023,7 @@ namespace AR6DoF
             "Bien ! => Gut!",
             "Bravo ! Morceau termine. => Bravo! Stueck beendet.",
             "Pas cette touche : cherche la verte. => Nicht diese Taste: suche die gruene.",
+            "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => Das Spiel steht ueber diesem Menue: verschiebe, verkleinere oder vergroessere das Fenster mit seiner unteren Leiste, das Spiel folgt. Wenn du das Menue ausblendest, bleibt nur das Spiel.",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6696,6 +6699,7 @@ namespace AR6DoF
             "Bien ! => Bene!",
             "Bravo ! Morceau termine. => Bravo! Brano finito.",
             "Pas cette touche : cherche la verte. => Non quel tasto: cerca quello verde.",
+            "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => Il gioco sta sopra questo menu: sposta, riduci o ingrandisci la finestra con la sua barra in basso e il gioco la segue. Nascondere il menu lascia solo il gioco.",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -8370,6 +8374,7 @@ namespace AR6DoF
             "Bien ! => Muito bem!",
             "Bravo ! Morceau termine. => Parabens! Melodia concluida.",
             "Pas cette touche : cherche la verte. => Essa nao: procure a verde.",
+            "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => O jogo fica acima deste menu: mova, reduza ou aumente a janela com a barra inferior e o jogo acompanha. Ocultar o menu mantem apenas o jogo.",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 
