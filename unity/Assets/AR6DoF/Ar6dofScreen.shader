@@ -9,6 +9,7 @@ Shader "AR6DoF/Screen"
         _UseTex ("Use texture (1) or flat colour (0)", Float) = 1
         _FlipY ("Flip vertical", Float) = 1
         _Hover ("Hover", Range(0,1)) = 0
+        _Fade ("Fade (1 = opaque, 0 = invisible)", Range(0,1)) = 1
     }
     SubShader
     {
@@ -16,6 +17,7 @@ Shader "AR6DoF/Screen"
         Pass
         {
             Cull Off
+            Blend SrcAlpha OneMinusSrcAlpha
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
@@ -23,7 +25,7 @@ Shader "AR6DoF/Screen"
             #include "UnityCG.cginc"
             sampler2D _MainTex;
             float4 _Color;
-            float _UseTex, _FlipY, _Hover;
+            float _UseTex, _FlipY, _Hover, _Fade;
             struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
             struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float back : TEXCOORD1; };
             // la face visible est celle qu'on voit depuis -Z de l'objet ; camera du cote +Z = on regarde le dos
@@ -40,7 +42,7 @@ Shader "AR6DoF/Screen"
                     float edge = step(min(e.x, e.y), 0.004);
                     c.rgb = lerp(c.rgb, float3(0.3, 0.85, 1.0), edge * _Hover);
                 }
-                return float4(c.rgb, 1.0);
+                return float4(c.rgb, _Fade);
             }
             ENDCG
         }

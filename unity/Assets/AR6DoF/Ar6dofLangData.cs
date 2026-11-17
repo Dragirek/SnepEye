@@ -1444,7 +1444,6 @@ namespace AR6DoF
             "Taille du logo => Logo size",
             "Change de couleur a chaque rebond => Changes colour on every bounce",
             "Son des rebonds => Bounce sound",
-            "Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux). => When the logo hits a corner: the text CORNER! appears and a jingle plays (game sound is set in the games).",
             "COIN ! => CORNER!",
             "Regles => Rules",
             "Francaises => French",
@@ -1457,9 +1456,7 @@ namespace AR6DoF
             "DVD => DVD",
             "Poser l'ecran => Place the screen",
             "Changer de type d'ecran => Change screen type",
-            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose devant toi ; vise-le au laser et garde le bouton appuye pour le deplacer, il te fait toujours face. => No screen yet: pick a type above. It is placed in front of you; aim at it with the laser and hold the button to move it, it always faces you.",
             "Retirer l'ecran => Remove the screen",
-            "Vise l'ecran au laser et garde le bouton appuye pour le deplacer : il te fait toujours face. => Aim at the screen with the laser and hold the button to move it: it always faces you.",
             "Retour au jeu => Back to the game",
             "Pas de regles pour ce jeu. => No rules for this game.",
             "But => Goal",
@@ -1679,6 +1676,8 @@ namespace AR6DoF
             "Bravo ! Morceau termine. => Well done! Tune finished.",
             "Pas cette touche : cherche la verte. => Not that key: look for the green one.",
             "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => The game sits above this menu: move, shrink or enlarge the window with its bottom bar and the game follows. Hiding the menu keeps only the game.",
+            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose au-dessus de ce menu ; deplace le menu avec sa barre du bas (ou l'ecran au laser), l'ecran suit. => No screen yet: pick a type above. It is placed above this menu; move the menu with its bottom bar (or the screen with the laser) and the screen follows.",
+            "Largeur => Width",
         };
         static string En { get { return string.Join("\n", EnRows); } }
 
@@ -3113,7 +3112,6 @@ namespace AR6DoF
             "Taille du logo => Tamano del logo",
             "Change de couleur a chaque rebond => Cambia de color en cada rebote",
             "Son des rebonds => Sonido de rebotes",
-            "Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux). => Cuando el logo toca una esquina: aparece el texto ESQUINA! y suena un jingle (el sonido de los juegos se ajusta en los juegos).",
             "COIN ! => ESQUINA!",
             "Regles => Reglas",
             "Francaises => Francesas",
@@ -3126,9 +3124,7 @@ namespace AR6DoF
             "DVD => DVD",
             "Poser l'ecran => Colocar la pantalla",
             "Changer de type d'ecran => Cambiar tipo de pantalla",
-            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose devant toi ; vise-le au laser et garde le bouton appuye pour le deplacer, il te fait toujours face. => Aun no hay pantalla: elige un tipo arriba. Se coloca delante de ti; apuntala con el laser y manten el boton pulsado para moverla, siempre te mira.",
             "Retirer l'ecran => Quitar la pantalla",
-            "Vise l'ecran au laser et garde le bouton appuye pour le deplacer : il te fait toujours face. => Apunta a la pantalla con el laser y manten el boton pulsado para moverla: siempre te mira.",
             "Retour au jeu => Volver al juego",
             "Pas de regles pour ce jeu. => No hay reglas para este juego.",
             "But => Objetivo",
@@ -3348,6 +3344,8 @@ namespace AR6DoF
             "Bravo ! Morceau termine. => Bravo! Melodia terminada.",
             "Pas cette touche : cherche la verte. => Esa no: busca la verde.",
             "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => El juego esta encima de este menu: mueve, reduce o agranda la ventana con su barra inferior y el juego la sigue. Ocultar el menu deja solo el juego.",
+            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose au-dessus de ce menu ; deplace le menu avec sa barre du bas (ou l'ecran au laser), l'ecran suit. => Aun no hay pantalla: elige un tipo arriba. Se coloca encima de este menu; mueve el menu con su barra inferior (o la pantalla con el laser) y la pantalla lo sigue.",
+            "Largeur => Ancho",
         };
         static string Es { get { return string.Join("\n", EsRows); } }
 
@@ -4789,7 +4787,6 @@ namespace AR6DoF
             "Taille du logo => Logo-Groesse",
             "Change de couleur a chaque rebond => Wechselt bei jedem Abprall die Farbe",
             "Son des rebonds => Abprall-Ton",
-            "Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux). => Wenn das Logo eine Ecke trifft: der Text ECKE! erscheint und ein Jingle spielt (der Spielton wird in den Spielen eingestellt).",
             "COIN ! => ECKE!",
             "Regles => Regeln",
             "Francaises => Franzoesisch",
@@ -4802,9 +4799,7 @@ namespace AR6DoF
             "DVD => DVD",
             "Poser l'ecran => Bildschirm aufstellen",
             "Changer de type d'ecran => Bildschirmtyp aendern",
-            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose devant toi ; vise-le au laser et garde le bouton appuye pour le deplacer, il te fait toujours face. => Noch kein Bildschirm: waehle oben einen Typ. Er steht vor dir; ziele mit dem Laser darauf und halte die Taste gedrueckt, um ihn zu verschieben, er schaut dich immer an.",
             "Retirer l'ecran => Bildschirm entfernen",
-            "Vise l'ecran au laser et garde le bouton appuye pour le deplacer : il te fait toujours face. => Ziele mit dem Laser auf den Bildschirm und halte die Taste gedrueckt, um ihn zu verschieben: er schaut dich immer an.",
             "Retour au jeu => Zurueck zum Spiel",
             "Pas de regles pour ce jeu. => Keine Regeln fuer dieses Spiel.",
             "But => Ziel",
@@ -5024,6 +5019,8 @@ namespace AR6DoF
             "Bravo ! Morceau termine. => Bravo! Stueck beendet.",
             "Pas cette touche : cherche la verte. => Nicht diese Taste: suche die gruene.",
             "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => Das Spiel steht ueber diesem Menue: verschiebe, verkleinere oder vergroessere das Fenster mit seiner unteren Leiste, das Spiel folgt. Wenn du das Menue ausblendest, bleibt nur das Spiel.",
+            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose au-dessus de ce menu ; deplace le menu avec sa barre du bas (ou l'ecran au laser), l'ecran suit. => Noch kein Bildschirm: waehle oben einen Typ. Er steht ueber diesem Menue; verschiebe das Menue mit seiner unteren Leiste (oder den Bildschirm mit dem Laser), der Bildschirm folgt.",
+            "Largeur => Breite",
         };
         static string De { get { return string.Join("\n", DeRows); } }
 
@@ -6465,7 +6462,6 @@ namespace AR6DoF
             "Taille du logo => Dimensione del logo",
             "Change de couleur a chaque rebond => Cambia colore a ogni rimbalzo",
             "Son des rebonds => Suono dei rimbalzi",
-            "Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux). => Quando il logo tocca un angolo: appare il testo ANGOLO! e suona un jingle (il suono dei giochi si regola nei giochi).",
             "COIN ! => ANGOLO!",
             "Regles => Regole",
             "Francaises => Francesi",
@@ -6478,9 +6474,7 @@ namespace AR6DoF
             "DVD => DVD",
             "Poser l'ecran => Posiziona lo schermo",
             "Changer de type d'ecran => Cambia tipo di schermo",
-            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose devant toi ; vise-le au laser et garde le bouton appuye pour le deplacer, il te fait toujours face. => Nessuno schermo per ora: scegli un tipo qui sopra. Viene posto davanti a te; puntalo col laser e tieni premuto il pulsante per spostarlo, ti guarda sempre.",
             "Retirer l'ecran => Rimuovi lo schermo",
-            "Vise l'ecran au laser et garde le bouton appuye pour le deplacer : il te fait toujours face. => Punta lo schermo col laser e tieni premuto il pulsante per spostarlo: ti guarda sempre.",
             "Retour au jeu => Torna al gioco",
             "Pas de regles pour ce jeu. => Nessuna regola per questo gioco.",
             "But => Obiettivo",
@@ -6700,6 +6694,8 @@ namespace AR6DoF
             "Bravo ! Morceau termine. => Bravo! Brano finito.",
             "Pas cette touche : cherche la verte. => Non quel tasto: cerca quello verde.",
             "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => Il gioco sta sopra questo menu: sposta, riduci o ingrandisci la finestra con la sua barra in basso e il gioco la segue. Nascondere il menu lascia solo il gioco.",
+            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose au-dessus de ce menu ; deplace le menu avec sa barre du bas (ou l'ecran au laser), l'ecran suit. => Nessuno schermo per ora: scegli un tipo qui sopra. Viene posto sopra questo menu; sposta il menu con la sua barra in basso (o lo schermo con il laser) e lo schermo lo segue.",
+            "Largeur => Larghezza",
         };
         static string It { get { return string.Join("\n", ItRows); } }
 
@@ -8140,7 +8136,6 @@ namespace AR6DoF
             "Taille du logo => Tamanho do logo",
             "Change de couleur a chaque rebond => Muda de cor a cada quique",
             "Son des rebonds => Som dos quiques",
-            "Quand le logo touche un coin : le texte COIN ! s'affiche et un jingle joue (le son des jeux se regle dans les jeux). => Quando o logo toca um canto: o texto CANTO! aparece e um jingle toca (o som dos jogos se ajusta nos jogos).",
             "COIN ! => CANTO!",
             "Regles => Regras",
             "Francaises => Francesas",
@@ -8153,9 +8148,7 @@ namespace AR6DoF
             "DVD => DVD",
             "Poser l'ecran => Colocar a tela",
             "Changer de type d'ecran => Mudar tipo de tela",
-            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose devant toi ; vise-le au laser et garde le bouton appuye pour le deplacer, il te fait toujours face. => Nenhuma tela por enquanto: escolha um tipo acima. Ela e colocada a sua frente; mire com o laser e segure o botao para mover, ela sempre fica de frente para voce.",
             "Retirer l'ecran => Remover a tela",
-            "Vise l'ecran au laser et garde le bouton appuye pour le deplacer : il te fait toujours face. => Mire a tela com o laser e segure o botao para move-la: ela sempre fica de frente para voce.",
             "Retour au jeu => Voltar ao jogo",
             "Pas de regles pour ce jeu. => Nao ha regras para este jogo.",
             "But => Objetivo",
@@ -8375,6 +8368,8 @@ namespace AR6DoF
             "Bravo ! Morceau termine. => Parabens! Melodia concluida.",
             "Pas cette touche : cherche la verte. => Essa nao: procure a verde.",
             "Le jeu est pose au-dessus de ce menu : deplace, reduis ou agrandis la fenetre avec sa barre du bas, le jeu suit. Cacher le menu ne garde que le jeu. => O jogo fica acima deste menu: mova, reduza ou aumente a janela com a barra inferior e o jogo acompanha. Ocultar o menu mantem apenas o jogo.",
+            "Aucun ecran pour le moment : choisis un type ci-dessus. Il est pose au-dessus de ce menu ; deplace le menu avec sa barre du bas (ou l'ecran au laser), l'ecran suit. => Nenhuma tela por enquanto: escolha um tipo acima. Ela fica acima deste menu; mova o menu com a barra inferior (ou a tela com o laser) e a tela acompanha.",
+            "Largeur => Largura",
         };
         static string Pt { get { return string.Join("\n", PtRows); } }
 

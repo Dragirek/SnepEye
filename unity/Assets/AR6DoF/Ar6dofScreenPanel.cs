@@ -215,6 +215,31 @@ namespace AR6DoF
             }
             hoverAmount = Mathf.MoveTowards(hoverAmount, hoverTarget, Time.unscaledDeltaTime * 8f);
             screenMat.SetFloat("_Hover", hoverAmount);
+            if (dockFade != dockFadeTarget) StepDockFade();
+        }
+
+        // ------------------------------------------------------------------ cache par le dock (fondu)
+        float dockFade = 1f, dockFadeTarget = 1f;
+        BoxCollider quadCollider;
+
+        /// <summary>Vrai si l'ecran est efface (ou en train de l'etre) parce que le dock apparait pres de lui.</summary>
+        public bool DockFaded { get { return dockFadeTarget < 0.5f; } }
+
+        /// <summary>Efface l'ecran en fondu (il n'est ni dessine, ni vise, ni capture une fois efface) ou le fait revenir. Rien ne tourne tant qu'il ne change pas.</summary>
+        public void SetDockFaded(bool faded)
+        {
+            dockFadeTarget = faded ? 0f : 1f;
+            if (quadCollider == null && quad != null) quadCollider = quad.GetComponent<BoxCollider>();
+            if (quadCollider != null) quadCollider.enabled = !faded;      // le laser traverse un ecran efface
+            if (!faded && quadRenderer != null) quadRenderer.enabled = true;
+            if (chrome != null) chrome.forceHidden = faded;
+        }
+
+        void StepDockFade()
+        {
+            dockFade = Mathf.MoveTowards(dockFade, dockFadeTarget, Time.unscaledDeltaTime / 0.3f);
+            if (screenMat != null) screenMat.SetFloat("_Fade", dockFade);
+            if (quadRenderer != null) quadRenderer.enabled = dockFade > 0.003f;
         }
 
         public void SetMonitor(int m)

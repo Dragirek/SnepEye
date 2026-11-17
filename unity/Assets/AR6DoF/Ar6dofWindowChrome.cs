@@ -451,6 +451,7 @@ namespace AR6DoF
 
         /// <summary>Vrai pour les menus (Canvas) : une barre de déplacement apparaît sous la fenêtre. Les écrans virtuels ont déjà la leur.</summary>
         public bool canMove;
+        public bool forceHidden;                       // vrai : les boutons sont caches (l'ecran est efface par le dock)
 
         const float Gap = 0.008f;
         const float MoveLen = 4.2f, MoveThick = 0.7f;   // barre de déplacement : en multiples de S
@@ -604,7 +605,7 @@ namespace AR6DoF
         void LateUpdate()
         {
             if (target == null) { Destroy(gameObject); return; }
-            bool vis = target.gameObject.activeInHierarchy;
+            bool vis = target.gameObject.activeInHierarchy && !forceHidden;
             if (group.activeSelf != vis) group.SetActive(vis);
             if (!vis) return;
             float sc = S;

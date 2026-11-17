@@ -265,17 +265,21 @@ namespace AR6DoF
         }
 
         /// <summary>Le panneau des notifications fait partie du dock : il reste pose au-dessus de lui (il le suit quand il bouge) et n'est visible que quand le dock l'est.</summary>
+        Ar6dofBackFace notifBack;
         void FollowNotifTick()
         {
             if (notifApp == null || !notifApp.open || notifApp.canvas == null) return;
             if (!animating.Contains(notifApp)) PlaceAboveDock(notifApp.canvas.transform);
-            notifApp.canvas.enabled = reveal > 0.05f;
+            notifApp.canvas.enabled = reveal > 0.003f;
+            if (notifBack == null) notifBack = notifApp.canvas.GetComponent<Ar6dofBackFace>();
+            if (notifBack != null) notifBack.Alpha = reveal;       // il s'efface en fondu avec le dock, comme s'il en faisait partie
         }
 
-        // ------------------------------------------------------------------ menus proches du dock
-        /// <summary>Rayon (metres) dans lequel les menus ouverts sont caches quand le dock apparait, pour qu'ils ne se superposent pas.</summary>
-        public const float DockHideRadius = 0.5f;
-        readonly Dictionary<Ar6dofDockApp, Canvas> dockHidden = new Dictionary<Ar6dofDockApp, Canvas>();
+        // ------------------------------------------------------------------ menus, ecrans et clavier proches du dock
+        /// <summary>Rayon (metres) dans lequel les menus, ecrans virtuels et le clavier ouverts s'effacent quand le dock apparait, pour qu'ils ne se superposent pas.</summary>
+        public const float DockHideRadius = 1.0f;
+        readonly Dictionary<Ar6dofDockApp, Ar6dofBackFace> dockHidden = new Dictionary<Ar6dofDockApp, Ar6dofBackFace>();
+        readonly List<Ar6dofScreenPanel> dockHiddenScreens = new List<Ar6dofScreenPanel>();
         bool dockShown;
 
         static Canvas CanvasOf(Ar6dofDockApp a)
@@ -287,12 +291,12 @@ namespace AR6DoF
         /// <summary>Distance (m) entre le dock et un rectangle (dans le repere de 't') : plus proche point du rectangle par rapport au centre et aux deux bouts du dock.</summary>
         float DistanceToDock(Transform t, Rect r)
         {
-            float half = barRt != null ? barRt.sizeDelta.x * 0.5f : 0f;
+            float half = barRt != null ? barRt.sizeDelta.x * Mathf.Abs(canvas.transform.lossyScale.x) * 0.5f : 0f;   // demi-largeur en metres (et non en pixels)
             Transform dt = canvas.transform;
             float best = float.MaxValue;
             for (int i = 0; i < 3; i++)
             {
-                Vector3 p = dt.TransformPoint(new Vector3((i - 1) * half, 0f, 0f));
+                Vector3 p = dt.position + dt.right * ((i - 1) * half);
                 Vector3 lp = t.InverseTransformPoint(p);
                 Vector3 onRect = t.TransformPoint(new Vector3(Mathf.Clamp(lp.x, r.xMin, r.xMax), Mathf.Clamp(lp.y, r.yMin, r.yMax), 0f));
                 best = Mathf.Min(best, Vector3.Distance(onRect, p));
@@ -300,7 +304,10 @@ namespace AR6DoF
             return best;
         }
 
-        /// <summary>Le dock apparait : les menus ouverts a moins de 50 cm disparaissent (sans etre fermes) et reviennent quand il s'efface. Un menu ouvert pendant que le dock est la n'est pas touche.</summary>
+        /// <summary>
+        /// Le dock apparait : les menus, ecrans virtuels et le clavier ouverts a moins de 1 m disparaissent en fondu (sans etre fermes) et reviennent en fondu quand il s'efface.
+        /// Un menu ouvert pendant que le dock est la n'est pas touche.
+        /// </summary>
         void DockOverlapTick()
         {
             if (!dockShown && reveal > 0.35f)
@@ -312,10 +319,25 @@ namespace AR6DoF
                     var c = CanvasOf(a);
                     if (c == null || !c.enabled || !c.gameObject.activeInHierarchy) continue;
                     if (DistanceToDock(c.transform, ((RectTransform)c.transform).rect) > DockHideRadius) continue;
-                    c.enabled = false;      // un Canvas desactive n'est ni dessine ni vise par le laser
-                    dockHidden[a] = c;
+                    var bf = c.GetComponent<Ar6dofBackFace>();
+                    if (bf == null) bf = c.gameObject.AddComponent<Ar6dofBackFace>();
+                    if (bf.Faded) continue;
+                    bf.SetFaded(true);      // fondu puis Canvas coupe : ni dessine ni vise par le laser
+                    dockHidden[a] = bf;
                 }
-                // le clavier se cache aussi s'il recouvre le dock (aucune fonction du dock n'en a besoin) ; il revient avec lui
+                // les ecrans virtuels aussi (ils etaient oublies : seuls les menus etaient testes)
+                var sc = Ar6dofScreens.Instance;
+                if (sc != null)
+                    foreach (var p in sc.panels)
+                    {
+                        if (p == null || !p.open || !p.gameObject.activeInHierarchy || p.DockFaded) continue;
+                        ScreenApp sa;
+                        if (screenApps.TryGetValue(p, out sa) && animating.Contains(sa)) continue;
+                        if (DistanceToDock(p.transform, new Rect(-p.Width * 0.5f, -p.Height * 0.5f, p.Width, p.Height)) > DockHideRadius) continue;
+                        p.SetDockFaded(true);
+                        dockHiddenScreens.Add(p);
+                    }
+                // le clavier s'efface aussi s'il recouvre le dock (aucune fonction du dock n'en a besoin) ; il revient avec lui
                 Transform kt; Rect kr;
                 if (keyboard != null && kbApp != null && kbApp.open && !animating.Contains(kbApp) && keyboard.TryGetRect(out kt, out kr) && DistanceToDock(kt, kr) <= DockHideRadius)
                     keyboard.DockHidden = true;
@@ -329,12 +351,14 @@ namespace AR6DoF
 
         void RestoreDockHidden()
         {
-            foreach (var kv in dockHidden) if (kv.Value != null) kv.Value.enabled = true;
+            foreach (var kv in dockHidden) if (kv.Value != null) kv.Value.SetFaded(false);
             dockHidden.Clear();
+            foreach (var p in dockHiddenScreens) if (p != null) p.SetDockFaded(false);
+            dockHiddenScreens.Clear();
             if (keyboard != null) keyboard.DockHidden = false;
         }
 
-        /// <summary>Appui sur l'icone d'un menu cache par le dock : il revient (au lieu d'etre range). Vrai si c'etait le cas.</summary>
+        /// <summary>Appui sur l'icone d'un menu, d'un ecran ou du clavier cache par le dock : il revient (au lieu d'etre range). Vrai si c'etait le cas.</summary>
         bool UnhideFromDock(Ar6dofDockApp a)
         {
             if (a != null && a == kbApp && keyboard != null && keyboard.DockHidden)
@@ -342,10 +366,16 @@ namespace AR6DoF
                 keyboard.DockHidden = false;
                 return a.open;           // cache puis touche : il revient ; s'il etait range, l'appui l'ouvre normalement
             }
-            Canvas c;
-            if (a == null || !dockHidden.TryGetValue(a, out c)) return false;
+            var sa = a as ScreenApp;
+            if (sa != null && sa.panel != null && dockHiddenScreens.Remove(sa.panel))
+            {
+                sa.panel.SetDockFaded(false);
+                return true;
+            }
+            Ar6dofBackFace bf;
+            if (a == null || !dockHidden.TryGetValue(a, out bf)) return false;
             dockHidden.Remove(a);
-            if (c != null) c.enabled = true;
+            if (bf != null) bf.SetFaded(false);
             return true;
         }
 
@@ -1097,26 +1127,20 @@ namespace AR6DoF
         }
 
         /// <summary>
-        /// Pose une fenetre juste au-dessus du dock, tournee vers toi, bas de la fenetre contre le haut du dock (elle grandit vers le haut). Le haut ne depasse
-        /// pas tes yeux de plus de 15 cm : si la fenetre est trop haute elle recouvre le dock plutot que de partir hors de vue. Utilise pour le panneau des notifications.
+        /// Pose le panneau des notifications DANS le plan du dock : meme orientation, meme echelle, bord bas contre le bord haut de la barre (il grandit vers le haut,
+        /// le long du dock). Comme il suit la barre a chaque image, il reste dans le champ de vision tant que la barre l'est, quelle que soit la hauteur du panneau.
         /// </summary>
         void PlaceAboveDock(Transform t)
         {
-            Transform h = Head;
-            if (h == null || canvas == null) return;
+            if (t == null || canvas == null || Head == null) return;
+            Transform dt = canvas.transform;
             var rt = t as RectTransform;
-            float hm = rt != null ? Mathf.Max(0.2f, rt.sizeDelta.y * Mathf.Abs(rt.lossyScale.y)) : 0.5f;
-            Vector3 dp = canvas.transform.position;
-            Vector3 f = dp - h.position; f.y = 0f;
-            if (f.sqrMagnitude < 1e-4f) { f = h.forward; f.y = 0f; }
-            if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
-            f.Normalize();
-            float barH = barRt != null ? barRt.sizeDelta.y * Mathf.Abs(canvas.transform.lossyScale.y) : 0.2f;
-            float bottom = dp.y + barH * 0.5f + 0.03f;
-            float top = Mathf.Min(bottom + hm, Mathf.Max(h.position.y + 0.15f, bottom + 0.35f));
-            Vector3 pos = dp + f * 0.08f;   // un peu plus loin que le dock : il ne cache jamais ses icones
-            pos.y = top;
-            t.SetPositionAndRotation(pos, Quaternion.LookRotation(f));
+            t.localScale = dt.localScale;
+            float sy = Mathf.Abs(dt.lossyScale.y);
+            float barH = barRt != null ? barRt.sizeDelta.y * sy : 0.2f;
+            float hm = rt != null ? rt.sizeDelta.y * sy : 0.5f;      // pivot en haut : la position est le haut du panneau
+            Vector3 bottom = dt.position + dt.up * (barH * 0.5f + 0.01f);
+            t.SetPositionAndRotation(bottom + dt.up * hm, dt.rotation);
         }
 
         // ------------------------------------------------------------------ Apps : toutes les applications
@@ -1198,7 +1222,8 @@ namespace AR6DoF
         {
             if (pointer != null) pointer.AddCanvas(w.canvas);
             AddChrome(w.canvas, w.title, w);
-            w.place = t => PlaceBeside(t, yawDeg, 0.2f);
+            var gw = w as Ar6dofGameWindow;
+            w.place = t => { PlaceBeside(t, yawDeg, 0.2f); if (gw != null) gw.OnPlaced(); };   // un jeu 3D : la fenetre est baissee de la hauteur du jeu pose au-dessus
         }
 
         public void Recenter()

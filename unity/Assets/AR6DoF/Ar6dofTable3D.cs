@@ -167,6 +167,33 @@ namespace AR6DoF
             root.transform.localScale = Vector3.one * s;
         }
 
+        /// <summary>
+        /// Hauteur (m, a l'echelle 1) que le jeu occupe AU-DESSUS du haut de la fenetre une fois pose par AttachAbove : le point le plus haut de tout ce qui est dessine
+        /// (plateau incline, pieces, machine a sous...). Sert a baisser la fenetre pour que l'ensemble fenetre + jeu ait la hauteur d'un menu ordinaire.
+        /// </summary>
+        public float MeasureRise()
+        {
+            if (!hasBounds) return 0f;
+            Quaternion rot = Quaternion.Euler(-22f, 0f, 0f);                       // la meme inclinaison que AttachAbove (le lacet ne change pas la hauteur)
+            Vector3 nearMid = new Vector3((minX + maxX) * 0.5f, 0f, minZ);
+            Transform rt = root.transform;
+            float top = 0.04f;
+            var rs = root.GetComponentsInChildren<Renderer>();
+            for (int i = 0; i < rs.Length; i++)
+            {
+                var r = rs[i];
+                if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                Bounds b = r.bounds;
+                for (int k = 0; k < 8; k++)
+                {
+                    Vector3 w = new Vector3((k & 1) == 0 ? b.min.x : b.max.x, (k & 2) == 0 ? b.min.y : b.max.y, (k & 4) == 0 ? b.min.z : b.max.z);
+                    Vector3 q = rt.InverseTransformPoint(w) - nearMid;
+                    top = Mathf.Max(top, (rot * q).y + 0.04f);
+                }
+            }
+            return Mathf.Clamp(top, 0.04f, 1.2f);
+        }
+
         // ---------------------------------------------------------------- socle
         public void SetSlab(float cx, float cz, float w, float d)
         {

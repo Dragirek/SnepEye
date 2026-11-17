@@ -81,6 +81,22 @@ namespace AR6DoF
             }
             shown = on;
             base.Activate(on);
+            if (on) { ApplyLowering(); lowerPending = false; }
+        }
+
+        // ---- hauteur globale : fenetre + jeu pose au-dessus forment un seul bloc, place comme un menu ordinaire (le haut du bloc juste au-dessus des yeux)
+        bool lowerPending;
+
+        /// <summary>Appele par le dock apres avoir pose la fenetre : la fenetre sera baissee de la hauteur du jeu des que celui-ci existe.</summary>
+        public void OnPlaced() { lowerPending = true; ApplyLowering(); }
+
+        void ApplyLowering()
+        {
+            if (!lowerPending || table == null || canvas == null) return;
+            lowerPending = false;
+            float s = refScale > 1e-6f ? Mathf.Clamp(canvas.transform.lossyScale.x / refScale, 0.02f, 4f) : 1f;
+            float rise = Mathf.Clamp(table.MeasureRise() * s, 0f, 0.55f);
+            canvas.transform.position += Vector3.down * rise;
         }
 
         /// <summary>Appele par le dock des le DEBUT d'une reduction ou d'une fermeture : le plateau 3D disparait tout de suite (il revient a la reouverture) et le jeu se fige. La partie reste telle quelle.</summary>

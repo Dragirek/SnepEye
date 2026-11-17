@@ -445,17 +445,13 @@ namespace AR6DoF
             Glow(hover ? 0.12f : 0f);
         }
 
+        /// <summary>Le laser sur l'ecran ne deplace pas l'ecran lui-meme : il deplace la fenetre du menu a laquelle l'ecran est lie (qui recoit ici le point voulu pour le centre de l'ecran).</summary>
+        public Action<Vector3> dragTo;
+
         public void OnDrag(Ray ray)
         {
-            if (!dragging) return;
-            Vector3 p = ray.GetPoint(dist) + offset;
-            transform.position = p;
-            Transform h = Ar6dofDvdWorld.HeadT();
-            if (h != null)
-            {
-                Vector3 d = p - h.position; d.y = 0f;
-                if (d.sqrMagnitude > 1e-4f) transform.rotation = Quaternion.LookRotation(d.normalized, Vector3.up);     // l'ecran te fait toujours face
-            }
+            if (!dragging || dragTo == null) return;
+            dragTo(ray.GetPoint(dist) + offset);
         }
 
         void OnDestroy()
